@@ -674,6 +674,8 @@ Every symbol (functions, types, `#define` macros, `enum` values) **must** start 
 - Do not add features not described in the specification without flagging them.
 - Follow **BARR-C:2018 (BARR-2018)** coding rules for naming, formatting, function size, and defensive coding practices.
 - Enclose every `#define` replacement value in parentheses: `#define FOO (123)`, `#define MY_STR ("text")`.
+- Every `typedef struct` and `typedef enum` must include a **tag name**: `typedef struct my_struct_tag { … } my_struct_t;` and `typedef enum my_enum_tag { … } my_enum_t;`.
+- Every `enum` enumerator must have an **explicit integer value**: `MY_ENUM_FOO = 0`, `MY_ENUM_BAR = 1`, etc. Do not rely on implicit sequential assignment.
 - Every symbol in a module (public and internal: functions, types, macros, enums) **must** be prefixed with the module's designated prefix from the **Module Prefix Table** above.
 - Function names must follow the pattern `{module_prefix}_{subject}_{action}` — the **action verb goes last**. Examples: `config_mngr_wifi_ssid_get`, `config_mngr_seconds_per_pulse_set`, `wifi_mngr_sta_is_connected`, `time_mngr_timezone_apply`. The only exception is `*_init` (no subject).
 - Use **Doxygen for all code documentation**. Use only `\\` Doxygen tags (for example `\\brief`, `\\param`, `\\return`, `\\note`); do not use `@` tags.
