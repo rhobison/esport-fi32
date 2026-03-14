@@ -132,8 +132,8 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 │  │  POST /config     save & apply configuration                 │ │
 │  │  GET /api/status  live state (JSON)                          │ │
 │  │  GET /api/sessions session history (JSON)                    │ │
-│  │  GET /api/sessions/export download CSV/JSON reports           │ │
-│  │  GET /api/sessions/daily graph-ready daily aggregates         │ │
+│  │  GET /api/sessions/export download CSV/JSON reports          │ │
+│  │  GET /api/sessions/daily graph-ready daily aggregates        │ │
 │  └──────────────────────────────────────────────────────────────┘ │
 └───────────────────────────────────────────────────────────────────┘
 ```
@@ -773,7 +773,7 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | -------------------- | ------ | ------------------------------ |
 | `slog_head`          | uint16 | Next write index (0–49)        |
 | `slog_count`         | uint16 | Number of valid entries (0–50) |
-| `slog_0` … `slog_49` | blob   | `session_trk_record_t` binary      |
+| `slog_0` … `slog_49` | blob   | `session_trk_record_t` binary  |
 
 `session_trk_record_t` binary layout (16 bytes):
 
@@ -802,7 +802,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 | `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s)   | `time_counter`    | `http_server` (status cache)      |
 | `ESPORT_EVENT_REWARD_AP_ON`     | —                        | `time_counter`    | (logging, status)                 |
 | `ESPORT_EVENT_REWARD_AP_OFF`    | —                        | `time_counter`    | (logging, status)                 |
-| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t`       | `session_tracker` | `session_log`                     |
+| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t`   | `session_tracker` | `session_log`                     |
 | `ESPORT_EVENT_STA_CONNECTED`    | —                        | `wifi_manager`    | `time_manager` (start SNTP)       |
 | `ESPORT_EVENT_STA_DISCONNECTED` | —                        | `wifi_manager`    | (logging, status)                 |
 
