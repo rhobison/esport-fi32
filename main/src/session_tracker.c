@@ -35,7 +35,7 @@ static const char * gp_tag = "session_tracker";
 // Public Functions
 //==================================================================================================
 
-esp_err_t session_tracker_init(void)
+esp_err_t session_trk_init(void)
 {
     ESP_LOGI(gp_tag, "init (Phase 0 stub)");
     return ESP_OK;

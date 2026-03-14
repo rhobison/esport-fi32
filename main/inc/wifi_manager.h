@@ -50,7 +50,7 @@ extern "C"
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
-esp_err_t wifi_manager_init(void);
+esp_err_t wifi_mngr_init(void);
 
 /**
  * \brief Enable or disable the reward Soft AP.
@@ -64,28 +64,28 @@ esp_err_t wifi_manager_init(void);
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
-esp_err_t wifi_manager_set_reward_ap(bool b_enable);
+esp_err_t wifi_mngr_reward_ap_set(bool b_enable);
 
 /**
  * \brief Query whether the STA interface currently has an IP address.
  *
  * \return \c true if connected and an IP has been assigned, \c false otherwise.
  */
-bool wifi_manager_is_sta_connected(void);
+bool wifi_mngr_sta_is_connected(void);
 
 /**
  * \brief Query whether the reward Soft AP is currently active.
  *
  * \return \c true if the reward AP is up, \c false otherwise.
  */
-bool wifi_manager_is_reward_ap_active(void);
+bool wifi_mngr_reward_ap_is_active(void);
 
 /**
  * \brief Return the number of stations currently associated with the reward AP.
  *
  * \return Station count (0 if the reward AP is inactive).
  */
-uint8_t wifi_manager_reward_ap_client_count(void);
+uint8_t wifi_mngr_reward_ap_client_count(void);
 
 /**
  * \brief Copy the STA interface IP address (dotted-decimal) into a buffer.
@@ -95,7 +95,7 @@ uint8_t wifi_manager_reward_ap_client_count(void);
  * \param[out] buf  Destination buffer.
  * \param[in]  len  Size of \p p_buf in bytes (including NUL terminator).
  */
-void wifi_manager_get_sta_ip(char * p_buf, size_t len);
+void wifi_mngr_sta_ip_get(char * p_buf, size_t len);
 
 #ifdef __cplusplus
 }

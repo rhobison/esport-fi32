@@ -58,7 +58,7 @@ Establish the complete file structure, all header files, the event bus definitio
    - Declare the enum `esport_event_id_t` with all event IDs from spec §9.
 
 4. **Create all header files** (`config_manager.h`, `wifi_manager.h`, `time_manager.h`, `pulse_input.h`, `time_counter.h`, `session_tracker.h`, `session_log.h`, `http_server.h`) with:
-   - All typedefs and structs from the spec (especially `session_record_t`). Boolean struct members must use the `b_` prefix.
+   - All typedefs and structs from the spec (especially `session_trk_record_t`). Boolean struct members must use the `b_` prefix.
    - All function declarations from the spec. Pointer parameters must use `p_` prefix; boolean parameters must use `b_` prefix.
    - Doxygen documentation for all public declarations using `\\` tags (not `@`). Reference project-defined symbols with `#`; use `\\c` only for external identifiers.
    - Use `\\param[in]`, `\\param[out]`, or `\\param[in,out]` for all parameters.
@@ -74,6 +74,9 @@ Establish the complete file structure, all header files, the event bus definitio
    - The `//---` function separator must follow every function definition's closing `}`.
    - Apply BARR-C:2018 variable naming: `p_` for pointer parameters, `b_` for boolean parameters, `gp_` for the file-scope `TAG` pointer.
    - Apply Yoda notation for all `==` and `!=` comparisons (constant on the left).
+   - Enclose every `#define` replacement value in parentheses: `#define FOO (123)`, `#define BAR ("text")`.
+   - Prefix every symbol (functions, types, macros, enums — public **and** internal) with the module's designated prefix from the **Module Prefix Table** (see end of document). Lower-case prefix for functions/types; upper-case prefix for macros/enums.
+   - Function names must follow the pattern `{module_prefix}_{subject}_{action}`: the **action verb goes last**. Examples: `config_mngr_wifi_ssid_get`, `config_mngr_seconds_per_pulse_set`, `wifi_mngr_sta_is_connected`, `time_mngr_timezone_apply`. Exception: `*_init` functions have no subject and keep the form `{module_prefix}_init`.
    - Any internal helper functions must be `static` with prototypes in the `Internal Function Prototypes` section.
 6. **Replace `firmware/src/main.c`** with a skeleton `app_main` that calls each `module_init()` in the order from spec §7.1, all guarded by `ESP_ERROR_CHECK`.
 
@@ -93,6 +96,9 @@ Establish the complete file structure, all header files, the event bus definitio
 - [ ] Every function definition in `.c` files is followed by a `//---` separator line.
 - [ ] BARR-C:2018 variable naming applied: all variable names lowercase; pointer params `p_`, boolean params `b_`, file-scope pointer `gp_tag`.
 - [ ] All `==` and `!=` comparisons use Yoda notation (constant on the left).
+- [ ] Every `#define` replacement value is enclosed in parentheses.
+- [ ] All symbols (public and internal) carry the module prefix from the **Module Prefix Table**.
+- [ ] All function names follow the `{module_prefix}_{subject}_{action}` pattern (action verb last); `*_init` functions are the only exception.
 - [ ] Any internal functions are `static` with prototypes in the `Internal Function Prototypes` section.
 - [ ] Project-defined symbols in Doxygen comments use `#` prefix; external symbols use `\\c`.
 
@@ -111,7 +117,7 @@ Implement `config_manager.c` fully: NVS initialisation, factory defaults, typed 
 
 ### Tasks
 
-1. Implement `config_manager_init()`:
+1. Implement `config_mngr_init()`:
    - Call `nvs_flash_init()`; on `ESP_ERR_NVS_NO_FREE_PAGES` or `ESP_ERR_NVS_NEW_VERSION_FOUND`, erase and reinit.
    - Open namespace `esport_cfg` with `NVS_READWRITE`.
    - For each parameter in the spec §3 table, read the key;  if `ESP_ERR_NVS_NOT_FOUND`, write the factory default.
@@ -125,10 +131,10 @@ Implement `config_manager.c` fully: NVS initialisation, factory defaults, typed 
 ### Acceptance Criteria
 
 - [ ] `idf.py build` succeeds.
-- [ ] Calling `config_manager_init()` twice in sequence does not corrupt state.
-- [ ] `config_set_seconds_per_pulse(0)` returns `ESP_ERR_INVALID_ARG`.
-- [ ] `config_set_seconds_per_pulse(61)` returns `ESP_ERR_INVALID_ARG`.
-- [ ] `config_set_seconds_per_pulse(5)` followed by `config_get_seconds_per_pulse()` returns `5` after a simulated reboot (reinit).
+- [ ] Calling `config_mngr_init()` twice in sequence does not corrupt state.
+- [ ] `config_mngr_seconds_per_pulse_set(0)` returns `ESP_ERR_INVALID_ARG`.
+- [ ] `config_mngr_seconds_per_pulse_set(61)` returns `ESP_ERR_INVALID_ARG`.
+- [ ] `config_mngr_seconds_per_pulse_set(5)` followed by `config_mngr_seconds_per_pulse_get()` returns `5` after a simulated reboot (reinit).
 - [ ] All boundary values from spec §5.1 validation table are correctly accepted/rejected.
 
 ---
@@ -147,11 +153,11 @@ Implement `wifi_manager.c` fully: AP+STA initialisation, config AP lifecycle (au
 
 ### Tasks
 
-1. Implement `wifi_manager_init()`:
+1. Implement `wifi_mngr_init()`:
    - Init TCP/IP stack: `esp_netif_init()`, `esp_netif_create_default_wifi_ap()`, `esp_netif_create_default_wifi_sta()`.
    - Init WiFi with `WIFI_MODE_APSTA`.
    - Register event handlers for `WIFI_EVENT` and `IP_EVENT`.
-   - Attempt STA connection using `config_get_wifi_ssid/password()`. If SSID is empty, skip STA and enable config AP immediately.
+   - Attempt STA connection using `config_mngr_wifi_ssid_get/password()`. If SSID is empty, skip STA and enable config AP immediately.
 
 2. Implement config AP logic:
    - SSID `CONFIG_ESPORT_CONFIG_AP_SSID`, password `CONFIG_ESPORT_CONFIG_AP_PASSWORD`, channel 1, max 4 clients.
@@ -161,13 +167,13 @@ Implement `wifi_manager.c` fully: AP+STA initialisation, config AP lifecycle (au
 
 3. Implement STA reconnection: retry every 10 seconds indefinitely using an `esp_timer`.
 
-4. Implement `wifi_manager_set_reward_ap(bool enable)`:
-   - When `enable == true`: configure AP with `config_get_soft_ap_ssid/password()`, set subnet `192.168.5.0/24`, start AP.
+4. Implement `wifi_mngr_reward_ap_set(bool enable)`:
+   - When `enable == true`: configure AP with `config_mngr_soft_ap_ssid_get/password()`, set subnet `192.168.5.0/24`, start AP.
    - When `enable == false`: stop AP interface.
    - Enable NAPT (`ip_napt_enable`) on AP netif pointing to STA netif after AP start.
    - Guard against double-enable: if already in desired state, return `ESP_OK` immediately.
 
-5. Implement `wifi_manager_is_sta_connected()`, `wifi_manager_is_reward_ap_active()`, `wifi_manager_reward_ap_client_count()`, `wifi_manager_get_sta_ip()`.
+5. Implement `wifi_mngr_sta_is_connected()`, `wifi_mngr_reward_ap_is_active()`, `wifi_mngr_reward_ap_client_count()`, `wifi_mngr_sta_ip_get()`.
 
 ### Acceptance Criteria
 
@@ -175,10 +181,10 @@ Implement `wifi_manager.c` fully: AP+STA initialisation, config AP lifecycle (au
 - [ ] On boot with valid `wifi_ssid`: STA connects, config AP is NOT enabled.
 - [ ] On boot with invalid/empty `wifi_ssid`: config AP `esport-fi32_config` is active.
 - [ ] After STA disconnection, config AP is re-enabled within 1 reconnect cycle.
-- [ ] `wifi_manager_set_reward_ap(true)` brings up the reward AP with correct SSID.
-- [ ] `wifi_manager_set_reward_ap(false)` brings down the reward AP.
+- [ ] `wifi_mngr_reward_ap_set(true)` brings up the reward AP with correct SSID.
+- [ ] `wifi_mngr_reward_ap_set(false)` brings down the reward AP.
 - [ ] NAPT is enabled; a device on the reward AP can ping through to the internet when STA is connected.
-- [ ] Calling `wifi_manager_set_reward_ap(true)` twice does not crash or duplicate AP.
+- [ ] Calling `wifi_mngr_reward_ap_set(true)` twice does not crash or duplicate AP.
 
 ---
 
@@ -196,16 +202,16 @@ Implement `time_manager.c`: SNTP sync at STA connection, timezone application, a
 
 ### Tasks
 
-1. Implement `time_manager_init()`:
+1. Implement `time_mngr_init()`:
    - Register a handler for `ESPORT_EVENT_STA_CONNECTED` on the app event loop.
    - On that event, call `esp_sntp_setoperatingmode(SNTP_OPMODE_POLL)`, `esp_sntp_setservername(0, "pool.ntp.org")`, `esp_sntp_setservername(1, "time.cloudflare.com")`, `esp_sntp_init()`.
    - Register SNTP sync notification callback to set `time_synced = true`.
-   - Call `time_manager_apply_timezone()` immediately to apply the stored TZ string.
+   - Call `time_mngr_timezone_apply()` immediately to apply the stored TZ string.
 
-2. Implement `time_manager_apply_timezone()`:
-   - Read `config_get_timezone()`, call `setenv("TZ", tz, 1)` and `tzset()`.
+2. Implement `time_mngr_timezone_apply()`:
+   - Read `config_mngr_timezone_get()`, call `setenv("TZ", tz, 1)` and `tzset()`.
 
-3. Implement `time_manager_is_synced()` and `time_manager_get_utc()`:
+3. Implement `time_mngr_is_synced()` and `time_mngr_utc_get()`:
    - `get_utc()`: return `time(NULL)`. If not synced, this returns a value derived from uptime + base epoch `946684800` (2000-01-01T00:00:00Z).
 
 4. If `wifi_ssid` is empty (no STA) or STA never connects, the fallback epoch ensures the device still functions with monotonic timestamps.
@@ -213,10 +219,10 @@ Implement `time_manager.c`: SNTP sync at STA connection, timezone application, a
 ### Acceptance Criteria
 
 - [ ] `idf.py build` succeeds.
-- [ ] After STA connects with internet access, `time_manager_is_synced()` returns `true` within 30 s.
-- [ ] `time_manager_get_utc()` returns a plausible Unix timestamp (> 1700000000) after sync.
-- [ ] `time_manager_apply_timezone()` after setting `timezone` to `"CET-1CEST,M3.5.0,M10.5.0/3"` causes `localtime()` to return a CET-offset time.
-- [ ] When STA never connects, `time_manager_get_utc()` returns a non-zero monotonically increasing value.
+- [ ] After STA connects with internet access, `time_mngr_is_synced()` returns `true` within 30 s.
+- [ ] `time_mngr_utc_get()` returns a plausible Unix timestamp (> 1700000000) after sync.
+- [ ] `time_mngr_timezone_apply()` after setting `timezone` to `"CET-1CEST,M3.5.0,M10.5.0/3"` causes `localtime()` to return a CET-offset time.
+- [ ] When STA never connects, `time_mngr_utc_get()` returns a non-zero monotonically increasing value.
 
 ---
 
@@ -234,17 +240,17 @@ Implement `pulse_input.c`: GPIO interrupt, software debounce, and event posting.
 
 ### Tasks
 
-1. Implement `pulse_input_init()`:
+1. Implement `pulse_in_init()`:
    - Configure `CONFIG_ESPORT_PULSE_GPIO` as input with `GPIO_PULLUP_ENABLE`, `GPIO_INTR_NEGEDGE`.
    - Install GPIO ISR service (`gpio_install_isr_service(0)`) and add ISR handler.
-   - Read `config_get_pulse_debounce_time_ms()` and store as a static `uint64_t debounce_us`.
+   - Read `config_mngr_pulse_debounce_time_ms_get()` and store as a static `uint64_t debounce_us`.
 
 2. Implement ISR (`IRAM_ATTR`):
    - Read `esp_timer_get_time()` for current timestamp.
    - If `(now - last_accepted_us) < debounce_us`, return immediately (discard).
    - Otherwise, update `last_accepted_us`, increment `total_count`, and post `ESPORT_EVENT_PULSE` with the timestamp payload via `esp_event_isr_post`.
 
-3. Implement `pulse_input_get_total_count()` returning the static counter.
+3. Implement `pulse_in_total_count_get()` returning the static counter.
 
 ### Notes
 
@@ -255,7 +261,7 @@ Implement `pulse_input.c`: GPIO interrupt, software debounce, and event posting.
 
 - [ ] `idf.py build` succeeds.
 - [ ] Simulating pulses faster than debounce interval on GPIO produces correctly filtered `ESPORT_EVENT_PULSE` events (only 1 event per debounce window).
-- [ ] `pulse_input_get_total_count()` increments only for accepted pulses.
+- [ ] `pulse_in_total_count_get()` increments only for accepted pulses.
 - [ ] No crash or watchdog trigger under continuous rapid pulse injection.
 
 ---
@@ -278,16 +284,16 @@ Implement `time_counter.c`: credit accumulation, real-time decrement, and reward
 
 2. Declare `typedef enum { TC_STATE_IDLE, TC_STATE_ACTIVE } tc_state_t` for the state machine.
 
-3. Implement `time_counter_init()`:
+3. Implement `time_ctr_init()`:
    - Register handler for `ESPORT_EVENT_PULSE` on app event loop.
    - Create a 1-second periodic `esp_timer` handle (`s_tick_timer`); do NOT start it yet.
 
 4. In the pulse event handler:
-   - Lock spinlock, add `config_get_seconds_per_pulse()` to `s_counter`, unlock.
-   - If `s_state == TC_STATE_IDLE && s_counter >= config_get_soft_ap_start_threshold_s()`:
+   - Lock spinlock, add `config_mngr_seconds_per_pulse_get()` to `s_counter`, unlock.
+   - If `s_state == TC_STATE_IDLE && s_counter >= config_mngr_soft_ap_start_threshold_s_get()`:
      - Set `s_state = TC_STATE_ACTIVE`.
      - Start `s_tick_timer`.
-     - Call `wifi_manager_set_reward_ap(true)`.
+     - Call `wifi_mngr_reward_ap_set(true)`.
      - Post `ESPORT_EVENT_REWARD_AP_ON`.
    - Post `ESPORT_EVENT_COUNTER_CHANGED` with current counter value.
 
@@ -297,16 +303,16 @@ Implement `time_counter.c`: credit accumulation, real-time decrement, and reward
    - If `s_counter == 0`:
      - Stop `s_tick_timer`.
      - Set `s_state = TC_STATE_IDLE`.
-     - Call `wifi_manager_set_reward_ap(false)`.
+     - Call `wifi_mngr_reward_ap_set(false)`.
      - Post `ESPORT_EVENT_REWARD_AP_OFF`.
 
-6. Implement `time_counter_get()`: lock spinlock, read, unlock, return.
+6. Implement `time_ctr_get()`: lock spinlock, read, unlock, return.
 
 ### Acceptance Criteria
 
 - [ ] `idf.py build` succeeds.
 - [ ] Counter starts at 0; reward AP is off.
-- [ ] After N pulses where `N * seconds_per_pulse >= threshold`, `wifi_manager_is_reward_ap_active()` returns `true`.
+- [ ] After N pulses where `N * seconds_per_pulse >= threshold`, `wifi_mngr_reward_ap_is_active()` returns `true`.
 - [ ] Counter decrements by 1 every second when AP is active.
 - [ ] After AP activates, counter temporarily dropping below threshold (due to decrement) does NOT disable AP.
 - [ ] After counter reaches 0, AP is disabled and state returns to IDLE.
@@ -343,7 +349,7 @@ Implement `session_tracker.c`: two-phase session detection (qualification + acti
    static int64_t       s_session_start_utc;
    ```
 
-3. Implement `session_tracker_init()`:
+3. Implement `session_trk_init()`:
    - Register handler for `ESPORT_EVENT_PULSE`.
    - Create (but do not start) `s_qualify_timer` and `s_idle_timer` using `xTimerCreate`.
 
@@ -356,19 +362,19 @@ Implement `session_tracker.c`: two-phase session detection (qualification + acti
 
 5. `s_qualify_timer` callback (fires after `start_session_interval_s`):
    - `s_state = ST_ACTIVE`.
-   - `s_session_start_utc = time_manager_get_utc() - (esp_timer_get_time() - s_potential_start_us) / 1000000`.
+   - `s_session_start_utc = time_mngr_utc_get() - (esp_timer_get_time() - s_potential_start_us) / 1000000`.
    (Back-calculate start UTC from elapsed time since `s_potential_start_us`.)
 
 6. `s_idle_timer` callback (fires after `idle_session_interval_s`):
    - If `s_state == ST_ACTIVE`:
      - Compute stats (see spec §5.6).
-     - Post `ESPORT_EVENT_SESSION_CLOSED` with a heap-allocated `session_record_t` (copy as event data, not pointer).
+     - Post `ESPORT_EVENT_SESSION_CLOSED` with a heap-allocated `session_trk_record_t` (copy as event data, not pointer).
    - Reset: stop both timers, `s_state = ST_IDLE`, zero all state.
    - If `s_state == ST_QUALIFYING`: gap during qualification → reset to IDLE.
 
 7. Speed calculation:
    ```c
-   uint64_t total_cm = (uint64_t)s_pulse_count * config_get_centimeters_per_pulse();
+   uint64_t total_cm = (uint64_t)s_pulse_count * config_mngr_centimeters_per_pulse_get();
    uint32_t dur_s    = (uint32_t)(... duration ...);
    /* avg_speed_kmh_x10 = (total_cm / 100.0) / dur_s * 3.6 * 10
                         = total_cm * 36 / (dur_s * 1000) */
@@ -400,7 +406,7 @@ Implement `session_log.c`: ring buffer backed by NVS, write on session close, re
 
 - `docs/1-specification.md` §5.7, §8
 - `firmware/inc/session_log.h`, `firmware/inc/event_ids.h`
-- `session_tracker.h` (Phase 6 output — `session_record_t` type)
+- `session_tracker.h` (Phase 6 output — `session_trk_record_t` type)
 - `config_manager` (Phase 1 — NVS initialisation already done)
 
 ### Tasks
@@ -412,7 +418,7 @@ Implement `session_log.c`: ring buffer backed by NVS, write on session close, re
    - Read `slog_head` and `slog_count`; validate ranges. If invalid, reset both to 0 and erase namespace.
    - Register handler for `ESPORT_EVENT_SESSION_CLOSED` on app event loop.
 
-3. Implement `session_log_write(const session_record_t *rec)`:
+3. Implement `session_log_write(const session_trk_record_t *rec)`:
    - Write blob at key `slog_N` (where N = current `slog_head`).
    - Advance `slog_head = (slog_head + 1) % MAX`.
    - Increment `slog_count` (cap at MAX).
@@ -450,7 +456,7 @@ Implement `http_server.c` with config form and JSON API endpoints. No HTML dashb
 
 ### Tasks
 
-1. Implement `http_server_init()`: start `esp_http_server` on port 80, register all URI handlers.
+1. Implement `http_srv_init()`: start `esp_http_server` on port 80, register all URI handlers.
 
 2. **`GET /config`** handler:
    - Read all config values.
@@ -462,7 +468,7 @@ Implement `http_server.c` with config form and JSON API endpoints. No HTML dashb
    - Parse each field using a simple key=value parser (no third-party library; implement as a local helper).
    - Validate and call the appropriate `config_set_*()` for each field.
    - Accumulate any validation errors.
-   - On success: call `time_manager_apply_timezone()` if `timezone` changed; schedule WiFi reconnect if wifi credentials changed; redirect to `GET /config` with query `?saved=1`.
+   - On success: call `time_mngr_timezone_apply()` if `timezone` changed; schedule WiFi reconnect if wifi credentials changed; redirect to `GET /config` with query `?saved=1`.
    - On error: respond HTTP 400 with error details.
 
 4. **`GET /api/status`** handler:
@@ -642,12 +648,34 @@ Phase 9 (HTTP Dashboard)  ── requires phase 8 complete              │
 Phase 10 (Integration)    ── requires phases 0-9 complete ──────────┘
 ```
 
+## Module Prefix Table
+
+Every symbol (functions, types, `#define` macros, `enum` values) **must** start with the module's designated prefix.  This applies to **both public and internal** symbols.  Use lower-case prefixes for functions/types and upper-case for macros/enum values.
+
+| Source file       | Function / type prefix | Macro / enum prefix |
+| ----------------- | ---------------------- | ------------------- |
+| `config_manager`  | `config_mngr_`         | `CONFIG_MNGR_`      |
+| `wifi_manager`    | `wifi_mngr_`           | `WIFI_MNGR_`        |
+| `time_manager`    | `time_mngr_`           | `TIME_MNGR_`        |
+| `pulse_input`     | `pulse_in_`            | `PULSE_IN_`         |
+| `time_counter`    | `time_ctr_`            | `TIME_CTR_`         |
+| `session_tracker` | `session_trk_`         | `SESSION_TRK_`      |
+| `session_log`     | `session_log_`         | `SESSION_LOG_`      |
+| `http_server`     | `http_srv_`            | `HTTP_SRV_`         |
+
+> `gp_tag` is a universal file-scope variable name and does **not** carry a module prefix (it follows the BARR-C:2018 pointer variable naming rule instead).
+
+---
+
 ## Notes for AI Agents
 
 - Each phase has its own acceptance criteria. **Do not proceed to the next phase until all acceptance criteria are met.**
 - When in doubt about a behaviour not covered by a criterion, refer to `docs/1-specification.md` and implement accordingly.
 - Do not add features not described in the specification without flagging them.
 - Follow **BARR-C:2018 (BARR-2018)** coding rules for naming, formatting, function size, and defensive coding practices.
+- Enclose every `#define` replacement value in parentheses: `#define FOO (123)`, `#define MY_STR ("text")`.
+- Every symbol in a module (public and internal: functions, types, macros, enums) **must** be prefixed with the module's designated prefix from the **Module Prefix Table** above.
+- Function names must follow the pattern `{module_prefix}_{subject}_{action}` — the **action verb goes last**. Examples: `config_mngr_wifi_ssid_get`, `config_mngr_seconds_per_pulse_set`, `wifi_mngr_sta_is_connected`, `time_mngr_timezone_apply`. The only exception is `*_init` (no subject).
 - Use **Doxygen for all code documentation**. Use only `\\` Doxygen tags (for example `\\brief`, `\\param`, `\\return`, `\\note`); do not use `@` tags.
 - Doxygen parameter tags must include direction: `\\param[in]`, `\\param[out]`, or `\\param[in,out]`.
 - Always leave one blank line between the last `\\param...` line and the `\\return` or `\\retval` line.

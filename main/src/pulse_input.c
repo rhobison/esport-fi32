@@ -35,7 +35,7 @@ static const char * gp_tag = "pulse_input";
 // Public Functions
 //==================================================================================================
 
-esp_err_t pulse_input_init(void)
+esp_err_t pulse_in_init(void)
 {
     ESP_LOGI(gp_tag, "init (Phase 0 stub)");
     return ESP_OK;
@@ -43,7 +43,7 @@ esp_err_t pulse_input_init(void)
 
 //--------------------------------------------------------------------------------------------------
 
-uint32_t pulse_input_get_total_count(void)
+uint32_t pulse_in_total_count_get(void)
 {
     return 0U;
 }

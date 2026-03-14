@@ -46,7 +46,7 @@ extern "C"
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
-esp_err_t config_manager_init(void);
+esp_err_t config_mngr_init(void);
 
 /**
  * \brief Copy the home Wi-Fi SSID into a caller-supplied buffer.
@@ -54,7 +54,7 @@ esp_err_t config_manager_init(void);
  * \param[out] buf  Destination buffer.
  * \param[in]  len  Size of \p p_buf in bytes (including NUL terminator).
  */
-void config_get_wifi_ssid(char * p_buf, size_t len);
+void config_mngr_wifi_ssid_get(char * p_buf, size_t len);
 
 /**
  * \brief Copy the home Wi-Fi WPA2 password into a caller-supplied buffer.
@@ -62,7 +62,7 @@ void config_get_wifi_ssid(char * p_buf, size_t len);
  * \param[out] buf  Destination buffer.
  * \param[in]  len  Size of \p p_buf in bytes (including NUL terminator).
  */
-void config_get_wifi_password(char * p_buf, size_t len);
+void config_mngr_wifi_password_get(char * p_buf, size_t len);
 
 /**
  * \brief Copy the reward Soft AP SSID into a caller-supplied buffer.
@@ -70,7 +70,7 @@ void config_get_wifi_password(char * p_buf, size_t len);
  * \param[out] buf  Destination buffer.
  * \param[in]  len  Size of \p p_buf in bytes (including NUL terminator).
  */
-void config_get_soft_ap_ssid(char * p_buf, size_t len);
+void config_mngr_soft_ap_ssid_get(char * p_buf, size_t len);
 
 /**
  * \brief Copy the reward Soft AP WPA2 password into a caller-supplied buffer.
@@ -78,7 +78,7 @@ void config_get_soft_ap_ssid(char * p_buf, size_t len);
  * \param[out] buf  Destination buffer.
  * \param[in]  len  Size of \p p_buf in bytes (including NUL terminator).
  */
-void config_get_soft_ap_password(char * p_buf, size_t len);
+void config_mngr_soft_ap_password_get(char * p_buf, size_t len);
 
 /**
  * \brief Return the number of seconds credited to the counter per accepted
@@ -86,7 +86,7 @@ void config_get_soft_ap_password(char * p_buf, size_t len);
  *
  * \return Seconds per pulse (range 1–60).
  */
-uint16_t config_get_seconds_per_pulse(void);
+uint16_t config_mngr_seconds_per_pulse_get(void);
 
 /**
  * \brief Return the counter threshold (seconds) at which the reward AP is
@@ -94,35 +94,35 @@ uint16_t config_get_seconds_per_pulse(void);
  *
  * \return Threshold in seconds.
  */
-uint32_t config_get_soft_ap_start_threshold_s(void);
+uint32_t config_mngr_soft_ap_start_threshold_s_get(void);
 
 /**
  * \brief Return the wheel travel distance in centimetres per pulse.
  *
  * \return Centimetres per pulse (>= 1).
  */
-uint32_t config_get_centimeters_per_pulse(void);
+uint32_t config_mngr_centimeters_per_pulse_get(void);
 
 /**
  * \brief Return the idle gap that closes an exercise session.
  *
  * \return Idle interval in seconds (range 5–600).
  */
-uint16_t config_get_idle_session_interval_s(void);
+uint16_t config_mngr_idle_session_interval_s_get(void);
 
 /**
  * \brief Return the continuous-pedalling window required to confirm a session.
  *
  * \return Session-start qualification interval in seconds (range 1–300).
  */
-uint16_t config_get_start_session_interval_s(void);
+uint16_t config_mngr_start_session_interval_s_get(void);
 
 /**
  * \brief Return the minimum time between two accepted pulses.
  *
  * \return Software debounce time in milliseconds (range 10–5000).
  */
-uint16_t config_get_pulse_debounce_time_ms(void);
+uint16_t config_mngr_pulse_debounce_time_ms_get(void);
 
 /**
  * \brief Copy the POSIX timezone string into a caller-supplied buffer.
@@ -130,7 +130,7 @@ uint16_t config_get_pulse_debounce_time_ms(void);
  * \param[out] buf  Destination buffer.
  * \param[in]  len  Size of \p p_buf in bytes (including NUL terminator).
  */
-void config_get_timezone(char * p_buf, size_t len);
+void config_mngr_timezone_get(char * p_buf, size_t len);
 
 /**
  * \brief Set and persist the home Wi-Fi SSID.
@@ -140,7 +140,7 @@ void config_get_timezone(char * p_buf, size_t len);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is out of
  *         the allowed length range, or an NVS error code on write failure.
  */
-esp_err_t config_set_wifi_ssid(const char * p_val);
+esp_err_t config_mngr_wifi_ssid_set(const char * p_val);
 
 /**
  * \brief Set and persist the home Wi-Fi WPA2 password.
@@ -150,7 +150,7 @@ esp_err_t config_set_wifi_ssid(const char * p_val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is out of
  *         the allowed length range, or an NVS error code on write failure.
  */
-esp_err_t config_set_wifi_password(const char * p_val);
+esp_err_t config_mngr_wifi_password_set(const char * p_val);
 
 /**
  * \brief Set and persist the reward Soft AP SSID.
@@ -160,7 +160,7 @@ esp_err_t config_set_wifi_password(const char * p_val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is out of
  *         the allowed length range, or an NVS error code on write failure.
  */
-esp_err_t config_set_soft_ap_ssid(const char * p_val);
+esp_err_t config_mngr_soft_ap_ssid_set(const char * p_val);
 
 /**
  * \brief Set and persist the reward Soft AP WPA2 password.
@@ -170,7 +170,7 @@ esp_err_t config_set_soft_ap_ssid(const char * p_val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is out of
  *         the allowed length range, or an NVS error code on write failure.
  */
-esp_err_t config_set_soft_ap_password(const char * p_val);
+esp_err_t config_mngr_soft_ap_password_set(const char * p_val);
 
 /**
  * \brief Set and persist the seconds credited per accepted pulse.
@@ -180,7 +180,7 @@ esp_err_t config_set_soft_ap_password(const char * p_val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is outside
  *         the valid range, or an NVS error code on write failure.
  */
-esp_err_t config_set_seconds_per_pulse(uint16_t val);
+esp_err_t config_mngr_seconds_per_pulse_set(uint16_t val);
 
 /**
  * \brief Set and persist the reward AP enable threshold.
@@ -189,7 +189,7 @@ esp_err_t config_set_seconds_per_pulse(uint16_t val);
  *
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */
-esp_err_t config_set_soft_ap_start_threshold_s(uint32_t val);
+esp_err_t config_mngr_soft_ap_start_threshold_s_set(uint32_t val);
 
 /**
  * \brief Set and persist the wheel travel distance per pulse.
@@ -199,7 +199,7 @@ esp_err_t config_set_soft_ap_start_threshold_s(uint32_t val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is 0,
  *         or an NVS error code on write failure.
  */
-esp_err_t config_set_centimeters_per_pulse(uint32_t val);
+esp_err_t config_mngr_centimeters_per_pulse_set(uint32_t val);
 
 /**
  * \brief Set and persist the idle gap that closes a session.
@@ -209,7 +209,7 @@ esp_err_t config_set_centimeters_per_pulse(uint32_t val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is outside
  *         the valid range, or an NVS error code on write failure.
  */
-esp_err_t config_set_idle_session_interval_s(uint16_t val);
+esp_err_t config_mngr_idle_session_interval_s_set(uint16_t val);
 
 /**
  * \brief Set and persist the session-start qualification window.
@@ -219,7 +219,7 @@ esp_err_t config_set_idle_session_interval_s(uint16_t val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is outside
  *         the valid range, or an NVS error code on write failure.
  */
-esp_err_t config_set_start_session_interval_s(uint16_t val);
+esp_err_t config_mngr_start_session_interval_s_set(uint16_t val);
 
 /**
  * \brief Set and persist the pulse debounce time.
@@ -229,7 +229,7 @@ esp_err_t config_set_start_session_interval_s(uint16_t val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is outside
  *         the valid range, or an NVS error code on write failure.
  */
-esp_err_t config_set_pulse_debounce_time_ms(uint16_t val);
+esp_err_t config_mngr_pulse_debounce_time_ms_set(uint16_t val);
 
 /**
  * \brief Set and persist the POSIX timezone string.
@@ -239,7 +239,7 @@ esp_err_t config_set_pulse_debounce_time_ms(uint16_t val);
  * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if \p val is out of
  *         the allowed length range, or an NVS error code on write failure.
  */
-esp_err_t config_set_timezone(const char * p_val);
+esp_err_t config_mngr_timezone_set(const char * p_val);
 
 #ifdef __cplusplus
 }

@@ -37,7 +37,7 @@ static const char * gp_tag = "wifi_manager";
 // Public Functions
 //==================================================================================================
 
-esp_err_t wifi_manager_init(void)
+esp_err_t wifi_mngr_init(void)
 {
     ESP_LOGI(gp_tag, "init (Phase 0 stub)");
     return ESP_OK;
@@ -45,7 +45,7 @@ esp_err_t wifi_manager_init(void)
 
 //--------------------------------------------------------------------------------------------------
 
-esp_err_t wifi_manager_set_reward_ap(bool b_enable)
+esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
 {
     (void)b_enable;
     return ESP_OK;
@@ -53,28 +53,28 @@ esp_err_t wifi_manager_set_reward_ap(bool b_enable)
 
 //--------------------------------------------------------------------------------------------------
 
-bool wifi_manager_is_sta_connected(void)
+bool wifi_mngr_sta_is_connected(void)
 {
     return false;
 }
 
 //--------------------------------------------------------------------------------------------------
 
-bool wifi_manager_is_reward_ap_active(void)
+bool wifi_mngr_reward_ap_is_active(void)
 {
     return false;
 }
 
 //--------------------------------------------------------------------------------------------------
 
-uint8_t wifi_manager_reward_ap_client_count(void)
+uint8_t wifi_mngr_reward_ap_client_count(void)
 {
     return 0U;
 }
 
 //--------------------------------------------------------------------------------------------------
 
-void wifi_manager_get_sta_ip(char * p_buf, size_t len)
+void wifi_mngr_sta_ip_get(char * p_buf, size_t len)
 {
     if ((NULL != p_buf) && (len > 0U))
     {

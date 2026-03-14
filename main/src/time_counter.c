@@ -35,7 +35,7 @@ static const char * gp_tag = "time_counter";
 // Public Functions
 //==================================================================================================
 
-esp_err_t time_counter_init(void)
+esp_err_t time_ctr_init(void)
 {
     ESP_LOGI(gp_tag, "init (Phase 0 stub)");
     return ESP_OK;
@@ -43,7 +43,7 @@ esp_err_t time_counter_init(void)
 
 //--------------------------------------------------------------------------------------------------
 
-uint32_t time_counter_get(void)
+uint32_t time_ctr_get(void)
 {
     return 0U;
 }

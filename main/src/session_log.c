@@ -43,7 +43,7 @@ esp_err_t session_log_init(void)
 
 //--------------------------------------------------------------------------------------------------
 
-esp_err_t session_log_write(const session_record_t * p_rec)
+esp_err_t session_log_write(const session_trk_record_t * p_rec)
 {
     (void)p_rec;
     return ESP_OK;
@@ -58,7 +58,7 @@ uint16_t session_log_count(void)
 
 //--------------------------------------------------------------------------------------------------
 
-uint16_t session_log_read(session_record_t * p_out, uint16_t max_count)
+uint16_t session_log_read(session_trk_record_t * p_out, uint16_t max_count)
 {
     (void)p_out;
     (void)max_count;

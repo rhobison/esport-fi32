@@ -70,7 +70,7 @@ void app_main(void)
 
     /* Step 1: Initialise the NVS flash partition.
      * On partition corruption, erase and reinitialise so that factory
-     * defaults are applied by config_manager_init(). */
+     * defaults are applied by config_mngr_init(). */
     ret = nvs_flash_init();
     if ((ESP_ERR_NVS_NO_FREE_PAGES == ret) || (ESP_ERR_NVS_NEW_VERSION_FOUND == ret))
     {
@@ -81,7 +81,7 @@ void app_main(void)
 
     /* Step 2: Load runtime configuration from NVS; apply factory defaults
      * for any missing key. */
-    ESP_ERROR_CHECK(config_manager_init());
+    ESP_ERROR_CHECK(config_mngr_init());
 
     /* Step 3: Create the default event loop used for all inter-module
      * messaging via ESPORT_EVENT_BASE events. */
@@ -89,23 +89,23 @@ void app_main(void)
 
     /* Step 4: Start Wi-Fi in AP+STA mode.  Attempts STA connection; enables
      * the config AP immediately if STA is unavailable. */
-    ESP_ERROR_CHECK(wifi_manager_init());
+    ESP_ERROR_CHECK(wifi_mngr_init());
 
     /* Step 5: Start the HTTP server so the config portal is reachable
      * immediately via the config AP (before STA connects). */
-    ESP_ERROR_CHECK(http_server_init());
+    ESP_ERROR_CHECK(http_srv_init());
 
     /* Step 6: Register SNTP sync callback; will fire once STA has an IP. */
-    ESP_ERROR_CHECK(time_manager_init());
+    ESP_ERROR_CHECK(time_mngr_init());
 
     /* Step 7: Configure the pulse GPIO interrupt and debounce filter. */
-    ESP_ERROR_CHECK(pulse_input_init());
+    ESP_ERROR_CHECK(pulse_in_init());
 
     /* Step 8: Start the time counter and reward AP state machine. */
-    ESP_ERROR_CHECK(time_counter_init());
+    ESP_ERROR_CHECK(time_ctr_init());
 
     /* Step 9: Start the two-phase exercise session detection logic. */
-    ESP_ERROR_CHECK(session_tracker_init());
+    ESP_ERROR_CHECK(session_trk_init());
 
     /* Step 10: Start the NVS-backed session ring-buffer log. */
     ESP_ERROR_CHECK(session_log_init());

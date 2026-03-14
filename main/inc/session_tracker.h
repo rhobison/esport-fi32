@@ -12,7 +12,7 @@
  *   -# \b Active: An idle timer is reset on each pulse.  When the idle
  *      timer fires (no pulse for \c idle_session_interval_s seconds), the
  *      session is closed and #ESPORT_EVENT_SESSION_CLOSED is posted with
- *      a #session_record_t payload.
+ *      a #session_trk_record_t payload.
  *
  * Configuration values are re-read from \c config_manager at the start of
  * each session so that changes apply without a reboot.
@@ -79,7 +79,7 @@ typedef struct
      * For example, 123 represents 12.3 km/h.  Zero if \c duration_s is zero.
      */
     uint16_t avg_speed_kmh_x10;
-} session_record_t;
+} session_trk_record_t;
 
 //==================================================================================================
 // Function Prototypes
@@ -94,7 +94,7 @@ typedef struct
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
-esp_err_t session_tracker_init(void);
+esp_err_t session_trk_init(void);
 
 #ifdef __cplusplus
 }

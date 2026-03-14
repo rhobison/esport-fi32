@@ -46,11 +46,11 @@ extern "C"
  * Registers a handler on the default event loop for
  * #ESPORT_EVENT_STA_CONNECTED.  When that event fires, SNTP polling is
  * started using \c pool.ntp.org and \c time.cloudflare.com.  Also calls
- * #time_manager_apply_timezone() immediately to set the initial timezone.
+ * #time_mngr_timezone_apply() immediately to set the initial timezone.
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
-esp_err_t time_manager_init(void);
+esp_err_t time_mngr_init(void);
 
 /**
  * \brief Query whether SNTP has completed at least one successful
@@ -58,7 +58,7 @@ esp_err_t time_manager_init(void);
  *
  * \return \c true after the first successful sync; \c false otherwise.
  */
-bool time_manager_is_synced(void);
+bool time_mngr_is_synced(void);
 
 /**
  * \brief Return the current time as seconds since the Unix epoch (UTC).
@@ -69,7 +69,7 @@ bool time_manager_is_synced(void);
  *
  * \return Current UTC time as a \c time_t value.
  */
-time_t time_manager_get_utc(void);
+time_t time_mngr_utc_get(void);
 
 /**
  * \brief Apply the stored POSIX timezone string via \c setenv and \c tzset.
@@ -77,7 +77,7 @@ time_t time_manager_get_utc(void);
  * Reads the \c timezone parameter from \c config_manager and applies it.
  * Call this after any configuration change that modifies the timezone.
  */
-void time_manager_apply_timezone(void);
+void time_mngr_timezone_apply(void);
 
 #ifdef __cplusplus
 }
