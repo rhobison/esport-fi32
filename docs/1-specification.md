@@ -831,7 +831,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
   - Boolean variables (including parameters) must start with `b_` (e.g. `bool b_enable`).
   - File-scope (`static`) and global variables must start with `g_`. Combined prefixes apply: global pointer → `gp_`, global boolean → `gb_` (e.g. `static const char * gp_tag`).
 - **Yoda notation**: for `==` and `!=` comparisons, always place the constant (literal, macro, or enum value) on the **left-hand side** (e.g. `ESP_OK == ret`, `NULL != p_buf`).
-- **Internal (private) functions** must be declared `static`. Every `static` function must have its prototype listed in the `// Internal Function Prototypes` section of the same `.c` file before it is defined.
+- **Internal (private) functions** must be declared `static`. Every `static` function must have its prototype listed in the `// Internal Function Prototypes` section of the same `.c` file (as a bare declaration, without a Doxygen comment); the Doxygen comment belongs on the function **definition**.
 - All modules expose an `_init()` function that must be called from `app_main` in the order specified in §7.1.
 - No module calls another module's internals directly; all cross-module communication is via the event bus or explicit API calls.
 - All `esp_err_t` return values must be checked; use `ESP_ERROR_CHECK()` for fatal initialisation failures and `ESP_LOGE` + graceful degradation for runtime errors.
@@ -845,6 +845,8 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 - Each public function must include at minimum: `\\brief`, one `\\param` per argument, and `\\return` when non-void.
 - Each `\\param` must include direction as `\\param[in]`, `\\param[out]`, or `\\param[in,out]`.
 - Doxygen blocks must include one blank line between the last `\\param...` line and `\\return` or `\\retval`.
+- Every `typedef struct` and `typedef enum` must include a **tag name**: `typedef struct my_struct_tag { … } my_struct_t;` and `typedef enum my_enum_tag { … } my_enum_t;`.
+- Every `enum` enumerator must have an **explicit integer value**: `MY_ENUM_FOO = 0`, `MY_ENUM_BAR = 1`, etc. Do not rely on implicit sequential assignment.
 - Internal `static` functions should include at least a `\\brief` when the logic is non-trivial.
 - **Single-line Doxygen comments** (`/** ... */` on one line) must **not** use `\\brief`.
 - **Multi-line Doxygen comments**: `\\brief` must appear on the **second line** (immediately after the opening `/**` line). One blank `*` line must always follow the `\\brief` line before any additional content.
