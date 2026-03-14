@@ -1,0 +1,25 @@
+idf_component_register(
+    REQUIRES
+        esp_wifi
+        esp_event
+        nvs_flash
+        esp_netif
+        esp_timer
+        driver
+        lwip
+        esp_http_server
+        log
+        freertos
+    INCLUDE_DIRS
+        "inc"
+    SRCS
+        "src/main.c"
+        "src/config_manager.c"
+        "src/wifi_manager.c"
+        "src/time_manager.c"
+        "src/pulse_input.c"
+        "src/time_counter.c"
+        "src/session_tracker.c"
+        "src/session_log.c"
+        "src/http_server.c"
+)

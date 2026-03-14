@@ -1,0 +1,46 @@
+services:
+  air-clock-dev:
+    image: air-clock-v2:dev
+    container_name: esport-fi32-dev
+
+    volumes:
+      # Mount the project source code (parent directory containing esport-fi32/)
+      - ../..:/workspace
+      # Preserve bash history
+      - esport-fi32-bash-history:/home/developer/.bash_history
+      # Cache directories for faster builds
+      - esport-fi32-cache:/home/developer/.cache
+      - esport-fi32-pip-cache:/home/developer/.cache/pip
+
+    working_dir: /workspace/esport-fi32
+
+    # Enable privileged mode for hardware debugging tools
+    privileged: true
+
+    # Mount USB devices for hardware debugging (J-Link, ST-Link, etc.)
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+
+    # Environment variables
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - ARM_TOOLCHAIN_PATH=/opt/arm-gnu-toolchain
+      - JLINK_PATH=/opt/jlink
+
+    # Network configuration
+    network_mode: host
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    # Command to run when container starts
+    command: /bin/bash
+
+volumes:
+  esport-fi32-bash-history:
+    driver: local
+  esport-fi32-cache:
+    driver: local
+  esport-fi32-pip-cache:
+    driver: local
