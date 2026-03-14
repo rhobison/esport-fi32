@@ -137,6 +137,43 @@ esp_err_t session_trk_init(void)
 
 //--------------------------------------------------------------------------------------------------
 
+/**
+ * \brief Fill a #session_trk_live_status_t with the current session state.
+ *
+ * Reads module-level state variables to produce a point-in-time snapshot.
+ * Intended for display purposes only; no locking is applied since a slightly
+ * stale snapshot is acceptable for the HTTP status API.
+ *
+ * \param[out] p_out  Destination status structure to populate.
+ */
+void session_trk_live_status_get(session_trk_live_status_t * p_out)
+{
+    static const char * const sc_state_names[] = { "idle", "qualifying", "active" };
+
+    p_out->p_state_name = sc_state_names[g_state];
+    p_out->start_utc    = g_session_start_utc;
+    p_out->pulse_count  = (SESSION_TRK_STATE_IDLE == g_state) ? 0U : g_pulse_count;
+
+    if (SESSION_TRK_STATE_ACTIVE == g_state)
+    {
+        int64_t now_s      = (int64_t)time_mngr_utc_get();
+        int64_t elapsed    = now_s - g_session_start_utc;
+        p_out->duration_s  = (elapsed > 0LL) ? (uint32_t)elapsed : 0U;
+
+        uint64_t total_cm         = (uint64_t)g_pulse_count * (uint64_t)g_centimeters_per_pulse;
+        p_out->live_speed_kmh_x10 = (0U < p_out->duration_s)
+            ? (uint16_t)(total_cm * 36ULL / ((uint64_t)p_out->duration_s * 1000ULL))
+            : 0U;
+    }
+    else
+    {
+        p_out->duration_s         = 0U;
+        p_out->live_speed_kmh_x10 = 0U;
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
 //==================================================================================================
 // Private Functions
 //==================================================================================================

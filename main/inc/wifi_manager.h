@@ -97,6 +97,16 @@ uint8_t wifi_mngr_reward_ap_client_count(void);
  */
 void wifi_mngr_sta_ip_get(char * p_buf, size_t len);
 
+/**
+ * \brief Query whether the config (fallback) Soft AP is currently active.
+ *
+ * The config AP is automatically enabled when STA is disconnected and
+ * disabled when STA obtains an IP.
+ *
+ * \return \c true if the config AP is up, \c false otherwise.
+ */
+bool wifi_mngr_config_ap_is_active(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -345,6 +345,18 @@ void wifi_mngr_sta_ip_get(char * p_buf, size_t len)
 
 //--------------------------------------------------------------------------------------------------
 
+/**
+ * \brief Query whether the config (fallback) Soft AP is currently active.
+ *
+ * \return \c true if the config AP is up, \c false otherwise.
+ */
+bool wifi_mngr_config_ap_is_active(void)
+{
+    return gb_config_ap_active;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 //==================================================================================================
 // Private Functions
 //==================================================================================================
