@@ -1,0 +1,105 @@
+/**
+ * \file
+ * \brief Exercise session detection and tracking public API.
+ *
+ * Listens for #ESPORT_EVENT_PULSE events and implements a two-phase
+ * session detection algorithm:
+ *
+ *   -# \b Qualification: On the first pulse after idle, a qualification
+ *      timer is started.  If pulses continue without a gap greater than
+ *      \c idle_session_interval_s for the duration of
+ *      \c start_session_interval_s, the session is confirmed.
+ *   -# \b Active: An idle timer is reset on each pulse.  When the idle
+ *      timer fires (no pulse for \c idle_session_interval_s seconds), the
+ *      session is closed and #ESPORT_EVENT_SESSION_CLOSED is posted with
+ *      a #session_record_t payload.
+ *
+ * Configuration values are re-read from \c config_manager at the start of
+ * each session so that changes apply without a reboot.
+ *
+ * \date 2026-03-14
+ */
+
+#ifndef SESSION_TRACKER_H
+#define SESSION_TRACKER_H
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+//==================================================================================================
+// Includes
+//==================================================================================================
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+
+//==================================================================================================
+// Constants/Macros/Datatypes
+//==================================================================================================
+
+/**
+ * \brief Record describing a completed exercise session.
+ *
+ * Posted as the event data payload for #ESPORT_EVENT_SESSION_CLOSED
+ * (copied by value, not by pointer).
+ *
+ * The NVS binary representation packs \c duration_s and \c pulse_count
+ * into 16-bit fields; values are capped at \c UINT16_MAX when serialised
+ * by \c session_log.
+ */
+typedef struct
+{
+    /**
+     * \brief Session start, seconds since Unix epoch.
+     *
+     * Set to 0 (boot-epoch fallback) when the clock was not synchronised.
+     */
+    int64_t start_time_utc;
+
+    /** \c true if the system clock was SNTP-synced at session start. */
+    bool b_time_synced;
+
+    /** Session duration in seconds (last_pulse_time - start_time). */
+    uint32_t duration_s;
+
+    /**
+     * \brief Total accepted pulses during the session.
+     *
+     * Includes pulses counted during the qualification window.
+     */
+    uint32_t pulse_count;
+
+    /**
+     * \brief Average speed in km/h multiplied by 10.
+     *
+     * For example, 123 represents 12.3 km/h.  Zero if \c duration_s is zero.
+     */
+    uint16_t avg_speed_kmh_x10;
+} session_record_t;
+
+//==================================================================================================
+// Function Prototypes
+//==================================================================================================
+
+/**
+ * \brief Initialise the session tracker and register the pulse event handler.
+ *
+ * Creates the FreeRTOS qualification and idle-detection timers (not started
+ * until the first qualifying pulse) and registers a handler for
+ * #ESPORT_EVENT_PULSE on the default event loop.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t session_tracker_init(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // SESSION_TRACKER_H
+
+/*** end of file ***/

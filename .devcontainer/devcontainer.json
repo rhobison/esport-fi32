@@ -1,0 +1,35 @@
+{
+    "name": "Esport FI32 Development",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "air-clock-dev",
+    "workspaceFolder": "/workspace/esport-fi32",
+    "shutdownAction": "stopCompose",
+    "features": {
+        "ghcr.io/devcontainers/features/git:1": {
+            "ppa": true,
+            "version": "latest"
+        }
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cpptools-extension-pack",
+                "ms-vscode.cmake-tools",
+                "twxs.cmake",
+                "marus25.cortex-debug",
+                "dan-c-underwood.arm",
+                "zixuanwang.linkerscript",
+                "cschlosser.doxdocgen",
+                "ms-vscode.live-server",
+                "ms-vscode.clangd",
+                "llvm-vs-code-extensions.vscode-clangd",
+                "xaver.clang-format",
+                "ms-python.python",
+                "ms-python.black-formatter",
+                "eamodio.gitlens",
+                "github.vscode-pull-request-github"
+            ]
+        }
+    }
+}

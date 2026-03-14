@@ -1,0 +1,32 @@
+menu "esport-fi32 Configuration"
+
+    config ESPORT_PULSE_GPIO
+        int "Pulse input GPIO number"
+        default 6
+        range 0 30
+        help
+            GPIO number connected to the bike sensor pulse output.
+            The pin is configured with an internal pull-up resistor;
+            valid pulses are detected on the falling edge
+            (sensor contact closes to GND).  Build-time constant;
+            cannot be changed at runtime.
+
+    config ESPORT_CONFIG_AP_SSID
+        string "Config SoftAP SSID"
+        default "esport-fi32_config"
+        help
+            SSID of the fallback configuration access point.
+            This AP is enabled automatically when the STA interface
+            is not connected, giving the user access to the web
+            configuration portal.  Maximum 32 characters.
+            Build-time constant; not stored in NVS.
+
+    config ESPORT_CONFIG_AP_PASSWORD
+        string "Config SoftAP Password"
+        default "esport-fi32_config"
+        help
+            WPA2 password for the fallback configuration access point.
+            Maximum 64 characters.  Build-time constant; not stored
+            in NVS.
+
+endmenu
