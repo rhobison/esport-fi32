@@ -81,6 +81,36 @@ typedef struct
     uint16_t avg_speed_kmh_x10;
 } session_trk_record_t;
 
+/**
+ * \brief Live session state snapshot for use by the HTTP status API.
+ *
+ * Populated by #session_trk_live_status_get(). Fields are consistent with
+ * the current state machine state at the moment of the call.  This function
+ * is intended for read-only display; no locking is performed.
+ */
+typedef struct session_trk_live_status_tag
+{
+    /** Human-readable state name: \c "idle", \c "qualifying", or \c "active". */
+    const char * p_state_name;
+
+    /** UTC timestamp of the confirmed session start.  Zero unless state is active. */
+    int64_t start_utc;
+
+    /** Elapsed seconds since #start_utc.  Zero unless state is active. */
+    uint32_t duration_s;
+
+    /** Accepted pulse count for the current session or qualifying window.  Zero when idle. */
+    uint32_t pulse_count;
+
+    /**
+     * \brief Current session average speed in km/h \u00d7 10.
+     *
+     * Computed from (#pulse_count \u00d7 centimeters_per_pulse) and #duration_s.
+     * Zero when state is not active or #duration_s is zero.
+     */
+    uint16_t live_speed_kmh_x10;
+} session_trk_live_status_t;
+
 //==================================================================================================
 // Function Prototypes
 //==================================================================================================
@@ -95,6 +125,17 @@ typedef struct
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
 esp_err_t session_trk_init(void);
+
+/**
+ * \brief Fill a #session_trk_live_status_t with the current session state.
+ *
+ * Reads the session tracker's internal state variables to provide a
+ * point-in-time snapshot.  Intended for display purposes only; the snapshot
+ * may be slightly stale under concurrent timer callbacks.
+ *
+ * \param[out] p_out  Destination status structure to populate.
+ */
+void session_trk_live_status_get(session_trk_live_status_t * p_out);
 
 #ifdef __cplusplus
 }
