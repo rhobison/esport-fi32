@@ -39,10 +39,10 @@
 #define CONFIG_MNGR_KEY_TZ          ("tz")
 
 /* Factory defaults (spec §3). */
-#define CONFIG_MNGR_DEF_WIFI_SSID   ("")
-#define CONFIG_MNGR_DEF_WIFI_PWD    ("")
-#define CONFIG_MNGR_DEF_AP_SSID     ("esport-fi32")
-#define CONFIG_MNGR_DEF_AP_PWD      ("esport-fi32")
+#define CONFIG_MNGR_DEF_WIFI_SSID   (CONFIG_ESPORT_WIFI_SSID)
+#define CONFIG_MNGR_DEF_WIFI_PWD    (CONFIG_ESPORT_WIFI_PASSWORD)
+#define CONFIG_MNGR_DEF_AP_SSID     (CONFIG_ESPORT_REWARD_AP_SSID)
+#define CONFIG_MNGR_DEF_AP_PWD      (CONFIG_ESPORT_REWARD_AP_PASSWORD)
 #define CONFIG_MNGR_DEF_SPP         ((uint16_t)3U)
 #define CONFIG_MNGR_DEF_AP_THRESH   ((uint32_t)300U)
 #define CONFIG_MNGR_DEF_CPP         ((uint32_t)25U)

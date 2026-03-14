@@ -11,6 +11,41 @@ menu "esport-fi32 Configuration"
             (sensor contact closes to GND).  Build-time constant;
             cannot be changed at runtime.
 
+    config ESPORT_WIFI_SSID
+        string "Home Wi-Fi SSID"
+        default ""
+        help
+            SSID of the home network the device connects to as a station.
+            Leave empty to skip STA connection and use the config AP only.
+            Maximum 32 characters.  Build-time default; can be overridden
+            at runtime via the web configuration portal (stored in NVS).
+
+    config ESPORT_WIFI_PASSWORD
+        string "Home Wi-Fi Password"
+        default ""
+        help
+            WPA2 password for the home network.  Leave empty for open
+            networks.  Maximum 64 characters.  Build-time default; can be
+            overridden at runtime via the web configuration portal
+            (stored in NVS).
+
+    config ESPORT_REWARD_AP_SSID
+        string "Reward SoftAP SSID"
+        default "esport-fi32"
+        help
+            SSID of the reward access point enabled when the time counter
+            reaches the threshold.  Maximum 32 characters.  Build-time
+            default; can be overridden at runtime via the web configuration
+            portal (stored in NVS).
+
+    config ESPORT_REWARD_AP_PASSWORD
+        string "Reward SoftAP Password"
+        default "esport-fi32"
+        help
+            WPA2 password for the reward access point.  Maximum 64
+            characters.  Build-time default; can be overridden at runtime
+            via the web configuration portal (stored in NVS).
+
     config ESPORT_CONFIG_AP_SSID
         string "Config SoftAP SSID"
         default "esport-fi32_config"
