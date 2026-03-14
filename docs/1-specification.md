@@ -186,33 +186,33 @@ firmware/
 **API (C):**
 
 ```c
-esp_err_t config_manager_init(void);
+esp_err_t config_mngr_init(void);
 
 /* Getters */
-void     config_get_wifi_ssid(char *buf, size_t len);
-void     config_get_wifi_password(char *buf, size_t len);
-void     config_get_soft_ap_ssid(char *buf, size_t len);
-void     config_get_soft_ap_password(char *buf, size_t len);
-uint16_t config_get_seconds_per_pulse(void);
-uint32_t config_get_soft_ap_start_threshold_s(void);
-uint32_t config_get_centimeters_per_pulse(void);
-uint16_t config_get_idle_session_interval_s(void);
-uint16_t config_get_start_session_interval_s(void);
-uint16_t config_get_pulse_debounce_time_ms(void);
-void     config_get_timezone(char *buf, size_t len);
+void     config_mngr_wifi_ssid_get(char *buf, size_t len);
+void     config_mngr_wifi_password_get(char *buf, size_t len);
+void     config_mngr_soft_ap_ssid_get(char *buf, size_t len);
+void     config_mngr_soft_ap_password_get(char *buf, size_t len);
+uint16_t config_mngr_seconds_per_pulse_get(void);
+uint32_t config_mngr_soft_ap_start_threshold_s_get(void);
+uint32_t config_mngr_centimeters_per_pulse_get(void);
+uint16_t config_mngr_idle_session_interval_s_get(void);
+uint16_t config_mngr_start_session_interval_s_get(void);
+uint16_t config_mngr_pulse_debounce_time_ms_get(void);
+void     config_mngr_timezone_get(char *buf, size_t len);
 
 /* Setters (validate range, return ESP_ERR_INVALID_ARG on out-of-range) */
-esp_err_t config_set_wifi_ssid(const char *val);
-esp_err_t config_set_wifi_password(const char *val);
-esp_err_t config_set_soft_ap_ssid(const char *val);
-esp_err_t config_set_soft_ap_password(const char *val);
-esp_err_t config_set_seconds_per_pulse(uint16_t val);
-esp_err_t config_set_soft_ap_start_threshold_s(uint32_t val);
-esp_err_t config_set_centimeters_per_pulse(uint32_t val);
-esp_err_t config_set_idle_session_interval_s(uint16_t val);
-esp_err_t config_set_start_session_interval_s(uint16_t val);
-esp_err_t config_set_pulse_debounce_time_ms(uint16_t val);
-esp_err_t config_set_timezone(const char *val);
+esp_err_t config_mngr_wifi_ssid_set(const char *val);
+esp_err_t config_mngr_wifi_password_set(const char *val);
+esp_err_t config_mngr_soft_ap_ssid_set(const char *val);
+esp_err_t config_mngr_soft_ap_password_set(const char *val);
+esp_err_t config_mngr_seconds_per_pulse_set(uint16_t val);
+esp_err_t config_mngr_soft_ap_start_threshold_s_set(uint32_t val);
+esp_err_t config_mngr_centimeters_per_pulse_set(uint32_t val);
+esp_err_t config_mngr_idle_session_interval_s_set(uint16_t val);
+esp_err_t config_mngr_start_session_interval_s_set(uint16_t val);
+esp_err_t config_mngr_pulse_debounce_time_ms_set(uint16_t val);
+esp_err_t config_mngr_timezone_set(const char *val);
 ```
 
 **Validation rules (setters reject values outside this range with `ESP_ERR_INVALID_ARG`):**
@@ -257,7 +257,7 @@ esp_err_t config_set_timezone(const char *val);
 - Channel: follows the STA channel after STA connects; default channel 6 before STA connects.
 - Max connected stations: 4.
 - IP subnet: `192.168.5.0/24`, gateway `192.168.5.1`.
-- Enabled/disabled only via `wifi_manager_set_reward_ap(bool enable)`.
+- Enabled/disabled only via `wifi_mngr_reward_ap_set(bool enable)`.
 - NAT must be (re-)applied if NAPT was reset when the AP was toggled.
 
 **STA reconnection:**
@@ -268,16 +268,16 @@ esp_err_t config_set_timezone(const char *val);
 **API:**
 
 ```c
-esp_err_t wifi_manager_init(void);
+esp_err_t wifi_mngr_init(void);
 
 /* Called by time_counter module */
-esp_err_t wifi_manager_set_reward_ap(bool enable);
+esp_err_t wifi_mngr_reward_ap_set(bool enable);
 
 /* Status queries */
-bool     wifi_manager_is_sta_connected(void);
-bool     wifi_manager_is_reward_ap_active(void);
-uint8_t  wifi_manager_reward_ap_client_count(void);
-void     wifi_manager_get_sta_ip(char *buf, size_t len);   /* dotted-decimal or "" */
+bool     wifi_mngr_sta_is_connected(void);
+bool     wifi_mngr_reward_ap_is_active(void);
+uint8_t  wifi_mngr_reward_ap_client_count(void);
+void     wifi_mngr_sta_ip_get(char *buf, size_t len);   /* dotted-decimal or "" */
 ```
 
 ---
@@ -296,10 +296,10 @@ void     wifi_manager_get_sta_ip(char *buf, size_t len);   /* dotted-decimal or 
 **API:**
 
 ```c
-esp_err_t  time_manager_init(void);
-bool       time_manager_is_synced(void);
-time_t     time_manager_get_utc(void);          /* seconds since Unix epoch */
-void       time_manager_apply_timezone(void);   /* call after timezone config change */
+esp_err_t  time_mngr_init(void);
+bool       time_mngr_is_synced(void);
+time_t     time_mngr_utc_get(void);          /* seconds since Unix epoch */
+void       time_mngr_timezone_apply(void);   /* call after timezone config change */
 ```
 
 ---
@@ -313,7 +313,7 @@ void       time_manager_apply_timezone(void);   /* call after timezone config ch
 - Install a GPIO interrupt on the **falling edge**.
 - Implement software debounce: ignore any edge that arrives less than `pulse_debounce_time_ms` milliseconds after the previous accepted edge. Use `esp_timer_get_time()` for sub-millisecond resolution.
 - For each accepted pulse, post an `ESPORT_EVENT_PULSE` event on the app event loop (payload: `int64_t timestamp_us` of the pulse).
-- Expose `pulse_input_get_total_count()` for diagnostic use.
+- Expose `pulse_in_total_count_get()` for diagnostic use.
 
 **Notes:**
 - The GPIO ISR must be minimal (set a flag / use `esp_event_isr_post()`). All business logic is handled in event callbacks outside the ISR.
@@ -332,8 +332,8 @@ These are **build-time** constants set via `idf.py menuconfig`. They are not sto
 **API:**
 
 ```c
-esp_err_t pulse_input_init(void);
-uint32_t  pulse_input_get_total_count(void);
+esp_err_t pulse_in_init(void);
+uint32_t  pulse_in_total_count_get(void);
 ```
 
 ---
@@ -347,8 +347,8 @@ uint32_t  pulse_input_get_total_count(void);
 - Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to the counter for each.
 - Run a 1-second periodic timer (`esp_timer_create`) that decrements the counter by 1 when the reward AP is active. The counter never goes below 0.
 - Manage reward AP state:
-  - **Enable reward AP** when counter crosses `soft_ap_start_threshold_s` from below (i.e. the counter just became ≥ threshold for the first time since it was last at 0-and-AP-off). Call `wifi_manager_set_reward_ap(true)`.
-  - **Disable reward AP** when counter reaches 0 while AP is active. Call `wifi_manager_set_reward_ap(false)`.
+  - **Enable reward AP** when counter crosses `soft_ap_start_threshold_s` from below (i.e. the counter just became ≥ threshold for the first time since it was last at 0-and-AP-off). Call `wifi_mngr_reward_ap_set(true)`.
+  - **Disable reward AP** when counter reaches 0 while AP is active. Call `wifi_mngr_reward_ap_set(false)`.
   - Once the reward AP is enabled, it stays enabled until the counter reaches 0 — even if the counter temporarily drops below `soft_ap_start_threshold_s` due to the realtime decrement.
 - Post `ESPORT_EVENT_COUNTER_CHANGED` (payload: `uint32_t counter_s`) after every change (pulse or tick).
 - Post `ESPORT_EVENT_REWARD_AP_ON` and `ESPORT_EVENT_REWARD_AP_OFF` when AP transitions occur.
@@ -383,8 +383,8 @@ uint32_t  pulse_input_get_total_count(void);
 **API:**
 
 ```c
-esp_err_t time_counter_init(void);
-uint32_t  time_counter_get(void);
+esp_err_t time_ctr_init(void);
+uint32_t  time_ctr_get(void);
 ```
 
 ---
@@ -409,7 +409,7 @@ uint32_t  time_counter_get(void);
   - `end_time` = `last_pulse_time` (the time of the last received pulse, NOT current time).
   - `duration_s` = `end_time - start_time`.
   - `avg_speed_kmh` = `(pulse_count * centimeters_per_pulse) / (duration_s * 100.0) * 3.6` (converts cm/s to km/h).
-  - Post `ESPORT_EVENT_SESSION_CLOSED` with a `session_record_t` payload.
+  - Post `ESPORT_EVENT_SESSION_CLOSED` with a `session_trk_record_t` payload.
   - Reset state to idle.
 
 **Handling qualification pulses in session stats:** Pulses during the qualification window also count toward the confirmed session (pulse_count includes them all from potential_start).
@@ -419,7 +419,7 @@ uint32_t  time_counter_get(void);
 **API:**
 
 ```c
-esp_err_t session_tracker_init(void);
+esp_err_t session_trk_init(void);
 
 typedef struct {
     int64_t  start_time_utc;   /* Unix timestamp, 0 if unsynced */
@@ -427,7 +427,7 @@ typedef struct {
     uint32_t duration_s;
     uint32_t pulse_count;
     uint16_t avg_speed_kmh_x10; /* km/h * 10 to avoid float, e.g. 123 = 12.3 km/h */
-} session_record_t;
+} session_trk_record_t;
 ```
 
 ---
@@ -437,7 +437,7 @@ typedef struct {
 **File:** `session_log.c` / `session_log.h`
 
 **Responsibilities:**
-- Listen for `ESPORT_EVENT_SESSION_CLOSED` events and persist the `session_record_t` payload to NVS.
+- Listen for `ESPORT_EVENT_SESSION_CLOSED` events and persist the `session_trk_record_t` payload to NVS.
 - Implement a **ring buffer** backed by NVS:
   - Maximum entries: `SESSION_LOG_MAX_ENTRIES` = 50 (compile-time constant).
   - Keys: `slog_head` (uint16, write index), `slog_count` (uint16), and `slog_N` (blob, where N is 0–49).
@@ -452,11 +452,11 @@ typedef struct {
 
 ```c
 esp_err_t session_log_init(void);
-esp_err_t session_log_write(const session_record_t *rec);
+esp_err_t session_log_write(const session_trk_record_t *rec);
 uint16_t  session_log_count(void);
 
 /* Returns up to `max_count` sessions, newest first. Returns actual count written. */
-uint16_t  session_log_read(session_record_t *out, uint16_t max_count);
+uint16_t  session_log_read(session_trk_record_t *out, uint16_t max_count);
 ```
 
 ---
@@ -477,7 +477,7 @@ uint16_t  session_log_read(session_record_t *out, uint16_t max_count);
 **API:**
 
 ```c
-esp_err_t http_server_init(void);
+esp_err_t http_srv_init(void);
 ```
 
 ---
@@ -642,18 +642,18 @@ Aggregation rules:
 
 ```
 1. nvs_flash_init()
-2. config_manager_init()         ← load config, apply factory defaults
+2. config_mngr_init()         ← load config, apply factory defaults
 3. esp_event_loop_create_default()
-4. wifi_manager_init()           ← start AP+STA, attempt STA connect
+4. wifi_mngr_init()           ← start AP+STA, attempt STA connect
    a. if wifi_ssid is empty: skip STA, enable config AP immediately
    b. otherwise: attempt STA connection; config AP is enabled immediately on
       the first WIFI_EVENT_STA_DISCONNECTED (no retry count needed); STA
       keeps retrying every 10 s in the background until it gets an IP
-5. http_server_init()            ← start web server (reachable immediately via config AP)
-6. time_manager_init()           ← register callback: sync SNTP on STA_GOT_IP
-7. pulse_input_init()
-8. time_counter_init()
-9. session_tracker_init()
+5. http_srv_init()            ← start web server (reachable immediately via config AP)
+6. time_mngr_init()           ← register callback: sync SNTP on STA_GOT_IP
+7. pulse_in_init()
+8. time_ctr_init()
+9. session_trk_init()
 10. session_log_init()
 ```
 
@@ -686,7 +686,7 @@ ESPORT_EVENT_PULSE
   → time_counter: counter += seconds_per_pulse
       if counter >= threshold && state == IDLE:
           state = ACTIVE
-          wifi_manager_set_reward_ap(true)
+          wifi_mngr_reward_ap_set(true)
           post ESPORT_EVENT_REWARD_AP_ON
   → session_tracker: update pulse count, last_pulse_time, manage timers
 ```
@@ -699,7 +699,7 @@ ESPORT_EVENT_PULSE
   → post ESPORT_EVENT_COUNTER_CHANGED
   if counter == 0:
       state = IDLE
-      wifi_manager_set_reward_ap(false)
+      wifi_mngr_reward_ap_set(false)
       post ESPORT_EVENT_REWARD_AP_OFF
 ```
 
@@ -735,11 +735,11 @@ ESPORT_EVENT_SESSION_CLOSED
 ```
 POST /config
   → http_server validates all fields
-  → calls config_set_*() for each field
+  → calls config_mngr_*_set() for each field
   → if wifi_ssid or wifi_password changed:
       schedule wifi_manager reconnect after 1 s
   → if timezone changed:
-      time_manager_apply_timezone()
+      time_mngr_timezone_apply()
   → redirect to GET /config with success message
 ```
 
@@ -773,9 +773,9 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | -------------------- | ------ | ------------------------------ |
 | `slog_head`          | uint16 | Next write index (0–49)        |
 | `slog_count`         | uint16 | Number of valid entries (0–50) |
-| `slog_0` … `slog_49` | blob   | `session_record_t` binary      |
+| `slog_0` … `slog_49` | blob   | `session_trk_record_t` binary      |
 
-`session_record_t` binary layout (16 bytes):
+`session_trk_record_t` binary layout (16 bytes):
 
 | Field               | Offset | Type       | Notes                                   |
 | ------------------- | ------ | ---------- | --------------------------------------- |
@@ -802,7 +802,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 | `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s)   | `time_counter`    | `http_server` (status cache)      |
 | `ESPORT_EVENT_REWARD_AP_ON`     | —                        | `time_counter`    | (logging, status)                 |
 | `ESPORT_EVENT_REWARD_AP_OFF`    | —                        | `time_counter`    | (logging, status)                 |
-| `ESPORT_EVENT_SESSION_CLOSED`   | `session_record_t`       | `session_tracker` | `session_log`                     |
+| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t`       | `session_tracker` | `session_log`                     |
 | `ESPORT_EVENT_STA_CONNECTED`    | —                        | `wifi_manager`    | `time_manager` (start SNTP)       |
 | `ESPORT_EVENT_STA_DISCONNECTED` | —                        | `wifi_manager`    | (logging, status)                 |
 
@@ -810,7 +810,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 
 ## 10. Factory Defaults & NVS Recovery
 
-**Defaults applied by `config_manager_init`** when a key is absent or corrupt (see §3 table).
+**Defaults applied by `config_mngr_init`** when a key is absent or corrupt (see §3 table).
 
 **NVS corruption handling:**
 - `config_manager`: if `nvs_flash_init()` returns `ESP_ERR_NVS_NO_FREE_PAGES` or `ESP_ERR_NVS_NEW_VERSION_FOUND`, call `nvs_flash_erase()` then `nvs_flash_init()` again. All config defaults are applied.
@@ -835,7 +835,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 - All modules expose an `_init()` function that must be called from `app_main` in the order specified in §7.1.
 - No module calls another module's internals directly; all cross-module communication is via the event bus or explicit API calls.
 - All `esp_err_t` return values must be checked; use `ESP_ERROR_CHECK()` for fatal initialisation failures and `ESP_LOGE` + graceful degradation for runtime errors.
-- String inputs from HTTP POST bodies must be length-checked and null-terminated before being passed to `config_set_*()`.
+- String inputs from HTTP POST bodies must be length-checked and null-terminated before being passed to `config_mngr_*_set()`.
 - ISR functions must be declared `IRAM_ATTR` and kept minimal.
 - Log tags: one `static const char * gp_tag` per `.c` file, initialised to the module name string (e.g. `"pulse_input"`).
 - All timestamps stored and compared as UTC `time_t`; conversion to local time for display only.
@@ -851,7 +851,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 - The closing `*/` of a Doxygen block must always appear **alone on its own line**.
 - All `.h` files must follow the **`hhtemplate`** structure and all `.c` files must follow the **`cctemplate`** structure defined in `.vscode/esport-fi32.code-snippets`. This mandates: `//===` section separators, `extern "C"` with the brace on the next line, `#endif // GUARD` comment style, and a `/*** end of file ***/` marker at the bottom of every file.
 - In source files, the `//---` function separator (from `cctemplate`) must appear **after every function definition**. The closing `}` of every function is followed by a blank line, then the `//---` separator line, then a blank line, before the next function or section divider.
-- In Doxygen comments, reference **project-defined** types, functions, macros, and enum values using the `#` prefix (e.g. `#session_record_t`, `#ESPORT_EVENT_PULSE`, `#config_manager_init()`). This enables Doxygen to generate hyperlinks automatically. Use `\c` for external identifiers (ESP-IDF, C standard library, POSIX) and for plain code tokens that are not project symbols.
+- In Doxygen comments, reference **project-defined** types, functions, macros, and enum values using the `#` prefix (e.g. `#session_trk_record_t`, `#ESPORT_EVENT_PULSE`, `#config_mngr_init()`). This enables Doxygen to generate hyperlinks automatically. Use `\c` for external identifiers (ESP-IDF, C standard library, POSIX) and for plain code tokens that are not project symbols.
 
 Required Doxygen file-header format:
 

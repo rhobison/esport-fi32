@@ -41,12 +41,12 @@ extern "C"
 /**
  * \brief Configure the pulse GPIO and install the falling-edge ISR.
  *
- * Reads #config_get_pulse_debounce_time_ms() to initialise the debounce
+ * Reads #config_mngr_pulse_debounce_time_ms_get() to initialise the debounce
  * window.  Installs the GPIO ISR service if not already installed.
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
-esp_err_t pulse_input_init(void);
+esp_err_t pulse_in_init(void);
 
 /**
  * \brief Return the cumulative count of accepted (debounced) pulses.
@@ -55,7 +55,7 @@ esp_err_t pulse_input_init(void);
  *
  * \return Total accepted pulse count since boot.
  */
-uint32_t pulse_input_get_total_count(void);
+uint32_t pulse_in_total_count_get(void);
 
 #ifdef __cplusplus
 }

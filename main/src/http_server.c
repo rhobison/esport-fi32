@@ -35,7 +35,7 @@ static const char * gp_tag = "http_server";
 // Public Functions
 //==================================================================================================
 
-esp_err_t http_server_init(void)
+esp_err_t http_srv_init(void)
 {
     ESP_LOGI(gp_tag, "init (Phase 0 stub)");
     return ESP_OK;

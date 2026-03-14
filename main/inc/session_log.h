@@ -3,12 +3,12 @@
  * \brief NVS-backed session ring-buffer log public API.
  *
  * Listens for #ESPORT_EVENT_SESSION_CLOSED events and persists each
- * #session_record_t to NVS namespace \c esport_log as a circular buffer
+ * #session_trk_record_t to NVS namespace \c esport_log as a circular buffer
  * of up to #SESSION_LOG_MAX_ENTRIES (50) entries.  Old entries are
  * silently overwritten when the buffer is full.
  *
  * NVS keys: \c slog_head (uint16), \c slog_count (uint16), and
- * \c slog_0 \u2026 \c slog_49 (blobs of \c session_record_t).
+ * \c slog_0 \u2026 \c slog_49 (blobs of \c session_trk_record_t).
  *
  * On NVS corruption of the log namespace, the namespace is erased and
  * the log is reinitialised from empty.
@@ -64,7 +64,7 @@ esp_err_t session_log_init(void);
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on NVS failure.
  */
-esp_err_t session_log_write(const session_record_t * p_rec);
+esp_err_t session_log_write(const session_trk_record_t * p_rec);
 
 /**
  * \brief Return the number of valid entries currently in the ring buffer.
@@ -79,12 +79,12 @@ uint16_t session_log_count(void);
  * Fills \p p_out in reverse-chronological order (index 0 = most recent).
  * Reads \c min(session_log_count(), max_count) entries.
  *
- * \param[out] out        Destination array of #session_record_t.
+ * \param[out] out        Destination array of #session_trk_record_t.
  * \param[in]  max_count  Maximum number of entries to copy.
  *
  * \return Actual number of entries written into \p p_out.
  */
-uint16_t session_log_read(session_record_t * p_out, uint16_t max_count);
+uint16_t session_log_read(session_trk_record_t * p_out, uint16_t max_count);
 
 #ifdef __cplusplus
 }

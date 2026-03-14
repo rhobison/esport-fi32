@@ -2,8 +2,8 @@
  * \file
  * \brief SNTP time synchronisation and timezone management — Phase 0 stub.
  *
- * Full implementation is provided in Phase 3.  \c time_manager_is_synced()
- * always returns \c false; \c time_manager_get_utc() always returns 0.
+ * Full implementation is provided in Phase 3.  \c time_mngr_is_synced()
+ * always returns \c false; \c time_mngr_utc_get() always returns 0.
  *
  * \date 2026-03-14
  */
@@ -35,7 +35,7 @@ static const char * gp_tag = "time_manager";
 // Public Functions
 //==================================================================================================
 
-esp_err_t time_manager_init(void)
+esp_err_t time_mngr_init(void)
 {
     ESP_LOGI(gp_tag, "init (Phase 0 stub)");
     return ESP_OK;
@@ -43,21 +43,21 @@ esp_err_t time_manager_init(void)
 
 //--------------------------------------------------------------------------------------------------
 
-bool time_manager_is_synced(void)
+bool time_mngr_is_synced(void)
 {
     return false;
 }
 
 //--------------------------------------------------------------------------------------------------
 
-time_t time_manager_get_utc(void)
+time_t time_mngr_utc_get(void)
 {
     return (time_t)0;
 }
 
 //--------------------------------------------------------------------------------------------------
 
-void time_manager_apply_timezone(void)
+void time_mngr_timezone_apply(void)
 { /* Phase 0 stub — no-op */
 }
 

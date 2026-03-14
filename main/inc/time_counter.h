@@ -53,7 +53,7 @@ extern "C"
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
-esp_err_t time_counter_init(void);
+esp_err_t time_ctr_init(void);
 
 /**
  * \brief Return the current time counter value in seconds.
@@ -62,7 +62,7 @@ esp_err_t time_counter_init(void);
  *
  * \return Current counter value in seconds (>= 0).
  */
-uint32_t time_counter_get(void);
+uint32_t time_ctr_get(void);
 
 #ifdef __cplusplus
 }

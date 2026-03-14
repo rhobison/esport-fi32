@@ -44,12 +44,12 @@ extern "C"
 /**
  * \brief Start the HTTP server and register all URI handlers.
  *
- * Must be called after #wifi_manager_init() and #config_manager_init()
+ * Must be called after #wifi_mngr_init() and #config_mngr_init()
  * but before any HTTP request can be served.
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
-esp_err_t http_server_init(void);
+esp_err_t http_srv_init(void);
 
 #ifdef __cplusplus
 }
