@@ -15,6 +15,7 @@
 //==================================================================================================
 
 #include "http_server.h"
+#include "http_server_utils.h"
 
 #include <ctype.h>
 #include <inttypes.h>
@@ -39,41 +40,6 @@
 //==================================================================================================
 // Internal Constants/Macros/Datatypes
 //==================================================================================================
-
-/** Maximum number of bytes read from a POST /config request body. */
-#define HTTP_SRV_POST_BODY_MAX_LEN (2048U)
-
-/** Heap buffer size for JSON and CSV response bodies. */
-#define HTTP_SRV_JSON_BUF_LEN (4096U)
-
-/** Number of calendar days in the daily-aggregates window. */
-#define HTTP_SRV_DAILY_WINDOW_DAYS (31U)
-
-/**
- * Buffer size for HTML attribute value encoding used in the config GET handler.
- * Longest string field is 64 chars; worst-case HTML encoding (every char
- * becomes &quot; = 6 bytes) gives 384 bytes.  400 provides a safe margin.
- * Only ONE such buffer is kept on the stack at a time (re-used per field).
- */
-#define HTTP_SRV_ATTR_ENC_LEN (400U)
-
-/** Per-entry intermediate buffer for JSON/CSV row formatting. */
-#define HTTP_SRV_ENTRY_BUF_LEN (256U)
-
-/** Seconds per day, used for daily-window date arithmetic. */
-#define HTTP_SRV_SECS_PER_DAY (86400L)
-
-/** Maximum encoded byte length of a single URL-encoded form field value. */
-#define HTTP_SRV_FORM_VALUE_ENC_MAX_LEN (512U)
-
-/** Heap buffer size for the HTML status dashboard response. */
-#define HTTP_SRV_HTML_BUF_LEN (16384U)
-
-/** Maximum session entries fetched for the history table. */
-#define HTTP_SRV_HIST_MAX (20U)
-
-/** Maximum session entries fetched for graph aggregation. */
-#define HTTP_SRV_GRAPH_MAX (SESSION_LOG_MAX_ENTRIES)
 
 /* ---- SVG chart layout constants (used in root handler) ---- */
 
@@ -122,11 +88,6 @@ static httpd_handle_t gp_server_handle = NULL;
 //==================================================================================================
 // Internal Function Prototypes
 //==================================================================================================
-
-static void      http_srv_url_decode(const char * p_src, char * p_dst, size_t dst_len);
-static esp_err_t http_srv_form_field_get(const char * p_body, const char * p_key, char * p_out,
-    size_t out_len);
-static void      http_srv_html_attr_encode(const char * p_src, char * p_dst, size_t dst_len);
 
 static esp_err_t http_srv_root_get_handler(httpd_req_t * p_req);
 static esp_err_t http_srv_config_get_handler(httpd_req_t * p_req);
@@ -221,198 +182,6 @@ esp_err_t http_srv_init(void)
 //==================================================================================================
 // Private Functions
 //==================================================================================================
-
-/**
- * \brief Decode a URL-encoded string into \p p_dst.
- *
- * Converts '+' to space and '%XX' hex-escape sequences to their byte values.
- * The output is always NUL-terminated and never written past \p dst_len bytes
- * (including the terminator).
- *
- * \param[in]  p_src   NUL-terminated URL-encoded source string.
- * \param[out] p_dst   Destination buffer.
- * \param[in]  dst_len Total size of \p p_dst in bytes including the NUL terminator.
- */
-static void http_srv_url_decode(const char * p_src, char * p_dst, size_t dst_len)
-{
-    if ((NULL == p_src) || (NULL == p_dst) || (0U == dst_len))
-    {
-        return;
-    }
-
-    size_t pos = 0U;
-
-    while (('\0' != *p_src) && (pos < (dst_len - 1U)))
-    {
-        if ('+' == *p_src)
-        {
-            p_dst[pos] = ' ';
-            pos++;
-            p_src++;
-        }
-        else if (('%' == *p_src) && (0 != isxdigit((unsigned char)p_src[1])) &&
-                 (0 != isxdigit((unsigned char)p_src[2])))
-        {
-            char hex[3] = { p_src[1], p_src[2], '\0' };
-            p_dst[pos]  = (char)strtol(hex, NULL, 16);
-            pos++;
-            p_src += 3;
-        }
-        else
-        {
-            p_dst[pos] = *p_src;
-            pos++;
-            p_src++;
-        }
-    }
-
-    p_dst[pos] = '\0';
-}
-
-//--------------------------------------------------------------------------------------------------
-
-/**
- * \brief Look up a URL-encoded form field by key and decode its value.
- *
- * Searches \p p_body for "key=value" (fields separated by '&'), URL-decodes
- * the value into \p p_out (bounded by \p out_len), and NUL-terminates the
- * result.
- *
- * \param[in]  p_body   NUL-terminated URL-encoded form body string.
- * \param[in]  p_key    NUL-terminated field name to search for.
- * \param[out] p_out    Destination buffer for the decoded value.
- * \param[in]  out_len  Size of \p p_out in bytes including the NUL terminator.
- *
- * \return \c ESP_OK when the key was found and decoded,
- *         \c ESP_ERR_NOT_FOUND when the key is absent.
- */
-static esp_err_t http_srv_form_field_get(const char * p_body, const char * p_key, char * p_out,
-    size_t out_len)
-{
-    if ((NULL == p_body) || (NULL == p_key) || (NULL == p_out) || (0U == out_len))
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    size_t       key_len = strlen(p_key);
-    const char * p_pos   = p_body;
-
-    while (NULL != p_pos)
-    {
-        if ((0 == strncmp(p_pos, p_key, key_len)) && ('=' == p_pos[key_len]))
-        {
-            const char * p_val_start = p_pos + key_len + 1U;
-            const char * p_amp       = strchr(p_val_start, '&');
-            size_t raw_len = (NULL == p_amp) ? strlen(p_val_start) : (size_t)(p_amp - p_val_start);
-
-            /* Cap the raw length to protect the shared static decode buffer. */
-            static char raw[HTTP_SRV_FORM_VALUE_ENC_MAX_LEN];
-            if (raw_len > sizeof(raw) - 1U)
-            {
-                raw_len = sizeof(raw) - 1U;
-            }
-            memcpy(raw, p_val_start, raw_len);
-            raw[raw_len] = '\0';
-
-            http_srv_url_decode(raw, p_out, out_len);
-            return ESP_OK;
-        }
-
-        p_pos = strchr(p_pos, '&');
-        if (NULL != p_pos)
-        {
-            p_pos++; /* skip the '&' separator */
-        }
-    }
-
-    p_out[0] = '\0';
-    return ESP_ERR_NOT_FOUND;
-}
-
-//--------------------------------------------------------------------------------------------------
-
-/**
- * \brief HTML-encode a string value for safe insertion into a double-quoted attribute.
- *
- * Replaces \c & with \c &amp;, \c " with \c &quot;, \c < with \c &lt;,
- * and \c > with \c &gt;.  The output is NUL-terminated and never written
- * past \p dst_len bytes.
- *
- * \param[in]  p_src   NUL-terminated plain text source string.
- * \param[out] p_dst   Destination buffer.
- * \param[in]  dst_len Total size of \p p_dst in bytes including the NUL terminator.
- */
-static void http_srv_html_attr_encode(const char * p_src, char * p_dst, size_t dst_len)
-{
-    if ((NULL == p_src) || (NULL == p_dst) || (0U == dst_len))
-    {
-        return;
-    }
-
-    size_t pos = 0U;
-
-    while (('\0' != *p_src) && (pos < (dst_len - 1U)))
-    {
-        if ('&' == *p_src)
-        {
-            if ((pos + 5U) < dst_len)
-            {
-                memcpy(p_dst + pos, "&amp;", 5U);
-                pos += 5U;
-            }
-            else
-            {
-                break;
-            }
-        }
-        else if ('"' == *p_src)
-        {
-            if ((pos + 6U) < dst_len)
-            {
-                memcpy(p_dst + pos, "&quot;", 6U);
-                pos += 6U;
-            }
-            else
-            {
-                break;
-            }
-        }
-        else if ('<' == *p_src)
-        {
-            if ((pos + 4U) < dst_len)
-            {
-                memcpy(p_dst + pos, "&lt;", 4U);
-                pos += 4U;
-            }
-            else
-            {
-                break;
-            }
-        }
-        else if ('>' == *p_src)
-        {
-            if ((pos + 4U) < dst_len)
-            {
-                memcpy(p_dst + pos, "&gt;", 4U);
-                pos += 4U;
-            }
-            else
-            {
-                break;
-            }
-        }
-        else
-        {
-            p_dst[pos] = *p_src;
-            pos++;
-        }
-        p_src++;
-    }
-
-    p_dst[pos] = '\0';
-}
-
-//--------------------------------------------------------------------------------------------------
 
 /**
  * \brief Handler for \c GET /.

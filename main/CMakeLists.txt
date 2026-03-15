@@ -22,4 +22,7 @@ idf_component_register(
         "src/session_tracker.c"
         "src/session_log.c"
         "src/http_server.c"
+        "src/http_server_utils.c"
 )
+
+target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)
