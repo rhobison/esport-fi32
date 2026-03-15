@@ -57,6 +57,24 @@ esp_err_t pulse_in_init(void);
  */
 uint32_t pulse_in_total_count_get(void);
 
+/**
+ * \brief Return the count of pulses accepted by the ISR but dropped because
+ * the event loop queue was full.
+ *
+ * A non-zero value means the system cannot keep up; increase
+ * CONFIG_ESP_SYSTEM_EVENT_QUEUE_SIZE if this grows continuously.
+ *
+ * \return Dropped pulse count since boot.
+ */
+uint32_t pulse_in_dropped_count_get(void);
+
+/**
+ * \brief Return the last error code from a failed esp_event_isr_post call.
+ *
+ * \return ESP_OK if no post has ever failed, otherwise the last failure code.
+ */
+esp_err_t pulse_in_last_post_err_get(void);
+
 #ifdef __cplusplus
 }
 #endif

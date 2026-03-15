@@ -45,8 +45,10 @@ typedef enum
     /**
      * \brief A valid debounced pulse received from the bike sensor.
      *
-     * Payload: \c int64_t timestamp in microseconds
-     * (\c esp_timer_get_time() value at acceptance).
+     * No payload (NULL). The ISR inline payload is limited to 4 bytes; an
+     * int64_t µs timestamp does not fit. Handlers derive timing by calling
+     * esp_timer_get_time() directly — the sub-ms handler latency is negligible
+     * for all second-resolution consumers.
      */
     ESPORT_EVENT_PULSE = 0,
 
@@ -58,7 +60,7 @@ typedef enum
     ESPORT_EVENT_COUNTER_CHANGED = 1,
 
     /**
-     * \brief The reward Soft AP was enabled (counter crossed the threshold).
+     * \brief The reward Soft AP was enabled (session duration reached the threshold).
      *
      * No payload.
      */
@@ -72,25 +74,33 @@ typedef enum
     ESPORT_EVENT_REWARD_AP_OFF = 3,
 
     /**
+     * \brief An exercise session is confirmed open (QUALIFYING\u2192ACTIVE transition).
+     *
+     * No payload.  Posted by \c session_tracker once the qualification window
+     * (#start_session_interval_s) elapses without a disqualifying idle gap.
+     */
+    ESPORT_EVENT_SESSION_OPENED = 4,
+
+    /**
      * \brief An exercise session closed after the idle timeout.
      *
-     * Payload: #session_record_t copied by value into event data.
+     * Payload: #session_trk_record_t copied by value into event data.
      */
-    ESPORT_EVENT_SESSION_CLOSED = 4,
+    ESPORT_EVENT_SESSION_CLOSED = 5,
 
     /**
      * \brief STA interface obtained an IP address (connected to home network).
      *
      * No payload.
      */
-    ESPORT_EVENT_STA_CONNECTED = 5,
+    ESPORT_EVENT_STA_CONNECTED = 6,
 
     /**
      * \brief STA interface lost its connection or IP address.
      *
      * No payload.
      */
-    ESPORT_EVENT_STA_DISCONNECTED = 6,
+    ESPORT_EVENT_STA_DISCONNECTED = 7,
 } esport_event_id_t;
 
 //==================================================================================================

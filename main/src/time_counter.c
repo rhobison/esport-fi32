@@ -36,10 +36,12 @@
  */
 typedef enum time_ctr_state_tag
 {
-    /** Counter is below the threshold; reward AP is off; tick timer is stopped. */
-    TIME_CTR_STATE_IDLE   = 0,
-    /** Counter is at or above the threshold; reward AP is on; tick timer is running. */
-    TIME_CTR_STATE_ACTIVE = 1,
+    /** No active session; reward AP off; counter is 0. */
+    TIME_CTR_STATE_IDLE      = 0,
+    /** Session confirmed open; threshold timer running; counter accumulating from pulses. */
+    TIME_CTR_STATE_SESSION   = 1,
+    /** Session has been active for soft_ap_start_threshold_s; reward AP on; tick decrementing. */
+    TIME_CTR_STATE_AP_ACTIVE = 2,
 } time_ctr_state_t;
 
 //==================================================================================================
@@ -61,12 +63,20 @@ static time_ctr_state_t g_state = TIME_CTR_STATE_IDLE;
 /** Handle for the 1-second periodic decrement timer (created in #time_ctr_init). */
 static esp_timer_handle_t gp_tick_timer = NULL;
 
+/** Handle for the one-shot threshold timer that fires after #soft_ap_start_threshold_s seconds. */
+static esp_timer_handle_t gp_threshold_timer = NULL;
+
 //==================================================================================================
 // Internal Function Prototypes
 //==================================================================================================
 
 static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, int32_t event_id,
     void * p_event_data);
+static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base_t base,
+    int32_t event_id, void * p_event_data);
+static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base_t base,
+    int32_t event_id, void * p_event_data);
+static void time_ctr_threshold_cb(void * p_arg);
 static void time_ctr_tick_cb(void * p_arg);
 
 //==================================================================================================
@@ -75,17 +85,31 @@ static void time_ctr_tick_cb(void * p_arg);
 
 esp_err_t time_ctr_init(void)
 {
-    const esp_timer_create_args_t timer_args = {
+    const esp_timer_create_args_t tick_args = {
         .callback        = time_ctr_tick_cb,
         .arg             = NULL,
         .dispatch_method = ESP_TIMER_TASK,
         .name            = "time_ctr_tick",
     };
 
-    esp_err_t ret = esp_timer_create(&timer_args, &gp_tick_timer);
+    esp_err_t ret = esp_timer_create(&tick_args, &gp_tick_timer);
     if (ESP_OK != ret)
     {
-        ESP_LOGE(gp_tag, "esp_timer_create failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(gp_tag, "esp_timer_create (tick) failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    const esp_timer_create_args_t threshold_args = {
+        .callback        = time_ctr_threshold_cb,
+        .arg             = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name            = "time_ctr_thresh",
+    };
+
+    ret = esp_timer_create(&threshold_args, &gp_threshold_timer);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_timer_create (threshold) failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -93,7 +117,25 @@ esp_err_t time_ctr_init(void)
         NULL);
     if (ESP_OK != ret)
     {
-        ESP_LOGE(gp_tag, "esp_event_handler_register failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(gp_tag, "esp_event_handler_register (pulse) failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_SESSION_OPENED,
+        time_ctr_session_opened_handler, NULL);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_event_handler_register (session_opened) failed: %s",
+            esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_SESSION_CLOSED,
+        time_ctr_session_closed_handler, NULL);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_event_handler_register (session_closed) failed: %s",
+            esp_err_to_name(ret));
         return ret;
     }
 
@@ -120,14 +162,15 @@ uint32_t time_ctr_get(void)
 /**
  * \brief ESP event loop handler called for each accepted debounced pulse.
  *
- * Adds #config_mngr_seconds_per_pulse_get() credits to #g_counter_s and
- * initiates an IDLE→ACTIVE transition if the threshold is crossed for the
- * first time since the counter was last at zero.
+ * Adds #config_mngr_seconds_per_pulse_get() credits to #g_counter_s when the
+ * state machine is in #TIME_CTR_STATE_SESSION or #TIME_CTR_STATE_AP_ACTIVE.
+ * Pulses received in #TIME_CTR_STATE_IDLE (before a session is confirmed open)
+ * are ignored.
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
  * \param[in] event_id       Event identifier (always #ESPORT_EVENT_PULSE).
- * \param[in] p_event_data   Pointer to the \c int64_t pulse timestamp payload.
+ * \param[in] p_event_data   Unused (no payload).
  */
 static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, int32_t event_id,
     void * p_event_data)
@@ -137,39 +180,172 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
     (void)event_id;
     (void)p_event_data;
 
-    uint16_t spp       = config_mngr_seconds_per_pulse_get();
-    uint32_t threshold = config_mngr_soft_ap_start_threshold_s_get();
+    uint16_t spp = config_mngr_seconds_per_pulse_get();
 
     portENTER_CRITICAL(&g_spinlock);
-    g_counter_s += (uint32_t)spp;
-    uint32_t counter_snapshot = g_counter_s;
-    bool     activate         = (TIME_CTR_STATE_IDLE == g_state) && (counter_snapshot >= threshold);
-    if (activate)
+    bool b_credit = (TIME_CTR_STATE_SESSION == g_state) || (TIME_CTR_STATE_AP_ACTIVE == g_state);
+    if (b_credit)
     {
-        g_state = TIME_CTR_STATE_ACTIVE;
+        g_counter_s += (uint32_t)spp;
+    }
+    uint32_t counter_snapshot = g_counter_s;
+    portEXIT_CRITICAL(&g_spinlock);
+
+    if (b_credit)
+    {
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_snapshot,
+            sizeof(counter_snapshot), 0U);
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief ESP event loop handler called when an exercise session is confirmed open.
+ *
+ * Transitions from #TIME_CTR_STATE_IDLE to #TIME_CTR_STATE_SESSION and starts
+ * the one-shot threshold timer for #config_mngr_soft_ap_start_threshold_s_get()
+ * seconds.  When the timer fires, the reward AP is enabled.  Events received
+ * in non-IDLE states are silently ignored (AP already active or session already
+ * in progress).
+ *
+ * \param[in] p_handler_arg  Unused context pointer.
+ * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
+ * \param[in] event_id       Event identifier (always #ESPORT_EVENT_SESSION_OPENED).
+ * \param[in] p_event_data   Unused (no payload).
+ */
+static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base_t base,
+    int32_t event_id, void * p_event_data)
+{
+    (void)p_handler_arg;
+    (void)base;
+    (void)event_id;
+    (void)p_event_data;
+
+    portENTER_CRITICAL(&g_spinlock);
+    bool b_start = (TIME_CTR_STATE_IDLE == g_state);
+    if (b_start)
+    {
+        g_state = TIME_CTR_STATE_SESSION;
     }
     portEXIT_CRITICAL(&g_spinlock);
 
-    if (activate)
+    if (!b_start)
     {
-        esp_err_t ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
-        if (ESP_OK != ret)
-        {
-            ESP_LOGE(gp_tag, "esp_timer_start_periodic failed: %s", esp_err_to_name(ret));
-        }
-
-        ret = wifi_mngr_reward_ap_set(true);
-        if (ESP_OK != ret)
-        {
-            ESP_LOGW(gp_tag, "wifi_mngr_reward_ap_set(true) failed: %s", esp_err_to_name(ret));
-        }
-
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
-        ESP_LOGI(gp_tag, "IDLE→ACTIVE: reward AP on, counter = %" PRIu32 " s", counter_snapshot);
+        return; /* Already in SESSION or AP_ACTIVE — ignore. */
     }
 
-    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_snapshot,
-        sizeof(counter_snapshot), 0U);
+    uint32_t threshold    = config_mngr_soft_ap_start_threshold_s_get();
+    uint64_t threshold_us = (uint64_t)threshold * 1000000ULL;
+
+    if (0U == threshold)
+    {
+        /* Threshold of zero means enable AP immediately. */
+        time_ctr_threshold_cb(NULL);
+    }
+    else
+    {
+        esp_err_t ret = esp_timer_start_once(gp_threshold_timer, threshold_us);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGE(gp_tag, "esp_timer_start_once failed: %s", esp_err_to_name(ret));
+            portENTER_CRITICAL(&g_spinlock);
+            g_state = TIME_CTR_STATE_IDLE;
+            portEXIT_CRITICAL(&g_spinlock);
+        }
+    }
+
+    ESP_LOGI(gp_tag, "IDLE→SESSION: session opened, AP threshold %" PRIu32 "s", threshold);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief ESP event loop handler called when an exercise session closes.
+ *
+ * If in #TIME_CTR_STATE_SESSION (before the threshold timer has fired), the
+ * threshold timer is cancelled, the counter is reset to zero, and the state
+ * returns to #TIME_CTR_STATE_IDLE.  If in #TIME_CTR_STATE_AP_ACTIVE the close
+ * is silently ignored — the reward AP continues until the counter drains.
+ *
+ * \param[in] p_handler_arg  Unused context pointer.
+ * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
+ * \param[in] event_id       Event identifier (always #ESPORT_EVENT_SESSION_CLOSED).
+ * \param[in] p_event_data   Unused (no payload consumed here).
+ */
+static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base_t base,
+    int32_t event_id, void * p_event_data)
+{
+    (void)p_handler_arg;
+    (void)base;
+    (void)event_id;
+    (void)p_event_data;
+
+    portENTER_CRITICAL(&g_spinlock);
+    bool b_cancel = (TIME_CTR_STATE_SESSION == g_state);
+    if (b_cancel)
+    {
+        g_state     = TIME_CTR_STATE_IDLE;
+        g_counter_s = 0U;
+    }
+    portEXIT_CRITICAL(&g_spinlock);
+
+    if (b_cancel)
+    {
+        (void)esp_timer_stop(gp_threshold_timer);
+        uint32_t zero = 0U;
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &zero,
+            sizeof(zero), 0U);
+        ESP_LOGI(gp_tag, "SESSION→IDLE: session closed before threshold, counter reset");
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief One-shot timer callback that fires after #soft_ap_start_threshold_s seconds.
+ *
+ * Transitions from #TIME_CTR_STATE_SESSION to #TIME_CTR_STATE_AP_ACTIVE, starts
+ * the 1-second decrement timer, and enables the reward AP via
+ * #wifi_mngr_reward_ap_set().  If the state is no longer SESSION when the timer
+ * fires (e.g. session closed just before expiry), the callback exits without
+ * activating the AP.
+ *
+ * \param[in] p_arg  Unused context pointer passed by the timer subsystem.
+ */
+static void time_ctr_threshold_cb(void * p_arg)
+{
+    (void)p_arg;
+
+    portENTER_CRITICAL(&g_spinlock);
+    bool b_activate = (TIME_CTR_STATE_SESSION == g_state);
+    if (b_activate)
+    {
+        g_state = TIME_CTR_STATE_AP_ACTIVE;
+    }
+    uint32_t counter_snapshot = g_counter_s;
+    portEXIT_CRITICAL(&g_spinlock);
+
+    if (!b_activate)
+    {
+        return; /* State changed before timer fired — session likely closed. */
+    }
+
+    esp_err_t ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_timer_start_periodic failed: %s", esp_err_to_name(ret));
+    }
+
+    ret = wifi_mngr_reward_ap_set(true);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGW(gp_tag, "wifi_mngr_reward_ap_set(true) failed: %s", esp_err_to_name(ret));
+    }
+
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
+    ESP_LOGI(gp_tag, "SESSION→AP_ACTIVE: reward AP on, counter = %" PRIu32 " s",
+        counter_snapshot);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -213,7 +389,7 @@ static void time_ctr_tick_cb(void * p_arg)
         }
 
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_OFF, NULL, 0U, 0U);
-        ESP_LOGI(gp_tag, "ACTIVE→IDLE: reward AP off, counter reached 0");
+        ESP_LOGI(gp_tag, "AP_ACTIVE→IDLE: reward AP off, counter reached 0");
     }
 }
 
