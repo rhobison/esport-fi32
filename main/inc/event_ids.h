@@ -55,42 +55,42 @@ typedef enum
      *
      * Payload: \c uint32_t current counter value in seconds.
      */
-    ESPORT_EVENT_COUNTER_CHANGED,
+    ESPORT_EVENT_COUNTER_CHANGED = 1,
 
     /**
      * \brief The reward Soft AP was enabled (counter crossed the threshold).
      *
      * No payload.
      */
-    ESPORT_EVENT_REWARD_AP_ON,
+    ESPORT_EVENT_REWARD_AP_ON = 2,
 
     /**
      * \brief The reward Soft AP was disabled (counter reached zero).
      *
      * No payload.
      */
-    ESPORT_EVENT_REWARD_AP_OFF,
+    ESPORT_EVENT_REWARD_AP_OFF = 3,
 
     /**
      * \brief An exercise session closed after the idle timeout.
      *
      * Payload: #session_record_t copied by value into event data.
      */
-    ESPORT_EVENT_SESSION_CLOSED,
+    ESPORT_EVENT_SESSION_CLOSED = 4,
 
     /**
      * \brief STA interface obtained an IP address (connected to home network).
      *
      * No payload.
      */
-    ESPORT_EVENT_STA_CONNECTED,
+    ESPORT_EVENT_STA_CONNECTED = 5,
 
     /**
      * \brief STA interface lost its connection or IP address.
      *
      * No payload.
      */
-    ESPORT_EVENT_STA_DISCONNECTED,
+    ESPORT_EVENT_STA_DISCONNECTED = 6,
 } esport_event_id_t;
 
 //==================================================================================================

@@ -89,15 +89,18 @@ esp_err_t pulse_in_init(void)
         return ret;
     }
 
+    /* Set debounce window BEFORE adding the ISR handler so the first edge is
+       never accepted with g_debounce_us == 0 (which would record g_last_accepted_us
+       at that moment and then filter any real pulse arriving within 200 ms). */
+    uint16_t debounce_ms = config_mngr_pulse_debounce_time_ms_get();
+    g_debounce_us        = (uint64_t)debounce_ms * (uint64_t)PULSE_IN_MS_TO_US;
+
     ret = gpio_isr_handler_add((gpio_num_t)CONFIG_ESPORT_PULSE_GPIO, pulse_in_gpio_isr, NULL);
     if (ESP_OK != ret)
     {
         ESP_LOGE(gp_tag, "gpio_isr_handler_add failed: %s", esp_err_to_name(ret));
         return ret;
     }
-
-    uint16_t debounce_ms = config_mngr_pulse_debounce_time_ms_get();
-    g_debounce_us        = (uint64_t)debounce_ms * (uint64_t)PULSE_IN_MS_TO_US;
 
     ESP_LOGI(gp_tag, "init complete — GPIO %d, debounce %u ms", CONFIG_ESPORT_PULSE_GPIO,
         (unsigned)debounce_ms);
