@@ -487,9 +487,8 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
     }
 
     /* soft_ap_dec_time_above_threshold_kbps (uint16, range 0–65535) */
-    if (ESP_OK ==
-        http_srv_form_field_get(body, "soft_ap_dec_time_above_threshold_kbps", num_str,
-            sizeof(num_str)))
+    if (ESP_OK == http_srv_form_field_get(body, "soft_ap_dec_time_above_threshold_kbps", num_str,
+                      sizeof(num_str)))
     {
         char *        endptr;
         unsigned long val = strtoul(num_str, &endptr, 10);
@@ -508,9 +507,8 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
     }
 
     /* soft_ap_idle_throughput_timeout_s (uint16, range 0–65535) */
-    if (ESP_OK ==
-        http_srv_form_field_get(body, "soft_ap_idle_throughput_timeout_s", num_str,
-            sizeof(num_str)))
+    if (ESP_OK == http_srv_form_field_get(body, "soft_ap_idle_throughput_timeout_s", num_str,
+                      sizeof(num_str)))
     {
         char *        endptr;
         unsigned long val = strtoul(num_str, &endptr, 10);

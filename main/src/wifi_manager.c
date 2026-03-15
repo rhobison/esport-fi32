@@ -145,11 +145,12 @@ esp_err_t wifi_mngr_init(void)
         return ret;
     }
 
-    /* Set WiFi to AP+STA mode. */
-    ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    /* Start in STA-only mode; AP interface is brought up on demand by
+     * wifi_mngr_config_ap_enable() or wifi_mngr_reward_ap_set(true). */
+    ret = esp_wifi_set_mode(WIFI_MODE_STA);
     if (ESP_OK != ret)
     {
-        ESP_LOGE(gp_tag, "esp_wifi_set_mode(APSTA) failed: 0x%x", ret);
+        ESP_LOGE(gp_tag, "esp_wifi_set_mode(STA) failed: 0x%x", ret);
         return ret;
     }
 
@@ -212,6 +213,14 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
 
         config_mngr_soft_ap_ssid_get(ap_ssid, sizeof(ap_ssid));
         config_mngr_soft_ap_password_get(ap_password, sizeof(ap_password));
+
+        /* Bring the AP interface up if it is not already running. */
+        ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGE(gp_tag, "esp_wifi_set_mode(APSTA) for reward AP failed: 0x%x", ret);
+            return ret;
+        }
 
         /* Stop DHCP server before changing IP configuration. */
         esp_netif_dhcps_stop(gp_netif_ap);
@@ -290,8 +299,15 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
 
         gb_reward_ap_active = false;
         /* Reset throughput measurement baseline so the next enable starts clean. */
-        g_prev_rx_bytes = 0U;
-        g_prev_tx_bytes = 0U;
+        g_prev_rx_bytes     = 0U;
+        g_prev_tx_bytes     = 0U;
+
+        if (!gb_config_ap_active)
+        {
+            /* No AP needed at all — revert to STA-only mode. */
+            (void)esp_wifi_set_mode(WIFI_MODE_STA);
+        }
+
         ESP_LOGI(gp_tag, "Reward AP disabled");
     }
 
@@ -432,6 +448,14 @@ static esp_err_t wifi_mngr_config_ap_enable(void)
         return ESP_OK;
     }
 
+    /* Bring the AP interface up if it is not already running. */
+    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_wifi_set_mode(APSTA) for config AP failed: 0x%x", ret);
+        return ret;
+    }
+
     wifi_config_t ap_cfg;
     memset(&ap_cfg, 0, sizeof(ap_cfg));
 
@@ -443,7 +467,7 @@ static esp_err_t wifi_mngr_config_ap_enable(void)
     ap_cfg.ap.max_connection = WIFI_MNGR_CONFIG_AP_MAX_STA;
     ap_cfg.ap.authmode = (ap_cfg.ap.password[0] != '\0') ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
-    esp_err_t ret = esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+    ret = esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
     if (ESP_OK != ret)
     {
         ESP_LOGE(gp_tag, "esp_wifi_set_config(AP) for config AP failed: 0x%x", ret);
@@ -472,19 +496,13 @@ static esp_err_t wifi_mngr_config_ap_disable(void)
         return ESP_OK;
     }
 
-    /* Only clear config-AP flag; if reward AP is inactive the AP interface
-     * will simply broadcast nothing. The reward AP manages its own config. */
     gb_config_ap_active = false;
 
     if (!gb_reward_ap_active)
     {
-        /* Hide the AP by setting an empty SSID. */
-        wifi_config_t ap_cfg;
-        memset(&ap_cfg, 0, sizeof(ap_cfg));
-        ap_cfg.ap.ssid_len       = 0U;
-        ap_cfg.ap.max_connection = 0U;
-        ap_cfg.ap.authmode       = WIFI_AUTH_OPEN;
-        esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
+        /* No AP needed at all — revert to STA-only mode so the AP interface
+         * stops transmitting entirely (no ESP_XXXXXX default beacon). */
+        (void)esp_wifi_set_mode(WIFI_MODE_STA);
     }
 
     ESP_LOGI(gp_tag, "Config AP disabled");

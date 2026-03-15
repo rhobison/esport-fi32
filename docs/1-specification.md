@@ -533,7 +533,7 @@ Serves a self-contained HTML page (embedded as a C string literal or embedded fi
 | System           | Current local time, NTP sync status, uptime                                                             |
 | Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status                                   |
 | Reward AP        | SSID, active/inactive, connected clients count                                                          |
-| Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled, countdown status (Decrementing / ⏸ Paused (low traffic)) |
+| Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled, reward AP throughput (kbps), countdown status (Decrementing / ⏸ Paused (low traffic)) |
 | Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average) |
 | Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count        |
 | Session Graphs   | Bar charts with day-of-month on X axis: average speed and total session duration per day                |
@@ -596,6 +596,7 @@ Returns JSON:
   "session_duration_s": 5400,
   "session_pulse_count": 1800,
   "live_speed_kmh_x10": 123,
+  "reward_ap_throughput_kbps": 42,
   "countdown_paused": false
 }
 ```
