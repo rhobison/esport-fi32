@@ -77,7 +77,7 @@ Establish the complete file structure, all header files, the event bus definitio
    - Add Doxygen file headers in each `.c` file using `\\file`, `\\brief`, and `\\date` (no filename argument on `\\file`).
    - Single-line `gp_tag` comment must not use `\\brief`.
    - File structure must follow the `cctemplate` from `.vscode/esport-fi32.code-snippets`: `//===` section separators, `/*** end of file ***/` footer.
-   - The `//---` function separator must follow every function definition's closing `}`.
+   - The `//--------------------------------------------------------------------------------------------------` function separator must follow every function definition's closing `}`.
    - Apply BARR-C:2018 variable naming: `p_` for pointer parameters, `b_` for boolean parameters, `gp_` for the file-scope `TAG` pointer.
    - Apply Yoda notation for all `==` and `!=` comparisons (constant on the left).
    - Enclose every `#define` replacement value in parentheses: `#define FOO (123)`, `#define BAR ("text")`.
@@ -99,7 +99,7 @@ Establish the complete file structure, all header files, the event bus definitio
 - [ ] Single-line Doxygen comments do not use `\\brief`.
 - [ ] Multi-line Doxygen `\\brief` is on the second line; one blank `*` line follows; `*/` is alone on its own line.
 - [ ] All `.h` files match the `hhtemplate` structure; all `.c` files match the `cctemplate` structure from `.vscode/esport-fi32.code-snippets`.
-- [ ] Every function definition in `.c` files is followed by a `//---` separator line.
+- [ ] Every function definition in `.c` files is followed by a `//--------------------------------------------------------------------------------------------------` separator line.
 - [ ] BARR-C:2018 variable naming applied: all variable names lowercase; pointer params `p_`, boolean params `b_`, file-scope pointer `gp_tag`.
 - [ ] All `==` and `!=` comparisons use Yoda notation (constant on the left).
 - [ ] Every `#define` replacement value is enclosed in parentheses.
@@ -595,7 +595,7 @@ Extract the three internal helper functions and all shared buffer-size constants
 
 2. **Create `main/src/http_server_utils.c`**:
    - Move the three helper implementations verbatim from `http_server.c`; remove `static` from each definition.
-   - Follow `cctemplate` structure: Doxygen file header (`\file`, `\brief`, `\date`), `gp_tag`, `//===` section separators, `//---` after every function `}`, `/*** end of file ***/` footer.
+   - Follow `cctemplate` structure: Doxygen file header (`\file`, `\brief`, `\date`), `gp_tag`, `//===` section separators, `//--------------------------------------------------------------------------------------------------` after every function `}`, `/*** end of file ***/` footer.
    - Include `http_server_utils.h` plus required system headers (`<ctype.h>`, `<stdlib.h>`, `<string.h>`, `esp_err.h`).
 
 3. **Update `main/src/http_server.c`**:
