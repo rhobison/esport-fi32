@@ -1249,17 +1249,20 @@ else:
 
 2. **`main/src/http_server_api.c`**:
    - In the `/api/status` JSON response, append `"countdown_paused": <true|false>` using `time_ctr_is_paused()`.  The field must always be present, including when the reward AP is inactive (value will be `false`).
+   - Append `"reward_ap_throughput_kbps": <value>` using `wifi_mngr_reward_ap_throughput_kbps()`.  The field must always be present; `0` when the reward AP is inactive.
 
 3. **`main/src/http_server_dashboard.c`**:
-   - In the countdown section of the dashboard HTML, add:
+   - In the Exercise Counter section of the dashboard HTML, add a "Traffic" line displaying the live reward AP throughput in kbps, e.g. `<span id="ap-throughput">0</span> kbps` (visible at all times).
+   - In the countdown section, add:
      ```html
      <span id="pause-indicator" style="display:none;">⏸ Paused (low traffic)</span>
      ```
-   - In the dashboard's JavaScript auto-refresh handler (polling `/api/status`), add:
+   - In the dashboard's JavaScript auto-refresh handler (polling `/api/status`), update the throughput display:
      ```js
-     document.getElementById('pause-indicator').style.display =
-         data.countdown_paused ? 'inline' : 'none';
+     var t = document.getElementById('ap-throughput');
+     if (t) t.textContent = data.reward_ap_throughput_kbps;
      ```
+   - Also update the pause/decrement indicator visibility using `data.countdown_paused`.
 
 **Acceptance Criteria**
 
@@ -1268,6 +1271,9 @@ else:
 - [ ] Submitting values `0` and `65535` for both fields saves and reflects correctly on reload.
 - [ ] Submitting a value of `65536` or a non-numeric string returns HTTP 400.
 - [ ] `/api/status` JSON contains `"countdown_paused"` key in all states.
+- [ ] `/api/status` JSON contains `"reward_ap_throughput_kbps"` key in all states (0 when AP inactive).
+- [ ] Dashboard Exercise Counter section shows current reward AP throughput in kbps.
+- [ ] Dashboard throughput display updates on each auto-refresh cycle.
 - [ ] Dashboard pause indicator is hidden when `countdown_paused` is `false`.
 - [ ] Dashboard pause indicator shows "⏸ Paused (low traffic)" when `countdown_paused` is `true`.
 - [ ] Dashboard auto-refresh interval is unchanged.
