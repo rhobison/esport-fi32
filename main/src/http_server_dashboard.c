@@ -96,6 +96,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
 
     if ((NULL == p_buf) || (NULL == p_hist) || (NULL == p_graph) || (NULL == p_bins))
     {
+        ESP_LOGE(gp_tag, "heap alloc failed");
         free(p_buf);
         free(p_hist);
         free(p_graph);
