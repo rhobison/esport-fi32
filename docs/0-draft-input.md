@@ -1,3 +1,5 @@
+# Initial spec draft
+
 The esport-32fi project consists of an ESP32 C6 WiFi board that both creates a soft AP and connects to an existing WiFi network.
 
 The goal of the project is to limit internet access to kids in the following way:
@@ -22,3 +24,8 @@ When the ESP32 is not able to connect to `wifi_ssid`, it should enable a soft AP
     - `seconds_per_pulse`, `soft_ap_start_threshold_s`, `meters_per_pulse`
 
 The Configuration Web page should be available all the time, via the `esport-fi32_config` when it is not possible to connect to the `wifi_ssid`, or via the normal WiFi network (both ESP32 and a computer/phone conected to the same `wifi_ssid`).
+
+
+# Improvements
+
+1. The time left to deactivate the soft Ap (reward Ap) should decrement only if there are clients connected and there is some traffic. A configuration variable `soft_ap_dec_time_above_threshold_kbps` should determine the traffic bellow which the time is not decremented.

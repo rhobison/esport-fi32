@@ -987,3 +987,510 @@ Every symbol (functions, types, `#define` macros, `enum` values) **must** start 
 - **Stack budget:** no function (nor any transitive callee within the same task) may allocate more than **512 bytes in total on the stack** at any single point in the call chain. Buffers larger than 512 bytes must be heap-allocated. Small scratch variables (e.g. `char num[16]`, `char hex[3]`) are exempt.
 - When allocating the HTTP response buffer, `4096` bytes is sufficient for the JSON endpoints; use `16384` bytes for the HTML dashboard.
 - The entire codebase must compile cleanly under ESP-IDF v5.x with `-Werror`.
+
+---
+
+## Improvement Features
+
+This section tracks incremental improvements beyond the base specification.  Each feature is numbered and broken into sub-phases following the same conventions as the base plan.  Features are independent of each other unless explicitly noted.
+
+### Quick Reference — Improvement Features
+
+| Phase | Feature | Name                                           | Key output files                                                       |
+| ----- | ------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
+| 1.1   | 1       | Spec update — traffic-gated countdown          | `docs/1-specification.md`                                              |
+| 1.2   | 1       | Config Manager — two new params                | `config_manager.c/h`, `Kconfig.projbuild`                              |
+| 1.3   | 1       | WiFi Manager — throughput query                | `wifi_manager.c/h`, `sdkconfig.defaults`                               |
+| 1.4   | 1       | Time Counter — sliding-window gated decrement  | `time_counter.c/h`                                                     |
+| 1.5   | 1       | Web UI & API — pause indicator and config      | `http_server_config.c`, `http_server_api.c`, `http_server_dashboard.c` |
+| 2.1   | 2       | Spec update — speed-gated increment            | `docs/1-specification.md`                                              |
+| 2.2   | 2       | Pulse Input — last interval query              | `pulse_input.c/h`                                                      |
+| 2.3   | 2       | Config Manager — speed threshold param         | `config_manager.c/h`, `Kconfig.projbuild`                              |
+| 2.4   | 2       | Time Counter — speed-gated pulse crediting     | `time_counter.c/h`                                                     |
+| 2.5   | 2       | Web UI & API — speed threshold config & status | `http_server_config.c`, `http_server_api.c`, `http_server_dashboard.c` |
+
+---
+
+## Feature 1 — Traffic-Gated Countdown Decrement
+
+### Overview
+
+The reward Soft AP time counter currently decrements unconditionally every second while the AP is active.  This feature gates the decrement on real-time Wi-Fi traffic: if throughput on the reward AP has been below a configurable threshold for a configurable number of seconds, the countdown pauses.  The countdown resumes immediately the moment throughput exceeds the threshold again.
+
+This prevents the timer from draining while no one is actually using the internet connection (e.g. no client connected, or a client device is idle).
+
+### New Configuration Parameters
+
+| Parameter                               | Type       | NVS key         | Default | Valid range |
+| --------------------------------------- | ---------- | --------------- | ------- | ----------- |
+| `soft_ap_dec_time_above_threshold_kbps` | `uint16_t` | `"ap_thr_kbps"` | 1       | 0–65535     |
+| `soft_ap_idle_throughput_timeout_s`     | `uint16_t` | `"ap_idle_tmo"` | 30      | 0–65535     |
+
+### Pause/Resume Logic — Sliding Window (evaluated once per 1-second tick)
+
+```
+throughput = wifi_mngr_reward_ap_throughput_kbps()  // combined RX + TX, kbps
+threshold  = config_mngr_soft_ap_dec_threshold_kbps_get()
+timeout    = config_mngr_soft_ap_idle_throughput_timeout_s_get()
+
+if throughput > threshold:
+    g_below_ticks = 0
+    g_paused      = false
+    decrement counter by 1
+else:
+    g_below_ticks++
+    if g_below_ticks >= timeout:
+        g_paused = true
+        do NOT decrement
+```
+
+- `timeout = 0` means pause immediately on the first below-threshold tick.
+- No clients connected → 0 kbps → handled identically to low-traffic.
+- `g_below_ticks` is reset to `0` whenever the state machine exits `TIME_CTR_STATE_AP_ACTIVE`.
+
+---
+
+### Phase 1.1 — Spec Update
+
+**Goal:** Update `docs/1-specification.md` to describe both new configuration parameters, the throughput-query function, the updated tick behaviour, and the new API/dashboard fields.  All later phases implement what this Spec describes.
+
+**Inputs**
+- `docs/0-draft-input.md` §Improvements item 1
+- `docs/1-specification.md` (current)
+
+**Tasks**
+
+1. **§3 Configuration Parameters table** — add two rows:
+   - `soft_ap_dec_time_above_threshold_kbps` — `uint16_t`, NVS key `"ap_thr_kbps"`, default `1`, range `0–65535`, description: "Combined RX+TX throughput (kbps) below which the countdown is considered idle."
+   - `soft_ap_idle_throughput_timeout_s` — `uint16_t`, NVS key `"ap_idle_tmo"`, default `30`, range `0–65535`, description: "Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses."
+
+2. **§5.1 NVS Configuration Manager** — add getter/setter entries for both parameters to the public API table.
+
+3. **§5.2 WiFi Manager** — add `wifi_mngr_reward_ap_throughput_kbps()` → `uint32_t` to the public API table, with description: "Returns the combined RX+TX throughput on the reward AP in kbps over the last 1-second interval.  Returns `0` when the reward AP is inactive."
+
+4. **§5.5 Time Counter & Reward AP State Machine** — replace the unconditional decrement description with the sliding-window logic documented in the Feature 1 overview above.  Add `time_ctr_is_paused()` → `bool` to the public API.
+
+5. **§6.1 Status Dashboard** — add a pause indicator: a status line labelled "Countdown" showing either "Decrementing" or "⏸ Paused (low traffic)".
+
+6. **§6.3 JSON Status API (`GET /api/status`)** — add `"countdown_paused"` (`bool`, always present) to the documented JSON schema.
+
+7. **§8 NVS Layout — namespace `esport_cfg`** — add `"ap_thr_kbps"` (`uint16_t`) and `"ap_idle_tmo"` (`uint16_t`) to the key table.
+
+**Acceptance Criteria**
+
+- [ ] Both parameters appear in §3 with correct types, NVS keys, defaults, and ranges.
+- [ ] `wifi_mngr_reward_ap_throughput_kbps()` is described in §5.2.
+- [ ] §5.5 tick description matches the sliding-window pseudo-code above.
+- [ ] `time_ctr_is_paused()` is listed in §5.5 public API.
+- [ ] `"countdown_paused"` is in the §6.3 JSON schema.
+- [ ] Both NVS keys appear in §8.
+
+---
+
+### Phase 1.2 — Config Manager
+
+**Goal:** Add getters and setters for `soft_ap_dec_time_above_threshold_kbps` and `soft_ap_idle_throughput_timeout_s` to the configuration manager.
+
+**Inputs**
+- `docs/1-specification.md` §3, §5.1 (Phase 1.1 output)
+- `main/inc/config_manager.h`, `main/src/config_manager.c` (existing)
+- `main/Kconfig.projbuild` (existing)
+
+**Tasks**
+
+1. **`main/Kconfig.projbuild`** — add inside the existing `menu "esport-fi32 Configuration"`:
+   ```
+   config ESPORT_AP_THRESHOLD_KBPS
+       int "Reward AP idle throughput threshold (kbps)"
+       range 0 65535
+       default 1
+   config ESPORT_AP_IDLE_TIMEOUT_S
+       int "Reward AP idle throughput timeout (seconds)"
+       range 0 65535
+       default 30
+   ```
+
+2. **`main/inc/config_manager.h`** — declare:
+   ```c
+   uint16_t  config_mngr_soft_ap_dec_threshold_kbps_get(void);
+   esp_err_t config_mngr_soft_ap_dec_threshold_kbps_set(uint16_t val);
+   uint16_t  config_mngr_soft_ap_idle_throughput_timeout_s_get(void);
+   esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val);
+   ```
+   Follow the existing Doxygen comment style (multi-line, `\brief`, parameter directions, blank line before `\return`).
+
+3. **`main/src/config_manager.c`** — implement all four functions:
+   - Getters: open namespace read-only, read NVS key (fall back to Kconfig default on error), close handle.
+   - Setters: full `uint16_t` range `0–65535` is valid; return `ESP_ERR_INVALID_ARG` only if a value exceeds the datatype range (cannot happen for `uint16_t` — effectively always `ESP_OK` for range); open `NVS_READWRITE`, write, commit, close.
+   - In `config_mngr_init()`: read `"ap_thr_kbps"` and `"ap_idle_tmo"`; if `ESP_ERR_NVS_NOT_FOUND`, write Kconfig defaults.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `config_mngr_soft_ap_dec_threshold_kbps_set(0)` returns `ESP_OK`.
+- [ ] `config_mngr_soft_ap_dec_threshold_kbps_set(65535)` returns `ESP_OK`.
+- [ ] Value survives `config_mngr_init()` reinit (simulated reboot).
+- [ ] Factory default `1` applied when NVS key absent.
+- [ ] `config_mngr_soft_ap_idle_throughput_timeout_s_set(0)` returns `ESP_OK` (disables timeout grace period).
+- [ ] Factory default `30` applied when NVS key absent.
+
+---
+
+### Phase 1.3 — WiFi Manager: Throughput Query
+
+**Goal:** Add `wifi_mngr_reward_ap_throughput_kbps()` to the WiFi manager, measuring combined RX+TX traffic on the reward AP interface over each 1-second window.
+
+**Inputs**
+- `docs/1-specification.md` §5.2 (Phase 1.1 output)
+- `main/inc/wifi_manager.h`, `main/src/wifi_manager.c` (existing)
+- `sdkconfig.defaults` (existing)
+
+**Tasks**
+
+1. **`sdkconfig.defaults`** — append `CONFIG_LWIP_STATS=y`.  This enables `esp_netif_get_stats()` on the AP netif.
+
+2. **`main/inc/wifi_manager.h`** — declare:
+   ```c
+   uint32_t wifi_mngr_reward_ap_throughput_kbps(void);
+   ```
+   Doxygen: "Returns the combined RX+TX throughput on the reward AP in kbps measured over the previous 1-second call interval.  Returns `0` when the reward AP is inactive or on the first call after activation."
+
+3. **`main/src/wifi_manager.c`** — implement `wifi_mngr_reward_ap_throughput_kbps()`:
+   - Add two `static uint64_t` file-scope variables `g_prev_rx_bytes` and `g_prev_tx_bytes` (initialised `0`).
+   - Call `esp_netif_get_stats(gp_netif_ap, &stats)`.  On any error or AP inactive (`!gb_reward_ap_active`), return `0`.
+   - Compute `delta = (stats.rx_bytes - g_prev_rx_bytes) + (stats.tx_bytes - g_prev_tx_bytes)`.
+   - Update `g_prev_rx_bytes` and `g_prev_tx_bytes`.
+   - Return `(uint32_t)(delta * 8U / 1000U)`.
+   - Inside `wifi_mngr_reward_ap_set(false)`: reset `g_prev_rx_bytes = 0` and `g_prev_tx_bytes = 0`.
+   - Function is designed to be called exactly once per second from the time counter tick callback.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] Returns `0` when reward AP is inactive.
+- [ ] Returns `0` when no clients are connected (0 bytes transferred).
+- [ ] Returns a non-zero value during active data transfer on the reward AP.
+- [ ] After `wifi_mngr_reward_ap_set(false)`, the next call after re-enabling returns `0` (prev bytes reset).
+
+---
+
+### Phase 1.4 — Time Counter: Sliding-Window Gated Decrement
+
+**Goal:** Update the time counter tick callback to use a sliding-window traffic gate.  Add `time_ctr_is_paused()` to the public API.
+
+**Inputs**
+- `docs/1-specification.md` §5.5 (Phase 1.1 output)
+- `main/inc/time_counter.h`, `main/src/time_counter.c` (existing)
+- `config_manager` (Phase 1.2 output), `wifi_manager` (Phase 1.3 output)
+
+**Tasks**
+
+1. **`main/inc/time_counter.h`** — declare:
+   ```c
+   bool time_ctr_is_paused(void);
+   ```
+   Doxygen: "Returns `true` if the countdown is currently paused due to below-threshold throughput on the reward AP."
+
+2. **`main/src/time_counter.c`** — add two file-scope variables protected by `g_spinlock`:
+   ```c
+   static volatile bool    g_paused      = false;
+   static          uint16_t g_below_ticks = 0U;
+   ```
+
+3. Replace the body of `time_ctr_tick_cb()` with the sliding-window logic:
+   - **Outside spinlock**: call `wifi_mngr_reward_ap_throughput_kbps()` → `throughput`; call `config_mngr_soft_ap_dec_threshold_kbps_get()` → `threshold`; call `config_mngr_soft_ap_idle_throughput_timeout_s_get()` → `timeout`.
+   - **Inside spinlock**:
+     - If `throughput > threshold`: set `g_below_ticks = 0`, set `g_paused = false`, decrement `g_counter_s` (floored at 0), check `reached_zero`.
+     - Else: increment `g_below_ticks`; if `g_below_ticks >= timeout` (or `timeout == 0`): set `g_paused = true`.  Do **not** decrement.  Set `reached_zero = false`.
+   - Remainder of the function (posting `ESPORT_EVENT_COUNTER_CHANGED` and handling `reached_zero`) is unchanged.
+
+4. Reset `g_below_ticks = 0` and `g_paused = false` in the `TIME_CTR_STATE_AP_ACTIVE` exit path (i.e. when the state transitions back to `TIME_CTR_STATE_IDLE`, whether by counter reaching zero or session-closed handling).
+
+5. Implement `time_ctr_is_paused()`:
+   ```c
+   bool time_ctr_is_paused(void)
+   {
+       portENTER_CRITICAL(&g_spinlock);
+       bool paused = g_paused;
+       portEXIT_CRITICAL(&g_spinlock);
+       return paused;
+   }
+   ```
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] With `timeout = 5` and `threshold = 10`: counter does not decrement for the first 5 below-threshold ticks but decrements on tick 6 if throughput exceeds threshold in between (window resets).
+- [ ] With `timeout = 0`: counter pauses on the very next below-threshold tick.
+- [ ] `time_ctr_is_paused()` reflects the current state correctly under concurrent access.
+- [ ] `g_below_ticks` is `0` after the reward AP is deactivated and re-activated.
+- [ ] No race condition: rapid pulses interleaved with tick still produce a non-negative counter.
+- [ ] `ESPORT_EVENT_COUNTER_CHANGED` is still posted every tick regardless of pause state.
+
+---
+
+### Phase 1.5 — Web UI & API: Pause Indicator and Config Fields
+
+**Goal:** Expose the new configuration parameters via the config web page, add `"countdown_paused"` to `/api/status`, and show a live pause indicator on the status dashboard.
+
+**Inputs**
+- `docs/1-specification.md` §6.1, §6.2, §6.3 (Phase 1.1 output)
+- `main/src/http_server_config.c`, `main/src/http_server_api.c`, `main/src/http_server_dashboard.c` (existing)
+- `config_manager` (Phase 1.2 output), `time_counter` (Phase 1.4 output)
+
+**Tasks**
+
+1. **`main/src/http_server_config.c`**:
+   - In the config form HTML, add two `<input type="number">` fields:
+     - `soft_ap_dec_time_above_threshold_kbps` — label "Reward AP idle throughput threshold (kbps)", min `0`, max `65535`.
+     - `soft_ap_idle_throughput_timeout_s` — label "Idle throughput timeout (s)", min `0`, max `65535`.
+   - In the GET handler: populate both fields from `config_mngr_soft_ap_dec_threshold_kbps_get()` and `config_mngr_soft_ap_idle_throughput_timeout_s_get()`.
+   - In the POST handler: parse both fields with `strtoul`; validate `0–65535`; call the corresponding setters; return HTTP 400 with an error message on out-of-range values.
+
+2. **`main/src/http_server_api.c`**:
+   - In the `/api/status` JSON response, append `"countdown_paused": <true|false>` using `time_ctr_is_paused()`.  The field must always be present, including when the reward AP is inactive (value will be `false`).
+
+3. **`main/src/http_server_dashboard.c`**:
+   - In the countdown section of the dashboard HTML, add:
+     ```html
+     <span id="pause-indicator" style="display:none;">⏸ Paused (low traffic)</span>
+     ```
+   - In the dashboard's JavaScript auto-refresh handler (polling `/api/status`), add:
+     ```js
+     document.getElementById('pause-indicator').style.display =
+         data.countdown_paused ? 'inline' : 'none';
+     ```
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] Config page renders both new fields with correct current values.
+- [ ] Submitting values `0` and `65535` for both fields saves and reflects correctly on reload.
+- [ ] Submitting a value of `65536` or a non-numeric string returns HTTP 400.
+- [ ] `/api/status` JSON contains `"countdown_paused"` key in all states.
+- [ ] Dashboard pause indicator is hidden when `countdown_paused` is `false`.
+- [ ] Dashboard pause indicator shows "⏸ Paused (low traffic)" when `countdown_paused` is `true`.
+- [ ] Dashboard auto-refresh interval is unchanged.
+
+---
+
+## Feature 2 — Speed-Gated Pulse Increment
+
+### Overview
+
+Currently every accepted pulse adds `seconds_per_pulse` credits to the time counter regardless of how fast the rider is pedalling.  This feature gates the increment: credits are only added when the rider's instantaneous speed is at or above a configurable minimum (`min_speed_to_increment_time_kmh_x10`, expressed in km/h × 10 for integer precision).  Below that speed, pulses are still counted for session tracking purposes but do **not** add time credits.
+
+This prevents the child from earning internet time by barely touching the pedals.
+
+### New Configuration Parameter
+
+| Parameter                             | Type       | NVS key         | Default | Valid range |
+| ------------------------------------- | ---------- | --------------- | ------- | ----------- |
+| `min_speed_to_increment_time_kmh_x10` | `uint16_t` | `"min_spd_x10"` | 30      | 0–65535     |
+
+A value of `30` represents 3.0 km/h.  A value of `0` disables the gate entirely (all pulses earn credits, preserving the original behaviour).
+
+### Speed Calculation
+
+Instantaneous speed is derived from the most recent inter-pulse interval measured in the pulse input ISR:
+
+```
+speed_kmh_x10 = (centimeters_per_pulse * 36) / last_pulse_interval_ms
+```
+
+- `last_pulse_interval_ms` is the elapsed time in milliseconds between the two most recent accepted pulses, computed from `esp_timer_get_time()` timestamps already captured in the ISR.
+- If no prior pulse timestamp is available (first pulse of a session), speed is considered `0` and no credits are awarded for that pulse.
+
+---
+
+### Phase 2.1 — Spec Update
+
+**Goal:** Update `docs/1-specification.md` to document the new configuration parameter, the speed calculation method, and the updated pulse credit behaviour.
+
+**Inputs**
+- `docs/0-draft-input.md` §Improvements item 2
+- `docs/1-specification.md` (current)
+
+**Tasks**
+
+1. **§3 Configuration Parameters table** — add one row:
+   - `min_speed_to_increment_time_kmh_x10` — `uint16_t`, NVS key `"min_spd_x10"`, default `30`, range `0–65535`, description: "Minimum instantaneous speed in km/h × 10 required for a pulse to earn time credits.  Set to `0` to disable the gate."
+
+2. **§5.1 NVS Configuration Manager** — add getter/setter entries for the new parameter to the public API table.
+
+3. **§5.4 Pulse Input Module** — document `pulse_in_last_interval_ms_get()` → `uint32_t`, which returns the elapsed time in milliseconds between the two most recent accepted pulses, or `UINT32_MAX` if fewer than two pulses have been accepted since boot (speed indeterminate).
+
+4. **§5.5 Time Counter & Reward AP State Machine** — update the pulse event handler description: before adding credits, compute instantaneous speed using `pulse_in_last_interval_ms_get()` and `config_mngr_centimeters_per_pulse_get()`; skip the credit if speed is below `min_speed_to_increment_time_kmh_x10` and the threshold is non-zero.  Add `time_ctr_current_speed_x10_get()` → `uint32_t` to the public API.
+
+5. **§6.1 Status Dashboard** — document a "Current speed" display line showing the live speed in km/h × 10.
+
+6. **§6.3 JSON Status API (`GET /api/status`)** — add `"current_speed_kmh_x10"` (`uint32_t`, always present, `0` when idle) to the documented JSON schema.
+
+7. **§8 NVS Layout — namespace `esport_cfg`** — add `"min_spd_x10"` (`uint16_t`) to the key table.
+
+**Acceptance Criteria**
+
+- [ ] New parameter appears in §3 with correct type, NVS key, default, and range.
+- [ ] `pulse_in_last_interval_ms_get()` is described in §5.4.
+- [ ] §5.5 pulse handler description includes the speed gate logic.
+- [ ] `time_ctr_current_speed_x10_get()` is listed in §5.5 public API.
+- [ ] `"current_speed_kmh_x10"` is in the §6.3 JSON schema.
+- [ ] `"min_spd_x10"` appears in §8.
+
+---
+
+### Phase 2.2 — Pulse Input: Last Interval Query
+
+**Goal:** Expose the most recent inter-pulse interval from the pulse input module so the time counter can compute instantaneous speed without duplicating ISR state.
+
+**Inputs**
+- `docs/1-specification.md` §5.4 (Phase 2.1 output)
+- `main/inc/pulse_input.h`, `main/src/pulse_input.c` (existing)
+
+**Tasks**
+
+1. **`main/src/pulse_input.c`** — add a `static volatile uint32_t g_last_interval_ms = UINT32_MAX` file-scope variable.  In the ISR, after the debounce check passes, capture the previous `last_accepted_us` before updating it, then compute:
+   ```c
+   uint64_t interval_us = now_us - prev_accepted_us;
+   g_last_interval_ms = (interval_us > (uint64_t)UINT32_MAX * 1000ULL)
+                        ? UINT32_MAX
+                        : (uint32_t)(interval_us / 1000U);
+   ```
+   The very first accepted pulse (no valid prior timestamp) leaves `g_last_interval_ms = UINT32_MAX`.
+
+2. **`main/inc/pulse_input.h`** — declare:
+   ```c
+   uint32_t pulse_in_last_interval_ms_get(void);
+   ```
+   Doxygen: "Returns the elapsed time in milliseconds between the two most recent accepted pulses.  Returns `UINT32_MAX` if fewer than two pulses have been accepted (speed indeterminate).  Safe to call from any task context (volatile read)."
+
+3. **`main/src/pulse_input.c`** — implement `pulse_in_last_interval_ms_get()` as a simple volatile read of `g_last_interval_ms`.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] Returns `UINT32_MAX` before two pulses have been received.
+- [ ] After two pulses separated by a known interval, returns the correct millisecond value (±debounce tolerance).
+- [ ] Rapid pulses do not cause wrap-around or negative intervals.
+
+---
+
+### Phase 2.3 — Config Manager: Speed Threshold Parameter
+
+**Goal:** Add a getter and setter for `min_speed_to_increment_time_kmh_x10` to the configuration manager.
+
+**Inputs**
+- `docs/1-specification.md` §3, §5.1 (Phase 2.1 output)
+- `main/inc/config_manager.h`, `main/src/config_manager.c` (existing)
+- `main/Kconfig.projbuild` (existing)
+
+**Tasks**
+
+1. **`main/Kconfig.projbuild`** — add inside the existing `menu "esport-fi32 Configuration"`:
+   ```
+   config ESPORT_MIN_SPEED_KMH_X10
+       int "Minimum speed to earn time credits (km/h × 10)"
+       range 0 65535
+       default 30
+   ```
+
+2. **`main/inc/config_manager.h`** — declare:
+   ```c
+   uint16_t  config_mngr_min_speed_to_increment_time_kmh_x10_get(void);
+   esp_err_t config_mngr_min_speed_to_increment_time_kmh_x10_set(uint16_t val);
+   ```
+   Follow the existing Doxygen comment style.
+
+3. **`main/src/config_manager.c`** — implement getter (NVS key `"min_spd_x10"`, fallback to `CONFIG_ESPORT_MIN_SPEED_KMH_X10`) and setter (full `0–65535` range is valid).  Handle the key in `config_mngr_init()` with factory default.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `config_mngr_min_speed_to_increment_time_kmh_x10_set(0)` returns `ESP_OK` (gate disabled).
+- [ ] `config_mngr_min_speed_to_increment_time_kmh_x10_set(65535)` returns `ESP_OK`.
+- [ ] Value survives `config_mngr_init()` reinit.
+- [ ] Factory default `30` applied when NVS key absent.
+
+---
+
+### Phase 2.4 — Time Counter: Speed-Gated Pulse Crediting
+
+**Goal:** Update the pulse event handler in `time_counter.c` to skip credit addition when the rider's instantaneous speed is below `min_speed_to_increment_time_kmh_x10`.
+
+**Inputs**
+- `docs/1-specification.md` §5.5 (Phase 2.1 output)
+- `main/inc/time_counter.h`, `main/src/time_counter.c` (existing)
+- `pulse_input` (Phase 2.2 output), `config_manager` (Phase 2.3 output)
+
+**Tasks**
+
+1. **`main/src/time_counter.c`** — add a file-scope variable protected by `g_spinlock`:
+   ```c
+   static volatile uint32_t g_current_speed_x10 = 0U;
+   ```
+
+2. In `time_ctr_pulse_handler()`, before the credit block, compute instantaneous speed **outside** the spinlock:
+   - `interval_ms = pulse_in_last_interval_ms_get()`
+   - `cpp = config_mngr_centimeters_per_pulse_get()`
+   - `min_spd = config_mngr_min_speed_to_increment_time_kmh_x10_get()`
+   - If `interval_ms == UINT32_MAX` or `interval_ms == 0`: `speed_x10 = 0`; else `speed_x10 = (uint32_t)cpp * 36U / interval_ms`
+
+3. **Inside spinlock**: update `g_current_speed_x10 = speed_x10`.  Then apply the gate: if `min_spd > 0` and `speed_x10 < min_spd`, set `b_credit = false` (skip the `g_counter_s` increment).  The remainder of the function (posting `ESPORT_EVENT_COUNTER_CHANGED`) is unchanged.
+
+4. Reset `g_current_speed_x10 = 0` when the state machine returns to `TIME_CTR_STATE_IDLE`.
+
+5. **`main/inc/time_counter.h`** — declare:
+   ```c
+   uint32_t time_ctr_current_speed_x10_get(void);
+   ```
+   Doxygen: "Returns the most recently computed instantaneous speed in km/h × 10.  Returns `0` when no speed data is available.  Thread-safe."
+
+6. **`main/src/time_counter.c`** — implement `time_ctr_current_speed_x10_get()` as a spinlock-guarded read of `g_current_speed_x10`.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] With `min_spd = 30` (3.0 km/h): pulses producing speed < 3.0 km/h do **not** add credits; pulses at ≥ 3.0 km/h **do** add credits.
+- [ ] With `min_spd = 0`: all pulses add credits regardless of speed (original behaviour preserved).
+- [ ] First pulse of a session (interval = `UINT32_MAX`) does not add credits when `min_spd > 0`.
+- [ ] `time_ctr_current_speed_x10_get()` returns `0` in IDLE state.
+- [ ] `ESPORT_EVENT_COUNTER_CHANGED` is posted for every pulse (including gated-out ones), carrying the current counter value.
+- [ ] No race conditions under rapid pulse injection interleaved with the tick timer.
+
+---
+
+### Phase 2.5 — Web UI & API: Speed Threshold Config & Live Speed
+
+**Goal:** Expose `min_speed_to_increment_time_kmh_x10` via the config page, add `"current_speed_kmh_x10"` to `/api/status`, and show live speed on the status dashboard.
+
+**Inputs**
+- `docs/1-specification.md` §6.1, §6.2, §6.3 (Phase 2.1 output)
+- `main/src/http_server_config.c`, `main/src/http_server_api.c`, `main/src/http_server_dashboard.c` (existing)
+- `config_manager` (Phase 2.3 output), `time_counter` (Phase 2.4 output)
+
+**Tasks**
+
+1. **`main/src/http_server_config.c`**:
+   - Add a `<input type="number">` field labelled "Minimum speed to earn credits (km/h × 10)", min `0`, max `65535`.
+   - GET handler: populate from `config_mngr_min_speed_to_increment_time_kmh_x10_get()`.
+   - POST handler: parse with `strtoul`; validate `0–65535`; call setter; return HTTP 400 on out-of-range or non-numeric input.
+
+2. **`main/src/http_server_api.c`**:
+   - In the `/api/status` JSON response, append `"current_speed_kmh_x10": <value>` using `time_ctr_current_speed_x10_get()`.  Always present; `0` when idle.
+
+3. **`main/src/http_server_dashboard.c`**:
+   - Add a "Current speed" display line in the live stats section, e.g. `<span id="current-speed">0</span> km/h × 10`.
+   - In the dashboard JS auto-refresh handler, update the element:
+     ```js
+     document.getElementById('current-speed').textContent = data.current_speed_kmh_x10;
+     ```
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] Config page renders the new field with the correct current value.
+- [ ] Submitting `0` and `65535` saves and reflects correctly on reload.
+- [ ] Submitting `65536` or a non-numeric string returns HTTP 400.
+- [ ] `/api/status` JSON contains `"current_speed_kmh_x10"` in all states.
+- [ ] Dashboard live speed display updates on each auto-refresh cycle.
+- [ ] Dashboard auto-refresh interval is unchanged.
