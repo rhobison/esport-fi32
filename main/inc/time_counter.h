@@ -3,16 +3,24 @@
  * \brief Time counter and reward AP state machine public API.
  *
  * Maintains the exercise time counter (unit: seconds, minimum 0).
- * Listens for #ESPORT_EVENT_PULSE events and credits
- * \c seconds_per_pulse seconds for each accepted pulse.
+ * Listens for #ESPORT_EVENT_SESSION_OPENED and starts a one-shot timer for
+ * \c soft_ap_start_threshold_s seconds.  When the timer fires the reward AP
+ * is enabled and a 1-second periodic timer starts decrementing the counter.
  *
- * A 1-second periodic timer decrements the counter by one when the reward
- * AP is active.  The counter never falls below zero.
+ * While a session is open (#ESPORT_EVENT_SESSION_OPENED received), each
+ * #ESPORT_EVENT_PULSE credits \c seconds_per_pulse seconds to the counter.
+ * If the session closes (#ESPORT_EVENT_SESSION_CLOSED) before the threshold
+ * timer fires, the threshold timer is cancelled and the counter resets to
+ * zero.  If the AP is already active the session-close event is ignored and
+ * the counter continues to drain.
  *
  * State machine:
- *   - \b IDLE: counter < threshold, reward AP off; pulses add credits only.
- *   - \b ACTIVE: counter >= threshold, reward AP on; pulses add credits,
- *     timer decrements.  Transitions back to IDLE when counter reaches 0.
+ *   - \b IDLE: no session, counter 0, reward AP off.
+ *   - \b SESSION: session confirmed open; threshold timer running; pulses add
+ *     credits.  Transitions to AP_ACTIVE when the timer fires, or back to
+ *     IDLE when the session closes (counter reset).
+ *   - \b AP_ACTIVE: reward AP on; pulses still add credits; 1-second tick
+ *     decrements.  Transitions back to IDLE when counter reaches 0.
  *
  * The counter variable is protected by a spinlock against concurrent access
  * from the FreeRTOS timer callback and the ESP event loop callbacks.

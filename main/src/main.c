@@ -16,6 +16,10 @@
 // Includes
 //==================================================================================================
 
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "config_manager.h"
 #include "event_ids.h"
 #include "http_server.h"
@@ -117,6 +121,23 @@ void app_main(void)
     ESP_LOGI(gp_tag, "Config: threshold=%" PRIu32 " spp=%" PRIu16 " cpp=%" PRIu32,
         config_mngr_soft_ap_start_threshold_s_get(), config_mngr_seconds_per_pulse_get(),
         config_mngr_centimeters_per_pulse_get());
+
+    /* DEBUG: poll GPIO input level every second to verify pin state changes.
+       If level stays 1 when grounded the HW wiring is suspect; if it toggles
+       but interrupts never fire the ISR service is the issue.
+       Remove before production release. */
+    // for (;;)
+    // {
+    //     int       level    = gpio_get_level((gpio_num_t)CONFIG_ESPORT_PULSE_GPIO);
+    //     uint32_t  count    = pulse_in_total_count_get();
+    //     uint32_t  dropped  = pulse_in_dropped_count_get();
+    //     esp_err_t post_err = pulse_in_last_post_err_get();
+    //     ESP_LOGI(gp_tag,
+    //         "[DBG] GPIO%d = %d  isr_count=%" PRIu32 "  dropped=%" PRIu32 "  post_err=0x%x (%s)",
+    //         CONFIG_ESPORT_PULSE_GPIO, level, count, dropped, post_err,
+    //         esp_err_to_name(post_err));
+    //     vTaskDelay(pdMS_TO_TICKS(1000U));
+    // }
 }
 
 //--------------------------------------------------------------------------------------------------

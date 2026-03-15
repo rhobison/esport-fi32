@@ -9,19 +9,17 @@
 // Includes
 //==================================================================================================
 
+#include "esp_log.h"
+#include "esp_event.h"
+#include "esp_timer.h"
+#include "event_ids.h"
 #include "pulse_input.h"
+#include "driver/gpio.h"
+#include "freertos/task.h"
+#include "config_manager.h"
+#include "freertos/FreeRTOS.h"
 
 #include <stdint.h>
-
-#include "driver/gpio.h"
-#include "esp_event.h"
-#include "esp_log.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include "config_manager.h"
-#include "event_ids.h"
 
 //==================================================================================================
 // Internal Constants/Macros/Datatypes
@@ -45,6 +43,12 @@ static volatile int64_t g_last_accepted_us = 0;
 
 /** Cumulative count of accepted (debounced) pulses; updated by the ISR only. */
 static volatile uint32_t g_total_count = 0U;
+
+/** Count of pulses accepted by the ISR but dropped because the event queue was full. */
+static volatile uint32_t g_dropped_count = 0U;
+
+/** Last error code returned by esp_event_isr_post; 0 means no failure yet. */
+static volatile esp_err_t g_last_post_err = ESP_OK;
 
 //==================================================================================================
 // Internal Function Prototypes
@@ -82,7 +86,7 @@ esp_err_t pulse_in_init(void)
         return ret;
     }
 
-    ret = gpio_install_isr_service(0);
+    ret = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if ((ESP_OK != ret) && (ESP_ERR_INVALID_STATE != ret))
     {
         ESP_LOGE(gp_tag, "gpio_install_isr_service failed: %s", esp_err_to_name(ret));
@@ -116,6 +120,20 @@ uint32_t pulse_in_total_count_get(void)
 
 //--------------------------------------------------------------------------------------------------
 
+uint32_t pulse_in_dropped_count_get(void)
+{
+    return g_dropped_count;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t pulse_in_last_post_err_get(void)
+{
+    return g_last_post_err;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 //==================================================================================================
 // Private Functions
 //==================================================================================================
@@ -123,6 +141,14 @@ uint32_t pulse_in_total_count_get(void)
 static void IRAM_ATTR pulse_in_gpio_isr(void * p_arg)
 {
     (void)p_arg;
+
+    /* Reject noise spikes: if the pin already returned high by the time the
+       ISR runs (~1-2 µs latency), the edge was too short to be a real pulse.
+       Real sensor pulses are held low for several milliseconds. */
+    if (gpio_get_level((gpio_num_t)CONFIG_ESPORT_PULSE_GPIO) != 0)
+    {
+        return;
+    }
 
     int64_t now_us = esp_timer_get_time();
 
@@ -134,9 +160,18 @@ static void IRAM_ATTR pulse_in_gpio_isr(void * p_arg)
     g_last_accepted_us = now_us;
     g_total_count++;
 
+    /* esp_event_isr_post copies payload inline into a uint32_t-sized field (max 4 bytes).
+       No handler needs the exact ISR timestamp — all consumers derive timing from
+       esp_timer_get_time() in handler context, where the sub-ms latency is negligible
+       for second-resolution outputs. */
     BaseType_t hp_task_awoken = pdFALSE;
-    (void)esp_event_isr_post(ESPORT_EVENT_BASE, ESPORT_EVENT_PULSE, &now_us, sizeof(now_us),
-        &hp_task_awoken);
+    esp_err_t  err =
+        esp_event_isr_post(ESPORT_EVENT_BASE, ESPORT_EVENT_PULSE, NULL, 0, &hp_task_awoken);
+    if (ESP_OK != err)
+    {
+        g_dropped_count++;
+        g_last_post_err = err;
+    }
 
     if (pdTRUE == hp_task_awoken)
     {

@@ -56,7 +56,7 @@ Key behaviour:
 
 - The device permanently operates in **AP+STA** (simultaneous Access Point + Station) Wi-Fi mode with NAT so that devices connected to the reward Soft AP can reach the internet through the home network.
 - A GPIO interrupt counts mechanical pulses from the bike sensor. Each pulse adds `seconds_per_pulse` seconds to a **time counter**.
-- Once the time counter reaches `soft_ap_start_threshold_s`, a **reward Soft AP** is created and the counter starts counting down in real time. Pulses still add to the counter while the AP is active.
+- Once the exercise session has been active for `soft_ap_start_threshold_s` seconds, a **reward Soft AP** is created and the accumulated pulse credits start counting down in real time. Pulses still add to the counter while the AP is active.
 - When the counter reaches 0 the reward Soft AP is disabled.
 - Exercise sessions are detected and logged to NVS (non-volatile storage) as a ring buffer.
 - Date/time is synchronised via SNTP at boot; a POSIX timezone string converts stored UTC timestamps to local time for display.
@@ -89,7 +89,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 | `soft_ap_ssid`              | `ap_ssid`     | string | `"esport-fi32"` | —   | 32 chars    | Reward Soft AP SSID                                   |
 | `soft_ap_password`          | `ap_pwd`      | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                          |
 | `seconds_per_pulse`         | `spp`         | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse              |
-| `soft_ap_start_threshold_s` | `ap_thresh`   | uint32 | `300`           | 0   | (unlimited) | Counter value (s) required to enable reward AP        |
+| `soft_ap_start_threshold_s` | `ap_thresh`   | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP     |
 | `centimeters_per_pulse`     | `cpp`         | uint32 | `25`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed           |
 | `idle_session_interval_s`   | `idle_s`      | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session          |
 | `start_session_interval_s`  | `start_s`     | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session   |
@@ -312,7 +312,7 @@ void       time_mngr_timezone_apply(void);   /* call after timezone config chang
 - Configure `CONFIG_ESPORT_PULSE_GPIO` as input with internal pull-up.
 - Install a GPIO interrupt on the **falling edge**.
 - Implement software debounce: ignore any edge that arrives less than `pulse_debounce_time_ms` milliseconds after the previous accepted edge. Use `esp_timer_get_time()` for sub-millisecond resolution.
-- For each accepted pulse, post an `ESPORT_EVENT_PULSE` event on the app event loop (payload: `int64_t timestamp_us` of the pulse).
+- For each accepted pulse, post an `ESPORT_EVENT_PULSE` event on the app event loop with no payload. The ISR inline payload is limited to 4 bytes; an `int64_t` µs timestamp does not fit. Handlers call `esp_timer_get_time()` directly — the sub-ms handler latency is negligible for all second-resolution consumers.
 - Expose `pulse_in_total_count_get()` for diagnostic use.
 
 **Notes:**
@@ -344,12 +344,14 @@ uint32_t  pulse_in_total_count_get(void);
 
 **Responsibilities:**
 - Maintain the **time counter** (integer, unit: seconds, minimum 0).
-- Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to the counter for each.
+- Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to the counter for each pulse received while a session is open (SESSION or AP_ACTIVE states). Pulses in IDLE state are ignored.
+- Listen for `ESPORT_EVENT_SESSION_OPENED` and start a one-shot timer for `soft_ap_start_threshold_s` seconds.
+- Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer and reset the counter to 0. If the AP is already active (AP_ACTIVE state), ignore the close — the AP stays on until the counter drains.
 - Run a 1-second periodic timer (`esp_timer_create`) that decrements the counter by 1 when the reward AP is active. The counter never goes below 0.
 - Manage reward AP state:
-  - **Enable reward AP** when counter crosses `soft_ap_start_threshold_s` from below (i.e. the counter just became ≥ threshold for the first time since it was last at 0-and-AP-off). Call `wifi_mngr_reward_ap_set(true)`.
+  - **Enable reward AP** when the threshold timer fires (session has been open for `soft_ap_start_threshold_s` seconds). Call `wifi_mngr_reward_ap_set(true)`.
   - **Disable reward AP** when counter reaches 0 while AP is active. Call `wifi_mngr_reward_ap_set(false)`.
-  - Once the reward AP is enabled, it stays enabled until the counter reaches 0 — even if the counter temporarily drops below `soft_ap_start_threshold_s` due to the realtime decrement.
+  - Once the reward AP is enabled, it stays enabled until the counter reaches 0.
 - Post `ESPORT_EVENT_COUNTER_CHANGED` (payload: `uint32_t counter_s`) after every change (pulse or tick).
 - Post `ESPORT_EVENT_REWARD_AP_ON` and `ESPORT_EVENT_REWARD_AP_OFF` when AP transitions occur.
 
@@ -358,16 +360,24 @@ uint32_t  pulse_in_total_count_get(void);
 ```
         ┌──────────────────────────────────────────────────────┐
         │                   IDLE state                         │
-        │  counter < threshold                                 │
-        │  reward AP: OFF                                      │
+        │  counter = 0, reward AP: OFF                         │
         │                                                      │
-        │  On pulse:  counter += seconds_per_pulse             │
-        │  On tick:   (no decrement, AP is off)                │
+        │  On SESSION_OPENED: start threshold timer →          │
         └──────────────────┬───────────────────────────────────┘
-                           │  counter >= threshold
+                           │  ESPORT_EVENT_SESSION_OPENED
                            ▼
         ┌──────────────────────────────────────────────────────┐
-        │                  ACTIVE state                        │
+        │                 SESSION state                        │
+        │  reward AP: OFF; threshold timer running             │
+        │                                                      │
+        │  On pulse:        counter += seconds_per_pulse       │
+        │  On SESSION_CLOSED: cancel timer, counter = 0 → IDLE │
+        └──────────────────┬───────────────────────────────────┘
+                           │  threshold timer fires
+                           │  (soft_ap_start_threshold_s elapsed)
+                           ▼
+        ┌──────────────────────────────────────────────────────┐
+        │                AP_ACTIVE state                       │
         │  reward AP: ON                                       │
         │                                                      │
         │  On pulse:  counter += seconds_per_pulse             │
@@ -683,12 +693,18 @@ Bike sensor → falling edge on GPIO 10
             → if valid: post ESPORT_EVENT_PULSE
 
 ESPORT_EVENT_PULSE
-  → time_counter: counter += seconds_per_pulse
-      if counter >= threshold && state == IDLE:
-          state = ACTIVE
-          wifi_mngr_reward_ap_set(true)
-          post ESPORT_EVENT_REWARD_AP_ON
+  → time_counter: if state == SESSION or AP_ACTIVE: counter += seconds_per_pulse
   → session_tracker: update pulse count, last_pulse_time, manage timers
+
+ESPORT_EVENT_SESSION_OPENED (posted by session_tracker on QUALIFYING→ACTIVE)
+  → time_counter: IDLE→SESSION, start one-shot threshold timer
+                  (soft_ap_start_threshold_s seconds)
+
+threshold timer fires
+  → time_counter: SESSION→AP_ACTIVE
+                  wifi_mngr_reward_ap_set(true)
+                  post ESPORT_EVENT_REWARD_AP_ON
+                  start 1-second decrement tick timer
 ```
 
 ### 7.4 Counter Decrement & AP Shutdown
@@ -798,11 +814,12 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 
 | Event ID                        | Payload type             | Posted by         | Consumed by                       |
 | ------------------------------- | ------------------------ | ----------------- | --------------------------------- |
-| `ESPORT_EVENT_PULSE`            | `int64_t` (timestamp_us) | `pulse_input`     | `time_counter`, `session_tracker` |
+| `ESPORT_EVENT_PULSE`            | none (NULL)               | `pulse_input`     | `time_counter`, `session_tracker` |
 | `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s)   | `time_counter`    | `http_server` (status cache)      |
 | `ESPORT_EVENT_REWARD_AP_ON`     | —                        | `time_counter`    | (logging, status)                 |
 | `ESPORT_EVENT_REWARD_AP_OFF`    | —                        | `time_counter`    | (logging, status)                 |
-| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t`   | `session_tracker` | `session_log`                     |
+| `ESPORT_EVENT_SESSION_OPENED`   | —                        | `session_tracker` | `time_counter`                    |
+| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t`   | `session_tracker` | `time_counter`, `session_log`     |
 | `ESPORT_EVENT_STA_CONNECTED`    | —                        | `wifi_manager`    | `time_manager` (start SNTP)       |
 | `ESPORT_EVENT_STA_DISCONNECTED` | —                        | `wifi_manager`    | (logging, status)                 |
 

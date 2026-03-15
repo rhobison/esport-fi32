@@ -7,7 +7,7 @@ The goal of the project is to limit internet access to kids in the following way
 - The ESP32 should keep a time counter in seconds.
 - The time counter should increment based on the pulses received in the GPIO input.
 - For every pulse, `seconds_per_pulse` seconds should be added to the time counter. `seconds_per_pulse` is a configuration.
-- When the time counter reaches `soft_ap_start_threshold_s` seconds, the ESP32 creates a Soft AP with a given `soft_ap_ssid` and `soft_ap_password` and starts decrementing the time counter in real time, but should still keep incrementing it according to the pulses received in the GPIO input. `soft_ap_start_threshold_s`,`soft_ap_ssid` and `soft_ap_password` are configurations.
+- After `soft_ap_start_threshold_s` seconds the pulses started, the ESP32 creates a Soft AP with a given `soft_ap_ssid` and `soft_ap_password` and starts decrementing the time counter in real time, but should still keep incrementing it according to the pulses received in the GPIO input. `soft_ap_start_threshold_s`,`soft_ap_ssid` and `soft_ap_password` are configurations.
 - When the time counter reaches 0, the Soft AP should be turned off.
 - The ESP32 should keep track of the current date and time. When it is turned on, it should synchronize its date/time (using NTP ?).
 - The ESP32 should keep a log in its NVM memory with the following information:

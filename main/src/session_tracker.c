@@ -55,11 +55,12 @@ static const char * gp_tag = "session_tracker";
 /** Current state of the session tracker state machine. */
 static session_trk_state_t g_state = SESSION_TRK_STATE_IDLE;
 
-/** esp_timer_get_time() value captured on the first pulse of the potential session. */
-static int64_t g_potential_start_us = 0;
+/** Millisecond timestamp (esp_timer_get_time()/1000) captured on the first pulse of the potential
+ * session. */
+static int64_t g_potential_start_ms = 0;
 
-/** esp_timer_get_time() value of the most recently accepted pulse. */
-static int64_t g_last_pulse_us = 0;
+/** Millisecond timestamp of the most recently accepted pulse. */
+static int64_t g_last_pulse_ms = 0;
 
 /** Number of accepted pulses since the current session (or potential session) began. */
 static uint32_t g_pulse_count = 0U;
@@ -156,14 +157,15 @@ void session_trk_live_status_get(session_trk_live_status_t * p_out)
 
     if (SESSION_TRK_STATE_ACTIVE == g_state)
     {
-        int64_t now_s      = (int64_t)time_mngr_utc_get();
-        int64_t elapsed    = now_s - g_session_start_utc;
-        p_out->duration_s  = (elapsed > 0LL) ? (uint32_t)elapsed : 0U;
+        int64_t now_s     = (int64_t)time_mngr_utc_get();
+        int64_t elapsed   = now_s - g_session_start_utc;
+        p_out->duration_s = (elapsed > 0LL) ? (uint32_t)elapsed : 0U;
 
-        uint64_t total_cm         = (uint64_t)g_pulse_count * (uint64_t)g_centimeters_per_pulse;
-        p_out->live_speed_kmh_x10 = (0U < p_out->duration_s)
-            ? (uint16_t)(total_cm * 36ULL / ((uint64_t)p_out->duration_s * 1000ULL))
-            : 0U;
+        uint64_t total_cm = (uint64_t)g_pulse_count * (uint64_t)g_centimeters_per_pulse;
+        p_out->live_speed_kmh_x10 =
+            (0U < p_out->duration_s) ?
+                (uint16_t)(total_cm * 36ULL / ((uint64_t)p_out->duration_s * 1000ULL)) :
+                0U;
     }
     else
     {
@@ -191,8 +193,8 @@ static void session_trk_state_reset(void)
 
     g_state              = SESSION_TRK_STATE_IDLE;
     g_pulse_count        = 0U;
-    g_potential_start_us = 0;
-    g_last_pulse_us      = 0;
+    g_potential_start_ms = 0;
+    g_last_pulse_ms      = 0;
     g_session_start_utc  = 0;
     gb_session_confirmed = false;
 }
@@ -220,10 +222,11 @@ static void session_trk_pulse_handler(void * p_handler_arg, esp_event_base_t bas
     (void)p_handler_arg;
     (void)base;
     (void)event_id;
+    (void)p_event_data; /* no payload; timing derived from esp_timer_get_time() below */
 
-    int64_t timestamp_us = *(const int64_t *)p_event_data;
+    int64_t timestamp_ms = esp_timer_get_time() / 1000LL;
 
-    g_last_pulse_us = timestamp_us;
+    g_last_pulse_ms = timestamp_ms;
     g_pulse_count++;
 
     if (SESSION_TRK_STATE_IDLE == g_state)
@@ -233,7 +236,7 @@ static void session_trk_pulse_handler(void * p_handler_arg, esp_event_base_t bas
         g_idle_interval_s       = config_mngr_idle_session_interval_s_get();
         g_centimeters_per_pulse = config_mngr_centimeters_per_pulse_get();
 
-        g_potential_start_us = timestamp_us;
+        g_potential_start_ms = timestamp_ms;
         g_pulse_count        = 1U;
         g_state              = SESSION_TRK_STATE_QUALIFYING;
 
@@ -264,7 +267,7 @@ static void session_trk_pulse_handler(void * p_handler_arg, esp_event_base_t bas
  * the session open.
  *
  * Back-calculates the session start UTC timestamp from the elapsed time since
- * #g_potential_start_us so that #session_trk_record_t.start_time_utc reflects
+ * #g_potential_start_ms so that #session_trk_record_t.start_time_utc reflects
  * the actual first-pulse time, not the confirmation moment.
  *
  * \param[in] p_timer  Handle of the timer that expired; unused.
@@ -275,10 +278,12 @@ static void session_trk_qualify_timer_cb(TimerHandle_t p_timer)
 
     g_state = SESSION_TRK_STATE_ACTIVE;
 
-    int64_t elapsed_us   = esp_timer_get_time() - g_potential_start_us;
-    int64_t elapsed_s    = elapsed_us / 1000000LL;
+    int64_t elapsed_ms   = esp_timer_get_time() / 1000LL - g_potential_start_ms;
+    int64_t elapsed_s    = elapsed_ms / 1000LL;
     g_session_start_utc  = (int64_t)time_mngr_utc_get() - elapsed_s;
     gb_session_confirmed = true;
+
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_SESSION_OPENED, NULL, 0U, 0U);
 
     ESP_LOGI(gp_tag, "QUALIFYING→ACTIVE: session open, start_utc=%" PRId64, g_session_start_utc);
 }
@@ -304,7 +309,7 @@ static void session_trk_idle_timer_cb(TimerHandle_t p_timer)
 
     if (SESSION_TRK_STATE_ACTIVE == g_state)
     {
-        int64_t  raw_duration = (g_last_pulse_us - g_potential_start_us) / 1000000LL;
+        int64_t  raw_duration = (g_last_pulse_ms - g_potential_start_ms) / 1000LL;
         uint32_t duration_s =
             (raw_duration > (int64_t)UINT32_MAX) ? UINT32_MAX : (uint32_t)raw_duration;
 
