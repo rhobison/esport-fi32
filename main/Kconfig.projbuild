@@ -2,7 +2,7 @@ menu "esport-fi32 Configuration"
 
     config ESPORT_PULSE_GPIO
         int "Pulse input GPIO number"
-        default 6
+        default 10
         range 0 30
         help
             GPIO number connected to the bike sensor pulse output.

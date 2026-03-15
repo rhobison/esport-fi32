@@ -70,7 +70,7 @@ Key behaviour:
 | Item                   | Details                                                                |
 | ---------------------- | ---------------------------------------------------------------------- |
 | MCU                    | ESP32-C6                                                               |
-| Bike sensor input GPIO | **GPIO 6** (configurable at build time via `CONFIG_ESPORT_PULSE_GPIO`) |
+| Bike sensor input GPIO | **GPIO 10** (configurable at build time via `CONFIG_ESPORT_PULSE_GPIO`) |
 | GPIO internal pull     | Pull-up (sensor contact closes to GND)                                 |
 | GPIO active edge       | **Falling edge** (sensor closes → logic low pulse)                     |
 
@@ -678,7 +678,7 @@ app_main  →  wifi_manager attempts to connect to wifi_ssid
 ### 7.3 Pulse & Counter Flow
 
 ```
-Bike sensor → falling edge on GPIO 6
+Bike sensor → falling edge on GPIO 10
             → ISR: check debounce (esp_timer_get_time)
             → if valid: post ESPORT_EVENT_PULSE
 
