@@ -95,6 +95,8 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 | `start_session_interval_s`  | `start_s`     | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session   |
 | `pulse_debounce_time_ms`    | `debounce_ms` | uint16 | `200`           | 10  | 5000        | Minimum time (ms) between two accepted pulses         |
 | `timezone`                  | `tz`          | string | `"UTC0"`        | —   | 63 chars    | POSIX TZ string (e.g. `"CET-1CEST,M3.5.0,M10.5.0/3"`) |
+| `soft_ap_dec_time_above_threshold_kbps` | `ap_thr_kbps` | uint16 | `1` | 0 | 65535 | Combined RX+TX throughput (kbps) below which the countdown is considered idle. |
+| `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo` | uint16 | `30` | 0 | 65535 | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses. |
 
 ---
 
@@ -213,6 +215,10 @@ esp_err_t config_mngr_idle_session_interval_s_set(uint16_t val);
 esp_err_t config_mngr_start_session_interval_s_set(uint16_t val);
 esp_err_t config_mngr_pulse_debounce_time_ms_set(uint16_t val);
 esp_err_t config_mngr_timezone_set(const char *val);
+uint16_t  config_mngr_soft_ap_dec_threshold_kbps_get(void);
+esp_err_t config_mngr_soft_ap_dec_threshold_kbps_set(uint16_t val);
+uint16_t  config_mngr_soft_ap_idle_throughput_timeout_s_get(void);
+esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val);
 ```
 
 **Validation rules (setters reject values outside this range with `ESP_ERR_INVALID_ARG`):**
@@ -278,6 +284,7 @@ bool     wifi_mngr_sta_is_connected(void);
 bool     wifi_mngr_reward_ap_is_active(void);
 uint8_t  wifi_mngr_reward_ap_client_count(void);
 void     wifi_mngr_sta_ip_get(char *buf, size_t len);   /* dotted-decimal or "" */
+uint32_t wifi_mngr_reward_ap_throughput_kbps(void);     /* combined RX+TX kbps over last 1-s interval; 0 when AP inactive */
 ```
 
 ---
@@ -352,8 +359,28 @@ uint32_t  pulse_in_total_count_get(void);
   - **Enable reward AP** when the threshold timer fires (session has been open for `soft_ap_start_threshold_s` seconds). Call `wifi_mngr_reward_ap_set(true)`.
   - **Disable reward AP** when counter reaches 0 while AP is active. Call `wifi_mngr_reward_ap_set(false)`.
   - Once the reward AP is enabled, it stays enabled until the counter reaches 0.
-- Post `ESPORT_EVENT_COUNTER_CHANGED` (payload: `uint32_t counter_s`) after every change (pulse or tick).
+- Post `ESPORT_EVENT_COUNTER_CHANGED` (payload: `uint32_t counter_s`) after every change (pulse or tick), including paused ticks.
 - Post `ESPORT_EVENT_REWARD_AP_ON` and `ESPORT_EVENT_REWARD_AP_OFF` when AP transitions occur.
+- **Traffic-gated decrement (sliding window, evaluated once per 1-second tick):** When the reward AP is active, the counter is only decremented if throughput on the reward AP exceeds the configured threshold or the timeout has not yet elapsed since throughput dropped below threshold:
+
+```
+throughput = wifi_mngr_reward_ap_throughput_kbps()  // combined RX+TX, kbps
+threshold  = config_mngr_soft_ap_dec_threshold_kbps_get()
+timeout    = config_mngr_soft_ap_idle_throughput_timeout_s_get()
+
+if throughput > threshold:
+    g_below_ticks = 0
+    g_paused      = false
+    decrement counter by 1
+else:
+    g_below_ticks++
+    if g_below_ticks >= timeout (or timeout == 0):
+        g_paused = true
+        do NOT decrement
+```
+
+  - `timeout = 0` means pause immediately on the first below-threshold tick.
+  - `g_below_ticks` is reset to `0` when the state machine exits `TIME_CTR_STATE_AP_ACTIVE`.
 
 **State machine:**
 
@@ -395,6 +422,7 @@ uint32_t  pulse_in_total_count_get(void);
 ```c
 esp_err_t time_ctr_init(void);
 uint32_t  time_ctr_get(void);
+bool      time_ctr_is_paused(void);  /* true when countdown is paused due to below-threshold traffic */
 ```
 
 ---
@@ -505,7 +533,7 @@ Serves a self-contained HTML page (embedded as a C string literal or embedded fi
 | System           | Current local time, NTP sync status, uptime                                                             |
 | Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status                                   |
 | Reward AP        | SSID, active/inactive, connected clients count                                                          |
-| Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled                         |
+| Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled, countdown status (Decrementing / ⏸ Paused (low traffic)) |
 | Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average) |
 | Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count        |
 | Session Graphs   | Bar charts with day-of-month on X axis: average speed and total session duration per day                |
@@ -567,7 +595,8 @@ Returns JSON:
   "session_start_utc": 1741905000,
   "session_duration_s": 5400,
   "session_pulse_count": 1800,
-  "live_speed_kmh_x10": 123
+  "live_speed_kmh_x10": 123,
+  "countdown_paused": false
 }
 ```
 
@@ -782,6 +811,8 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | `start_s`     | uint16 | start_session_interval_s  |
 | `debounce_ms` | uint16 | pulse_debounce_time_ms    |
 | `tz`          | string | POSIX TZ string           |
+| `ap_thr_kbps` | uint16 | soft_ap_dec_time_above_threshold_kbps |
+| `ap_idle_tmo` | uint16 | soft_ap_idle_throughput_timeout_s |
 
 ### Namespace: `esport_log`
 

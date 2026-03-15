@@ -133,6 +133,7 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
     uint8_t  ap_clients = wifi_mngr_reward_ap_client_count();
     uint32_t counter_s  = time_ctr_get();
     uint32_t threshold  = config_mngr_soft_ap_start_threshold_s_get();
+    bool     b_paused   = time_ctr_is_paused();
 
     char sta_ip[20];
     char sta_ssid[33];
@@ -163,13 +164,14 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         "  \"session_start_utc\": %" PRId64 ",\n"
         "  \"session_duration_s\": %" PRIu32 ",\n"
         "  \"session_pulse_count\": %" PRIu32 ",\n"
-        "  \"live_speed_kmh_x10\": %" PRIu16 "\n"
+        "  \"live_speed_kmh_x10\": %" PRIu16 ",\n"
+        "  \"countdown_paused\": %s\n"
         "}\n",
         (int64_t)now_utc, time_local_str, b_synced ? "true" : "false", uptime_s,
         b_sta ? "true" : "false", sta_ssid, sta_ip, b_cfg_ap ? "true" : "false",
         b_rew_ap ? "true" : "false", rew_ap_ssid, ap_clients, counter_s, threshold,
         sess.p_state_name, sess.start_utc, sess.duration_s, sess.pulse_count,
-        sess.live_speed_kmh_x10);
+        sess.live_speed_kmh_x10, b_paused ? "true" : "false");
 
     if (n >= (int)HTTP_SRV_JSON_BUF_LEN)
     {

@@ -64,4 +64,21 @@ menu "esport-fi32 Configuration"
             Maximum 64 characters.  Build-time constant; not stored
             in NVS.
 
+    config ESPORT_AP_THRESHOLD_KBPS
+        int "Reward AP idle throughput threshold (kbps)"
+        range 0 65535
+        default 1
+        help
+            Combined RX+TX throughput (kbps) on the reward AP below which
+            the countdown is considered idle and may pause.
+
+    config ESPORT_AP_IDLE_TIMEOUT_S
+        int "Reward AP idle throughput timeout (seconds)"
+        range 0 65535
+        default 30
+        help
+            Number of consecutive seconds that throughput must remain below
+            the threshold before the countdown pauses.  Set to 0 to pause
+            on the very first below-threshold tick.
+
 endmenu

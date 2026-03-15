@@ -240,7 +240,43 @@ esp_err_t config_mngr_pulse_debounce_time_ms_set(uint16_t val);
  *         the allowed length range, or an NVS error code on write failure.
  */
 esp_err_t config_mngr_timezone_set(const char * p_val);
+/**
+ * \brief Return the reward AP idle throughput threshold in kbps.
+ *
+ * If combined RX+TX throughput on the reward AP drops below this value for
+ * more than #config_mngr_soft_ap_idle_throughput_timeout_s_get() consecutive
+ * seconds, the time counter pauses decrementing.
+ *
+ * \return Threshold in kbps (range 0\u201365535; 0 = pause immediately).
+ */
+uint16_t config_mngr_soft_ap_dec_threshold_kbps_get(void);
 
+/**
+ * \brief Set and persist the reward AP idle throughput threshold.
+ *
+ * \param[in] val  Threshold in kbps (range 0\u201365535).
+ *
+ * \return \c ESP_OK on success, or an NVS error code on write failure.
+ */
+esp_err_t config_mngr_soft_ap_dec_threshold_kbps_set(uint16_t val);
+
+/**
+ * \brief Return the number of consecutive below-threshold seconds before the
+ * countdown pauses.
+ *
+ * \return Timeout in seconds (range 0\u201365535; 0 = pause on first below-threshold
+ *         tick).
+ */
+uint16_t config_mngr_soft_ap_idle_throughput_timeout_s_get(void);
+
+/**
+ * \brief Set and persist the below-threshold idle timeout.
+ *
+ * \param[in] val  Timeout in seconds (range 0\u201365535).
+ *
+ * \return \c ESP_OK on success, or an NVS error code on write failure.
+ */
+esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val);
 #ifdef __cplusplus
 }
 #endif

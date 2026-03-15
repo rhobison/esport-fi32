@@ -37,6 +37,8 @@
 #define CONFIG_MNGR_KEY_START_S     ("start_s")
 #define CONFIG_MNGR_KEY_DEBOUNCE_MS ("debounce_ms")
 #define CONFIG_MNGR_KEY_TZ          ("tz")
+#define CONFIG_MNGR_KEY_AP_THR_KBPS ("ap_thr_kbps")
+#define CONFIG_MNGR_KEY_AP_IDLE_TMO ("ap_idle_tmo")
 
 /* Factory defaults (spec §3). */
 #define CONFIG_MNGR_DEF_WIFI_SSID   (CONFIG_ESPORT_WIFI_SSID)
@@ -50,6 +52,8 @@
 #define CONFIG_MNGR_DEF_START_S     ((uint16_t)10U)
 #define CONFIG_MNGR_DEF_DEBOUNCE_MS ((uint16_t)200U)
 #define CONFIG_MNGR_DEF_TZ          ("UTC0")
+#define CONFIG_MNGR_DEF_AP_THR_KBPS ((uint16_t)CONFIG_ESPORT_AP_THRESHOLD_KBPS)
+#define CONFIG_MNGR_DEF_AP_IDLE_TMO ((uint16_t)CONFIG_ESPORT_AP_IDLE_TIMEOUT_S)
 
 /* String size limits (spec §5.1). */
 #define CONFIG_MNGR_MAX_SSID_LEN (32U) /* max 32 chars + NUL */
@@ -134,6 +138,10 @@ esp_err_t config_mngr_init(void)
     ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_DEBOUNCE_MS,
         CONFIG_MNGR_DEF_DEBOUNCE_MS);
     ret |= config_mngr_default_str_write(handle, CONFIG_MNGR_KEY_TZ, CONFIG_MNGR_DEF_TZ);
+    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_AP_THR_KBPS,
+        CONFIG_MNGR_DEF_AP_THR_KBPS);
+    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_AP_IDLE_TMO,
+        CONFIG_MNGR_DEF_AP_IDLE_TMO);
 
     if (ESP_OK == ret)
     {
@@ -301,6 +309,36 @@ esp_err_t config_mngr_pulse_debounce_time_ms_set(uint16_t val)
 esp_err_t config_mngr_timezone_set(const char * p_val)
 {
     return config_mngr_str_set(CONFIG_MNGR_KEY_TZ, p_val, 1U, CONFIG_MNGR_MAX_TZ_LEN);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+uint16_t config_mngr_soft_ap_dec_threshold_kbps_get(void)
+{
+    return config_mngr_u16_get(CONFIG_MNGR_KEY_AP_THR_KBPS, CONFIG_MNGR_DEF_AP_THR_KBPS);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t config_mngr_soft_ap_dec_threshold_kbps_set(uint16_t val)
+{
+    /* Full uint16_t range 0–65535 is valid per spec §3. */
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_AP_THR_KBPS, val, 0U, UINT16_MAX);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+uint16_t config_mngr_soft_ap_idle_throughput_timeout_s_get(void)
+{
+    return config_mngr_u16_get(CONFIG_MNGR_KEY_AP_IDLE_TMO, CONFIG_MNGR_DEF_AP_IDLE_TMO);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val)
+{
+    /* Full uint16_t range 0–65535 is valid per spec §3. */
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_AP_IDLE_TMO, val, 0U, UINT16_MAX);
 }
 
 //--------------------------------------------------------------------------------------------------

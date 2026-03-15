@@ -7,4 +7,6 @@ cmake_minimum_required(VERSION 3.16)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
+# Enable lwip MIB2 per-interface byte counters for reward AP throughput measurement.
+idf_build_set_property(COMPILE_DEFINITIONS "MIB2_STATS=1" APPEND)
 project(esport-fi32)

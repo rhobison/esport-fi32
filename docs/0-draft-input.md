@@ -15,7 +15,7 @@ The goal of the project is to limit internet access to kids in the following way
 - The ESP32 should keep a log in its NVM memory with the following information:
   - Date/time the pulses started to be received.
   - Duration of the session. If pulses stopped for more than `idle_session_interval_s` seconds, the session should be considered as closed. `idle_session_interval_s` is a configuration.
-  - Average of speed in km/h based on the pulses/time. `meters_per_pulse` is a configuration and will help translate pulses to speed in km/h.
+  - Average of speed in km/h based on the pulses/time. `centimeters_per_pulse` is a configuration and will help translate pulses to speed in km/h.
 
 Configuration:
 When the ESP32 is not able to connect to `wifi_ssid`, it should enable a soft AP called `esport-fi32_config` with password `esport-fi32_config` and a web page should be available to configure all the parameters, including:
@@ -28,4 +28,6 @@ The Configuration Web page should be available all the time, via the `esport-fi3
 
 # Improvements
 
-1. The time left to deactivate the soft Ap (reward Ap) should decrement only if there are clients connected and there is some traffic. A configuration variable `soft_ap_dec_time_above_threshold_kbps` should determine the traffic bellow which the time is not decremented.
+1. The time left to deactivate the soft Ap (reward Ap) should decrement only if there are clients connected and there is some traffic. A configuration variable `soft_ap_dec_time_above_threshold_kbps` should determine the traffic bellow which the time is not decremented. -- planned
+2. The time counter for how long the Soft Ap should be on must be incremented only if `min_speed_to_increment_time_kmh_x10`. The minimum value is 0, no maximum limit. Default value=30 (3 km/h). -- planned
+3. Low power mode. When the time counter reaches 0, a timer with value `sleep_timeout_s` (configuration parameter) should start. When this timer reaches 0, the system should enter low power mode (most low power possible). If new pulses are received in the input, the system should wake-up and function normally. If new pulses are received during the `sleep_timeout_s` period, the sleep timer should be reset.
