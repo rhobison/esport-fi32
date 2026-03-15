@@ -126,10 +126,11 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     uint8_t ap_clients = wifi_mngr_reward_ap_client_count();
 
     uint32_t counter_s = time_ctr_get();
-    uint32_t threshold = config_mngr_soft_ap_start_threshold_s_get();
-    uint32_t ctr_h     = counter_s / 3600U;
-    uint32_t ctr_m     = (counter_s % 3600U) / 60U;
-    uint32_t ctr_s_r   = counter_s % 60U;
+    uint32_t threshold  = config_mngr_soft_ap_start_threshold_s_get();
+    bool     b_paused   = time_ctr_is_paused();
+    uint32_t ctr_h      = counter_s / 3600U;
+    uint32_t ctr_m      = (counter_s % 3600U) / 60U;
+    uint32_t ctr_s_r    = counter_s % 60U;
 
     char sta_ip[20];
     char sta_ssid[33];
@@ -233,9 +234,15 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<p>Counter:&nbsp;<b>%" PRIu32 "s</b>"
         "&nbsp;(%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 ")"
         "&nbsp; Threshold:&nbsp;<b>%" PRIu32 "s</b></p>"
-        "<p>Reward AP:&nbsp;<span class=\"%s\">%s</span></p></div>",
+        "<p>Reward AP:&nbsp;<span class=\"%s\">%s</span></p>"
+        "<p>Countdown:&nbsp;"
+        "<span id=\"pause-indicator\" style=\"display:%s;\">&#9208; Paused (low traffic)</span>"
+        "<span id=\"decrement-indicator\" style=\"display:%s;\">Decrementing</span>"
+        "</p></div>",
         counter_s, ctr_h, ctr_m, ctr_s_r, threshold, b_rew_ap ? "ok" : "err",
-        b_rew_ap ? "Active" : "Inactive");
+        b_rew_ap ? "Active" : "Inactive",
+        b_paused ? "inline" : "none",
+        b_paused ? "none" : "inline");
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
 
     /* Current Session section */
@@ -365,10 +372,27 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
                                     "Download JSON</a></div>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_export);
 
-    /* Navigation */
-    static const char sc_nav[] = "<div class=\"card\">"
-                                 "<a href=\"/config\">&#9881; Go to Configuration</a>"
-                                 "</div></body></html>";
+    /* Navigation and JS auto-refresh for pause indicator */
+    static const char sc_nav[] =
+        "<div class=\"card\">"
+        "<a href=\"/config\">&#9881; Go to Configuration</a>"
+        "</div>"
+        "<script>"
+        "(function(){"
+        "function refresh(){"
+        "fetch('/api/status').then(function(r){return r.json();}).then(function(d){"
+        "var pi=document.getElementById('pause-indicator');"
+        "var di=document.getElementById('decrement-indicator');"
+        "if(pi&&di){"
+        "pi.style.display=d.countdown_paused?'inline':'none';"
+        "di.style.display=d.countdown_paused?'none':'inline';"
+        "}"
+        "}).catch(function(){});"
+        "}"
+        "setInterval(refresh,2000);"
+        "})();"
+        "</script>"
+        "</body></html>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_nav);
 
     /* Terminate chunked response */

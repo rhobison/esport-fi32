@@ -40,6 +40,7 @@ extern "C"
 // Includes
 //==================================================================================================
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -71,6 +72,16 @@ esp_err_t time_ctr_init(void);
  * \return Current counter value in seconds (>= 0).
  */
 uint32_t time_ctr_get(void);
+
+/**
+ * \brief Return whether the countdown is currently paused due to low AP traffic.
+ *
+ * Thread-safe: acquires and releases the internal spinlock.
+ *
+ * \return \c true if paused (below-threshold throughput timeout elapsed),
+ *         \c false if decrementing normally or reward AP is inactive.
+ */
+bool time_ctr_is_paused(void);
 
 #ifdef __cplusplus
 }

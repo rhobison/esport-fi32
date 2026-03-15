@@ -77,6 +77,8 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     uint16_t    idle_s      = config_mngr_idle_session_interval_s_get();
     uint16_t    start_s     = config_mngr_start_session_interval_s_get();
     uint16_t    debounce_ms = config_mngr_pulse_debounce_time_ms_get();
+    uint16_t    ap_thr_kbps = config_mngr_soft_ap_dec_threshold_kbps_get();
+    uint16_t    ap_idle_tmo = config_mngr_soft_ap_idle_throughput_timeout_s_get();
     static char tz[64];
 
     config_mngr_wifi_ssid_get(wifi_ssid, sizeof(wifi_ssid));
@@ -210,6 +212,22 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
                                           "<input type=\"text\" name=\"timezone\" value=\"");
     (void)httpd_resp_sendstr_chunk(p_req, enc);
     (void)httpd_resp_sendstr_chunk(p_req, "\" maxlength=\"63\"></p>");
+
+    /* soft_ap_dec_time_above_threshold_kbps */
+    snprintf(num, sizeof(num), "%" PRIu16, ap_thr_kbps);
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<p><label>Reward AP idle throughput threshold (kbps)</label>"
+        "<input type=\"number\" name=\"soft_ap_dec_time_above_threshold_kbps\" value=\"");
+    (void)httpd_resp_sendstr_chunk(p_req, num);
+    (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
+
+    /* soft_ap_idle_throughput_timeout_s */
+    snprintf(num, sizeof(num), "%" PRIu16, ap_idle_tmo);
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<p><label>Idle throughput timeout (s)</label>"
+        "<input type=\"number\" name=\"soft_ap_idle_throughput_timeout_s\" value=\"");
+    (void)httpd_resp_sendstr_chunk(p_req, num);
+    (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
 
     /* ---- Footer ---- */
     static const char sc_footer[] = "<p style=\"margin-top:1em\">"
@@ -466,6 +484,48 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
     if (b_tz_changed)
     {
         time_mngr_timezone_apply();
+    }
+
+    /* soft_ap_dec_time_above_threshold_kbps (uint16, range 0–65535) */
+    if (ESP_OK ==
+        http_srv_form_field_get(body, "soft_ap_dec_time_above_threshold_kbps", num_str,
+            sizeof(num_str)))
+    {
+        char *        endptr;
+        unsigned long val = strtoul(num_str, &endptr, 10);
+        if (('\0' != *endptr) || (val > 65535UL))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "soft_ap_dec_time_above_threshold_kbps must be 0-65535");
+            return ESP_FAIL;
+        }
+        if (ESP_OK != config_mngr_soft_ap_dec_threshold_kbps_set((uint16_t)val))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "Invalid soft_ap_dec_time_above_threshold_kbps");
+            return ESP_FAIL;
+        }
+    }
+
+    /* soft_ap_idle_throughput_timeout_s (uint16, range 0–65535) */
+    if (ESP_OK ==
+        http_srv_form_field_get(body, "soft_ap_idle_throughput_timeout_s", num_str,
+            sizeof(num_str)))
+    {
+        char *        endptr;
+        unsigned long val = strtoul(num_str, &endptr, 10);
+        if (('\0' != *endptr) || (val > 65535UL))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "soft_ap_idle_throughput_timeout_s must be 0-65535");
+            return ESP_FAIL;
+        }
+        if (ESP_OK != config_mngr_soft_ap_idle_throughput_timeout_s_set((uint16_t)val))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "Invalid soft_ap_idle_throughput_timeout_s");
+            return ESP_FAIL;
+        }
     }
 
     /* Redirect to /config?saved=1 on success. */

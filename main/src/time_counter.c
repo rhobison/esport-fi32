@@ -66,6 +66,20 @@ static esp_timer_handle_t gp_tick_timer = NULL;
 /** Handle for the one-shot threshold timer that fires after #soft_ap_start_threshold_s seconds. */
 static esp_timer_handle_t gp_threshold_timer = NULL;
 
+/**
+ * \brief Tracks how many consecutive ticks throughput was below threshold.
+ *
+ * Protected by #g_spinlock; reset to 0 when AP is disabled or throughput
+ * rises above threshold.
+ */
+static          uint16_t g_below_ticks = 0U;
+
+/**
+ * \brief True when the countdown is currently paused due to low AP traffic;
+ * protected by #g_spinlock.
+ */
+static volatile bool g_paused = false;
+
 //==================================================================================================
 // Internal Function Prototypes
 //==================================================================================================
@@ -151,6 +165,16 @@ uint32_t time_ctr_get(void)
     uint32_t counter_snapshot = g_counter_s;
     portEXIT_CRITICAL(&g_spinlock);
     return counter_snapshot;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+bool time_ctr_is_paused(void)
+{
+    portENTER_CRITICAL(&g_spinlock);
+    bool b_paused = g_paused;
+    portEXIT_CRITICAL(&g_spinlock);
+    return b_paused;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -351,36 +375,76 @@ static void time_ctr_threshold_cb(void * p_arg)
 //--------------------------------------------------------------------------------------------------
 
 /**
- * \brief 1-second periodic timer callback that decrements #g_counter_s by one.
+ * \brief 1-second periodic timer callback that applies the traffic-gated decrement.
  *
- * Decrements the time credit counter (floored at zero) and, when the counter
- * reaches zero, stops the tick timer and initiates an ACTIVE→IDLE transition.
+ * Evaluates the sliding-window pause logic using current reward AP throughput
+ * from #wifi_mngr_reward_ap_throughput_kbps() against the configured threshold
+ * and timeout.  Decrements #g_counter_s only when throughput is above threshold
+ * or the below-threshold streak has not yet reached the timeout.  When the
+ * counter reaches zero, stops the tick timer and transitions back to
+ * #TIME_CTR_STATE_IDLE.
  *
- * \param[in] p_arg  Unused context pointer passed by the timer subsystem.
+ * \\param[in] p_arg  Unused context pointer passed by the timer subsystem.
  */
 static void time_ctr_tick_cb(void * p_arg)
 {
     (void)p_arg;
 
+    /* Read config and throughput outside the spinlock (these calls may sleep). */
+    uint32_t throughput = wifi_mngr_reward_ap_throughput_kbps();
+    uint16_t threshold  = config_mngr_soft_ap_dec_threshold_kbps_get();
+    uint16_t timeout    = config_mngr_soft_ap_idle_throughput_timeout_s_get();
+
     portENTER_CRITICAL(&g_spinlock);
-    if (0U < g_counter_s)
+
+    bool b_reached_zero = false;
+
+    if (throughput > (uint32_t)threshold)
     {
-        g_counter_s--;
+        /* Traffic above threshold — reset streak, clear pause, decrement. */
+        g_below_ticks = 0U;
+        g_paused      = false;
+        if (0U < g_counter_s)
+        {
+            g_counter_s--;
+        }
+        b_reached_zero = (0U == g_counter_s);
+        if (b_reached_zero)
+        {
+            g_state = TIME_CTR_STATE_IDLE;
+        }
     }
+    else
+    {
+        /* Traffic at or below threshold — advance streak counter. */
+        if (g_below_ticks < UINT16_MAX)
+        {
+            g_below_ticks++;
+        }
+        /* Pause if streak >= timeout, or immediately when timeout == 0. */
+        if ((0U == timeout) || (g_below_ticks >= (uint32_t)timeout))
+        {
+            g_paused = true;
+        }
+        /* Do NOT decrement when paused. */
+    }
+
     uint32_t counter_snapshot = g_counter_s;
-    bool     reached_zero     = (0U == g_counter_s);
-    if (reached_zero)
-    {
-        g_state = TIME_CTR_STATE_IDLE;
-    }
+
     portEXIT_CRITICAL(&g_spinlock);
 
     (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_snapshot,
         sizeof(counter_snapshot), 0U);
 
-    if (reached_zero)
+    if (b_reached_zero)
     {
         (void)esp_timer_stop(gp_tick_timer);
+
+        /* Reset sliding-window state when leaving AP_ACTIVE. */
+        portENTER_CRITICAL(&g_spinlock);
+        g_below_ticks = 0U;
+        g_paused      = false;
+        portEXIT_CRITICAL(&g_spinlock);
 
         esp_err_t ret = wifi_mngr_reward_ap_set(false);
         if (ESP_OK != ret)

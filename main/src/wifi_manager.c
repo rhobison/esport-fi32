@@ -17,11 +17,14 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_net_stack.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/lwip_napt.h"
+#include "lwip/netif.h"
+#include "lwip/stats.h"
 
 #include "config_manager.h"
 #include "event_ids.h"
@@ -75,6 +78,12 @@ static esp_timer_handle_t gp_reconnect_timer = NULL;
 
 /** true if the config AP is currently enabled. */
 static volatile bool gb_config_ap_active = false;
+
+/** Previous RX byte count snapshot for throughput measurement. */
+static uint64_t g_prev_rx_bytes = 0U;
+
+/** Previous TX byte count snapshot for throughput measurement. */
+static uint64_t g_prev_tx_bytes = 0U;
 
 //==================================================================================================
 // Internal Function Prototypes
@@ -280,6 +289,9 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
         esp_netif_dhcps_start(gp_netif_ap);
 
         gb_reward_ap_active = false;
+        /* Reset throughput measurement baseline so the next enable starts clean. */
+        g_prev_rx_bytes = 0U;
+        g_prev_tx_bytes = 0U;
         ESP_LOGI(gp_tag, "Reward AP disabled");
     }
 
@@ -353,6 +365,50 @@ void wifi_mngr_sta_ip_get(char * p_buf, size_t len)
 bool wifi_mngr_config_ap_is_active(void)
 {
     return gb_config_ap_active;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Return the combined RX+TX throughput on the reward AP in kbps.
+ *
+ * Reads cumulative byte counters from the underlying lwip netif
+ * (\c mib2_counters.ifinoctets and \c mib2_counters.ifoutoctets), computes
+ * the delta since the previous call, and converts to kbps.  Designed to be
+ * called exactly once per second from the tick callback.  Returns \c 0 when
+ * the reward AP is inactive or on the first call after activation.
+ *
+ * \return Combined RX+TX throughput in kbps.
+ */
+uint32_t wifi_mngr_reward_ap_throughput_kbps(void)
+{
+    if (!gb_reward_ap_active)
+    {
+        return 0U;
+    }
+
+    /* Obtain the underlying lwip struct netif from the esp_netif handle. */
+    struct netif * p_netif = (struct netif *)esp_netif_get_netif_impl(gp_netif_ap);
+    if (NULL == p_netif)
+    {
+        return 0U;
+    }
+
+    uint64_t cur_rx = (uint64_t)p_netif->mib2_counters.ifinoctets;
+    uint64_t cur_tx = (uint64_t)p_netif->mib2_counters.ifoutoctets;
+
+    /* Guard against 32-bit counter wrap: treat wrapped values as 0 delta. */
+    uint64_t delta_bytes = 0U;
+    if ((cur_rx >= g_prev_rx_bytes) && (cur_tx >= g_prev_tx_bytes))
+    {
+        delta_bytes = (cur_rx - g_prev_rx_bytes) + (cur_tx - g_prev_tx_bytes);
+    }
+
+    g_prev_rx_bytes = cur_rx;
+    g_prev_tx_bytes = cur_tx;
+
+    /* Convert bytes to kbps: multiply by 8 (bits) then divide by 1000 (kilo). */
+    return (uint32_t)(delta_bytes * 8U / 1000U);
 }
 
 //--------------------------------------------------------------------------------------------------

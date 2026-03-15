@@ -107,6 +107,19 @@ void wifi_mngr_sta_ip_get(char * p_buf, size_t len);
  */
 bool wifi_mngr_config_ap_is_active(void);
 
+/**
+ * \brief Return the combined RX+TX throughput on the reward AP in kbps.
+ *
+ * Measures bytes transferred on the reward AP netif since the previous call
+ * and converts the delta to kilobits per second.  Designed to be called
+ * exactly once per second from the time counter tick callback.  Returns
+ * \c 0 when the reward AP is inactive or on the first call after activation
+ * (no prior sample available).
+ *
+ * \return Combined RX+TX throughput in kbps, or \c 0 when unavailable.
+ */
+uint32_t wifi_mngr_reward_ap_throughput_kbps(void);
+
 #ifdef __cplusplus
 }
 #endif
