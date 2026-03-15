@@ -25,6 +25,7 @@ idf_component_register(
         "src/http_server_utils.c"
         "src/http_server_config.c"
         "src/http_server_api.c"
+        "src/http_server_export.c"
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)
