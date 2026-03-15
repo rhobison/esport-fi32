@@ -9,25 +9,31 @@
 
 ## Overview
 
-This plan breaks the firmware into **10 phases** that can be executed sequentially by AI coding agents.
+This plan breaks the firmware into **10 top-level phases** (with sub-phases 9A–9F for the HTTP server file refactoring) that can be executed sequentially by AI coding agents.
 Each phase is self-contained: it has clear inputs, explicit acceptance criteria, and defined output files.
 Agents must not skip phases or merge phases; each phase must pass its acceptance criteria before the next begins.
 
 ### Quick Reference
 
-| Phase | Name                           | Key output files                  |
-| ----- | ------------------------------ | --------------------------------- |
-| 0     | Project Skeleton               | CMakeLists, headers, Kconfig      |
-| 1     | NVS Config Manager             | `config_manager.c/h`              |
-| 2     | WiFi Manager                   | `wifi_manager.c/h`                |
-| 3     | SNTP / Time Manager            | `time_manager.c/h`                |
-| 4     | Pulse Input Module             | `pulse_input.c/h`                 |
-| 5     | Time Counter State Machine     | `time_counter.c/h`                |
-| 6     | Session Tracker                | `session_tracker.c/h`             |
-| 7     | NVS Session Log                | `session_log.c/h`                 |
-| 8     | HTTP Server — Config & API     | `http_server.c/h` (config + JSON) |
-| 9     | HTTP Server — Status Dashboard | `http_server.c/h` (HTML UI)       |
-| 10    | Integration & Verification     | `main.c` final wiring             |
+| Phase | Name                               | Key output files                                     |
+| ----- | ---------------------------------- | ---------------------------------------------------- |
+| 0     | Project Skeleton                   | CMakeLists, headers, Kconfig                         |
+| 1     | NVS Config Manager                 | `config_manager.c/h`                                 |
+| 2     | WiFi Manager                       | `wifi_manager.c/h`                                   |
+| 3     | SNTP / Time Manager                | `time_manager.c/h`                                   |
+| 4     | Pulse Input Module                 | `pulse_input.c/h`                                    |
+| 5     | Time Counter State Machine         | `time_counter.c/h`                                   |
+| 6     | Session Tracker                    | `session_tracker.c/h`                                |
+| 7     | NVS Session Log                    | `session_log.c/h`                                    |
+| 8     | HTTP Server — Config & API         | `http_server.c/h` (config + JSON)                    |
+| 9     | HTTP Server — Status Dashboard     | `http_server.c/h` (HTML UI)                          |
+| 9A    | HTTP Server Refactor: Utils        | `http_server_utils.c/h`                              |
+| 9B    | HTTP Server Refactor: Config       | `http_server_config.c`, `http_server_config.h`       |
+| 9C    | HTTP Server Refactor: API          | `http_server_api.c/h`                                |
+| 9D    | HTTP Server Refactor: Export       | `http_server_export.c`, `http_server_export.h`       |
+| 9E    | HTTP Server Refactor: Dashboard    | `http_server_dashboard.c`, `http_server_dashboard.h` |
+| 9F    | HTTP Server Refactor: Core & Build | `http_server.c` (trimmed), `CMakeLists.txt`          |
+| 10    | Integration & Verification         | `main.c` final wiring                                |
 
 ---
 
@@ -562,6 +568,276 @@ Add the HTML status dashboard (`GET /`) to `http_server.c`.
 
 ---
 
+## Phase 9A — HTTP Server Refactor: Shared Utilities
+
+### Goal
+
+Extract the three internal helper functions and all shared buffer-size constants from `http_server.c` into a dedicated translation unit. All subsequent refactoring phases depend on this file and must not begin until it compiles cleanly.
+
+### Inputs
+
+- `main/src/http_server.c` (Phase 9 output — the monolithic 1718-line file)
+- `main/inc/http_server.h`
+
+### Tasks
+
+1. **Create `main/inc/http_server_utils.h`** (internal header — not part of the public API):
+   - Move the following `#define` constants here from `http_server.c`: `HTTP_SRV_POST_BODY_MAX_LEN`, `HTTP_SRV_JSON_BUF_LEN`, `HTTP_SRV_DAILY_WINDOW_DAYS`, `HTTP_SRV_ATTR_ENC_LEN`, `HTTP_SRV_ENTRY_BUF_LEN`, `HTTP_SRV_SECS_PER_DAY`, `HTTP_SRV_FORM_VALUE_ENC_MAX_LEN`, `HTTP_SRV_HTML_BUF_LEN`, `HTTP_SRV_HIST_MAX`, `HTTP_SRV_GRAPH_MAX`.
+   - Do **not** include `HTTP_SRV_SVG_*` constants — those will be defined locally in `http_server_dashboard.c` only.
+   - Declare the three helpers as non-`static` (they must be callable from other translation units):
+     ```c
+     void      http_srv_url_decode(const char *p_src, char *p_dst, size_t dst_len);
+     esp_err_t http_srv_form_field_get(const char *p_body, const char *p_key,
+                                       char *p_out, size_t out_len);
+     void      http_srv_html_attr_encode(const char *p_src, char *p_dst, size_t dst_len);
+     ```
+   - Use `hhtemplate` structure; guard with `HTTP_SERVER_UTILS_H`.
+
+2. **Create `main/src/http_server_utils.c`**:
+   - Move the three helper implementations verbatim from `http_server.c`; remove `static` from each definition.
+   - Follow `cctemplate` structure: Doxygen file header (`\file`, `\brief`, `\date`), `gp_tag`, `//===` section separators, `//---` after every function `}`, `/*** end of file ***/` footer.
+   - Include `http_server_utils.h` plus required system headers (`<ctype.h>`, `<stdlib.h>`, `<string.h>`, `esp_err.h`).
+
+3. **Update `main/src/http_server.c`**:
+   - Delete the three helper implementations and their forward declarations from the Internal Function Prototypes section.
+   - Delete the moved `#define` constants.
+   - Add `#include "http_server_utils.h"`.
+
+4. **Update `main/CMakeLists.txt`**: add `"src/http_server_utils.c"` to the `SRCS` list.
+
+### Notes
+
+> **Stack budget — applies to all phases 9A–9F.**
+> No function in any `http_server_*.c` file, nor any function it calls transitively within the same task, may allocate more than **512 bytes in total on the stack** at any one point in the call chain. All buffers larger than 512 bytes must be heap-allocated with `malloc` (and the return value checked). This constraint exists because HTTP handlers run in the `httpd` worker task, which has a limited stack. The only exception is small, bounded scratch variables (e.g. a `char num[16]` or `char hex[3]`) — these are fine.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors.
+- [ ] All shared `HTTP_SRV_*` constants are defined exactly once, in `http_server_utils.h`.
+- [ ] `http_srv_url_decode()`, `http_srv_form_field_get()`, and `http_srv_html_attr_encode()` are no longer defined in `http_server.c`.
+- [ ] All existing endpoints continue to respond correctly.
+- [ ] No individual function allocates more than 512 bytes of local variables on the stack.
+
+---
+
+## Phase 9B — HTTP Server Refactor: Configuration Handlers
+
+### Goal
+
+Move the `GET /config` and `POST /config` handlers out of `http_server.c` into a dedicated translation unit.
+
+### Inputs
+
+- `main/src/http_server.c` (Phase 9A output)
+- `main/inc/http_server_utils.h`
+
+### Tasks
+
+1. **Create `main/inc/http_server_config.h`** (internal header):
+   - Declare the two handlers as non-`static`:
+     ```c
+     esp_err_t http_srv_config_get_handler(httpd_req_t *p_req);
+     esp_err_t http_srv_config_post_handler(httpd_req_t *p_req);
+     ```
+   - Include `esp_http_server.h`; guard with `HTTP_SERVER_CONFIG_H`; use `hhtemplate` structure.
+
+2. **Create `main/src/http_server_config.c`**:
+   - Move both handler implementations verbatim from `http_server.c`; remove `static` from each definition.
+   - Include `http_server_config.h`, `http_server_utils.h`, and all required module headers (`config_manager.h`, `time_manager.h`, `esp_http_server.h`, etc.).
+   - Follow `cctemplate` structure with `gp_tag`.
+
+3. **Update `main/src/http_server.c`**:
+   - Remove both handler implementations and their forward declarations.
+   - Add `#include "http_server_config.h"`.
+
+4. **Update `main/CMakeLists.txt`**: add `"src/http_server_config.c"` to `SRCS`.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds.
+- [ ] `GET /config` returns HTTP 200 with all 11 form fields pre-populated.
+- [ ] `POST /config` with valid data saves to NVS and redirects to `/config?saved=1`.
+- [ ] `POST /config` with `seconds_per_pulse=0` returns HTTP 400.
+
+---
+
+## Phase 9C — HTTP Server Refactor: JSON API Handlers
+
+### Goal
+
+Move `GET /api/status`, `GET /api/sessions`, and `GET /api/sessions/daily` to a dedicated file. Extract the duplicated 31-day binning logic into a single shared helper `http_srv_daily_bins_build()` so the dashboard (Phase 9E) can call it instead of copying the code.
+
+### Inputs
+
+- `main/src/http_server.c` (Phase 9B output)
+- `main/inc/http_server_utils.h`
+
+### Tasks
+
+1. **Create `main/inc/http_server_api.h`** (internal header):
+   - Move `http_srv_daily_bin_t` typedef here from the Internal Constants section of `http_server.c`.
+   - Declare the shared bin-builder helper:
+     ```c
+     void http_srv_daily_bins_build(http_srv_daily_bin_t       *p_bins,
+                                    const session_trk_record_t *p_sessions,
+                                    uint16_t                    count);
+     ```
+     This function fills the caller-supplied `p_bins` array (`HTTP_SRV_DAILY_WINDOW_DAYS` entries) with the 31-day window ending today (local time) and accumulates `p_sessions` into the matching bins.
+   - Declare the three API handlers (non-`static`).
+   - Guard with `HTTP_SERVER_API_H`; use `hhtemplate` structure.
+
+2. **Create `main/src/http_server_api.c`**:
+   - Implement `http_srv_daily_bins_build()` by extracting and consolidating the identical bin-building loops currently duplicated in `http_srv_root_get_handler()` and `http_srv_api_sessions_daily_handler()`.
+   - Move all three handler implementations verbatim; update `http_srv_api_sessions_daily_handler()` to call `http_srv_daily_bins_build()` instead of the inline loop.
+   - Remove `static` from all four function definitions.
+   - Follow `cctemplate` structure with `gp_tag`.
+
+3. **Update `main/src/http_server.c`**:
+   - Remove the three handler implementations, the `http_srv_daily_bin_t` typedef, and their forward declarations.
+   - Add `#include "http_server_api.h"`.
+
+4. **Update `main/CMakeLists.txt`**: add `"src/http_server_api.c"` to `SRCS`.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds.
+- [ ] `GET /api/status` returns valid JSON with all keys from spec §6.3.
+- [ ] `GET /api/sessions` returns valid JSON array.
+- [ ] `GET /api/sessions/daily` returns valid JSON with 31 day bins including zero-filled days.
+- [ ] The 31-day binning logic exists in exactly one place: `http_srv_daily_bins_build()` in `http_server_api.c`.
+
+---
+
+## Phase 9D — HTTP Server Refactor: Export Handlers
+
+### Goal
+
+Move `GET /api/sessions/export` and its two internal send helpers to a dedicated translation unit.
+
+### Inputs
+
+- `main/src/http_server.c` (Phase 9C output)
+- `main/inc/http_server_utils.h`
+
+### Tasks
+
+1. **Create `main/inc/http_server_export.h`** (internal header):
+   - Declare only the route handler (the two `_send` helpers remain `static` inside the `.c` file):
+     ```c
+     esp_err_t http_srv_api_sessions_export_handler(httpd_req_t *p_req);
+     ```
+   - Guard with `HTTP_SERVER_EXPORT_H`; use `hhtemplate` structure.
+
+2. **Create `main/src/http_server_export.c`**:
+   - Move `http_srv_export_csv_send()`, `http_srv_export_json_send()`, and `http_srv_api_sessions_export_handler()` verbatim from `http_server.c`.
+   - `http_srv_export_csv_send()` and `http_srv_export_json_send()` keep `static`; add their forward declarations to the Internal Function Prototypes section.
+   - `http_srv_api_sessions_export_handler()` removes `static`.
+   - Include `http_server_export.h`, `http_server_utils.h`, and required module headers.
+   - Follow `cctemplate` structure with `gp_tag`.
+
+3. **Update `main/src/http_server.c`**: remove the three function implementations and their forward declarations; add `#include "http_server_export.h"`.
+
+4. **Update `main/CMakeLists.txt`**: add `"src/http_server_export.c"` to `SRCS`.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds.
+- [ ] `GET /api/sessions/export?format=csv` returns downloadable CSV with the correct header row.
+- [ ] `GET /api/sessions/export?format=json` returns downloadable JSON with attachment header.
+- [ ] `GET /api/sessions/export?format=xml` returns HTTP 400 with JSON error body.
+
+---
+
+## Phase 9E — HTTP Server Refactor: Status Dashboard
+
+### Goal
+
+Move the `GET /` status dashboard handler to a dedicated file. Eliminate code duplication by calling `http_srv_daily_bins_build()` from Phase 9C instead of re-implementing the bin loop.
+
+### Inputs
+
+- `main/src/http_server.c` (Phase 9D output)
+- `main/inc/http_server_api.h` (for `http_srv_daily_bin_t` and `http_srv_daily_bins_build()`)
+- `main/inc/http_server_utils.h`
+
+### Tasks
+
+1. **Create `main/inc/http_server_dashboard.h`** (internal header):
+   - Declare:
+     ```c
+     esp_err_t http_srv_root_get_handler(httpd_req_t *p_req);
+     ```
+   - Guard with `HTTP_SERVER_DASHBOARD_H`; use `hhtemplate` structure.
+
+2. **Create `main/src/http_server_dashboard.c`**:
+   - Move `http_srv_root_get_handler()` verbatim from `http_server.c`.
+   - Replace the inline 31-day bin population loop with a call to `http_srv_daily_bins_build(p_bins, p_graph, graph_count)`.
+   - Define `HTTP_SRV_SVG_*` constants locally in this file (they are only needed here).
+   - Remove `static` from `http_srv_root_get_handler()`.
+   - Include `http_server_dashboard.h`, `http_server_api.h`, `http_server_utils.h`, and all required module headers.
+   - Follow `cctemplate` structure with `gp_tag`.
+
+3. **Update `main/src/http_server.c`**:
+   - Remove `http_srv_root_get_handler()` implementation, the `HTTP_SRV_SVG_*` constant definitions, and the handler's forward declaration.
+   - Add `#include "http_server_dashboard.h"`.
+
+4. **Update `main/CMakeLists.txt`**: add `"src/http_server_dashboard.c"` to `SRCS`.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds.
+- [ ] `GET /` returns HTTP 200 with valid HTML containing all sections from spec §6.1.
+- [ ] Both SVG bar charts (daily avg speed and daily total duration) render correctly with day-of-month X-axis labels.
+- [ ] No `HTTP_SRV_SVG_*` constants remain in `http_server.c`.
+- [ ] `http_server_dashboard.c` calls `http_srv_daily_bins_build()` — it does not contain a copy of the bin-building loop.
+
+---
+
+## Phase 9F — HTTP Server Refactor: Core Cleanup & Build Verification
+
+### Goal
+
+Confirm `http_server.c` is now an init-only file, verify `CMakeLists.txt` lists all new sources, and close out the refactoring with a clean build.
+
+### Inputs
+
+- All Phase 9A–9E outputs.
+
+### Tasks
+
+1. **Audit `main/src/http_server.c`**. After all prior phases it must contain only:
+   - Doxygen file header and `#include` directives (including the five internal headers: `http_server_utils.h`, `http_server_config.h`, `http_server_api.h`, `http_server_export.h`, `http_server_dashboard.h`).
+   - `gp_tag` and `gp_server_handle` static variables.
+   - `http_srv_init()` implementation (server start + URI registration for all 7 routes).
+   - No handler function bodies, no helper functions, no `#define` constants other than those used solely inside `http_srv_init()`.
+
+2. **Confirm `main/inc/http_server.h`** (the public API header) is unchanged — it must still declare only `http_srv_init()`.
+
+3. **Confirm `main/CMakeLists.txt`** `SRCS` contains all six files:
+   ```
+   "src/http_server.c"
+   "src/http_server_utils.c"
+   "src/http_server_config.c"
+   "src/http_server_api.c"
+   "src/http_server_export.c"
+   "src/http_server_dashboard.c"
+   ```
+
+4. Run `idf.py build` and fix any remaining compilation or linker errors.
+
+5. Verify final file sizes — no single `.c` file in the `http_server` group should exceed 450 lines.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and zero warnings (`-Werror` enforced).
+- [ ] `http_server.c` is ≤ 100 lines.
+- [ ] No `HTTP_SRV_*` size or window constant is defined in more than one file.
+- [ ] No handler function body exists in `http_server.c`.
+- [ ] All six new `.c` files follow `cctemplate` structure; all five new internal `.h` files follow `hhtemplate` structure.
+- [ ] All endpoints (`/`, `/config`, `POST /config`, `/api/status`, `/api/sessions`, `/api/sessions/export`, `/api/sessions/daily`) respond correctly.
+
+---
+
 ## Phase 10 — Integration & Verification
 
 ### Goal
@@ -570,7 +846,7 @@ Wire all modules together in `main.c`, add final integration, and verify end-to-
 
 ### Inputs
 
-- All Phase 0–9 outputs.
+- All Phase 0–9F outputs.
 - `docs/1-specification.md` (full document).
 
 ### Tasks
@@ -643,25 +919,36 @@ Phase 0 (Skeleton)
           │                               └── Phase 7 (Session Log)
           └─────────────────────────────────────────────────────────┐
                                                                     │
-Phase 8 (HTTP Config+API) ── requires phases 1-7 complete           │
-Phase 9 (HTTP Dashboard)  ── requires phase 8 complete              │
-Phase 10 (Integration)    ── requires phases 0-9 complete ──────────┘
+Phase 8  (HTTP Config+API)       ── requires phases 1-7 complete         │
+Phase 9  (HTTP Dashboard)        ── requires phase 8 complete            │
+Phase 9A (Refactor: Utils)       ── requires phase 9 complete            │
+Phase 9B (Refactor: Config)      ── requires phase 9A complete           │
+Phase 9C (Refactor: API)         ── requires phase 9A complete           │
+Phase 9D (Refactor: Export)      ── requires phase 9A complete           │
+Phase 9E (Refactor: Dashboard)   ── requires phases 9A + 9C complete     │
+Phase 9F (Refactor: Core+Build)  ── requires phases 9B–9E complete      │
+Phase 10 (Integration)           ── requires phases 0–9F complete ─────┘
 ```
 
 ## Module Prefix Table
 
 Every symbol (functions, types, `#define` macros, `enum` values) **must** start with the module's designated prefix.  This applies to **both public and internal** symbols.  Use lower-case prefixes for functions/types and upper-case for macros/enum values.
 
-| Source file       | Function / type prefix | Macro / enum prefix |
-| ----------------- | ---------------------- | ------------------- |
-| `config_manager`  | `config_mngr_`         | `CONFIG_MNGR_`      |
-| `wifi_manager`    | `wifi_mngr_`           | `WIFI_MNGR_`        |
-| `time_manager`    | `time_mngr_`           | `TIME_MNGR_`        |
-| `pulse_input`     | `pulse_in_`            | `PULSE_IN_`         |
-| `time_counter`    | `time_ctr_`            | `TIME_CTR_`         |
-| `session_tracker` | `session_trk_`         | `SESSION_TRK_`      |
-| `session_log`     | `session_log_`         | `SESSION_LOG_`      |
-| `http_server`     | `http_srv_`            | `HTTP_SRV_`         |
+| Source file             | Function / type prefix | Macro / enum prefix |
+| ----------------------- | ---------------------- | ------------------- |
+| `config_manager`        | `config_mngr_`         | `CONFIG_MNGR_`      |
+| `wifi_manager`          | `wifi_mngr_`           | `WIFI_MNGR_`        |
+| `time_manager`          | `time_mngr_`           | `TIME_MNGR_`        |
+| `pulse_input`           | `pulse_in_`            | `PULSE_IN_`         |
+| `time_counter`          | `time_ctr_`            | `TIME_CTR_`         |
+| `session_tracker`       | `session_trk_`         | `SESSION_TRK_`      |
+| `session_log`           | `session_log_`         | `SESSION_LOG_`      |
+| `http_server`           | `http_srv_`            | `HTTP_SRV_`         |
+| `http_server_utils`     | `http_srv_`            | `HTTP_SRV_`         |
+| `http_server_config`    | `http_srv_`            | `HTTP_SRV_`         |
+| `http_server_api`       | `http_srv_`            | `HTTP_SRV_`         |
+| `http_server_export`    | `http_srv_`            | `HTTP_SRV_`         |
+| `http_server_dashboard` | `http_srv_`            | `HTTP_SRV_`         |
 
 > `gp_tag` is a universal file-scope variable name and does **not** carry a module prefix (it follows the BARR-C:2018 pointer variable naming rule instead).
 
@@ -697,5 +984,6 @@ Every symbol (functions, types, `#define` macros, `enum` values) **must** start 
 ```
 - Use `ESP_LOGI` for normal operational events, `ESP_LOGW` for recoverable anomalies, `ESP_LOGE` for errors.
 - Prefer stack allocation; use heap only when size is unknown at compile time (e.g. HTTP response body). Always check `malloc` return value.
+- **Stack budget:** no function (nor any transitive callee within the same task) may allocate more than **512 bytes in total on the stack** at any single point in the call chain. Buffers larger than 512 bytes must be heap-allocated. Small scratch variables (e.g. `char num[16]`, `char hex[3]`) are exempt.
 - When allocating the HTTP response buffer, `4096` bytes is sufficient for the JSON endpoints; use `16384` bytes for the HTML dashboard.
 - The entire codebase must compile cleanly under ESP-IDF v5.x with `-Werror`.
