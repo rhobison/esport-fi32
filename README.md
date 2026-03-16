@@ -1,74 +1,157 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-S2 | ESP32-S3 | ESP32-P4 | ESP32-H2 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- | -------- |
+# esport-fi32
 
-# Wi-Fi SoftAP & Station Example
+**Turn pedalling into internet time — a parental-control firmware for the ESP32-C6.**
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+esport-fi32 is an ESP-IDF firmware that incentivises children to exercise on a sports/exercise bike by gating Wi-Fi internet access behind time credits earned through physical activity. The more the child pedals, the more internet time they earn. When the credits run out, the Wi-Fi access point shuts down automatically.
 
-This example demonstrates how to use the ESP Wi-Fi driver to act as both an Access Point and a Station simultaneously using the SoftAP and Station features.
-With NAPT enabled on the softAP interface and the station interface set as the default interface this example can be used as Wifi nat router.
+---
 
-## How to use example
-### Configure the project
+## How it works
 
-Open the project configuration menu (`idf.py menuconfig`).
+1. **Sensor input** — A bike sensor is wired to a GPIO pin on the ESP32-C6. Every pedal revolution generates a pulse that is counted by the firmware.
+2. **Credit accumulation** — Each pulse adds a configurable number of seconds (`seconds_per_pulse`) to a time counter.
+3. **Reward Wi-Fi** — Once continuous pedalling exceeds a warm-up threshold (`soft_ap_start_threshold_s`), the firmware enables a **Reward Soft AP** that acts as a NAT router, giving connected devices access to the internet through the home network.
+4. **Countdown** — While the Reward AP is active, the time counter counts down in real time. Continued pedalling replenishes the credits. The countdown pauses automatically when there is no active internet traffic (configurable threshold), so idle screen time does not consume credits.
+5. **Access cut-off** — When the counter reaches zero the Reward AP is disabled and internet access is cut off until the child earns more credits.
 
-In the `Example Configuration` menu:
+---
 
-* Set the Wi-Fi SoftAP configuration.
-    * Set `WiFi AP SSID`.
-    * Set `WiFi AP Password`.
+## Features
 
-* Set the Wi-Fi STA configuration.
-    * Set `WiFi Remote AP SSID`.
-    * Set `WiFi Remote AP Password`.
+- **AP + STA simultaneous mode** with NAT — connected devices browse the internet via the home network.
+- **Exercise session tracking** — sessions are detected, timed, and stored in NVS as a ring buffer with start time, duration, distance, and average speed.
+- **NTP time synchronisation** — date/time is synced at boot; a configurable POSIX timezone string converts UTC timestamps to local time.
+- **Always-available configuration portal** — a web UI is reachable via the home network IP or via a dedicated fallback config AP (`esport-fi32_config`) when home network access is unavailable.
+- **Live status dashboard** — shows the current counter value, AP state, connected clients, NTP status, and session history.
+- **REST JSON API** — for status, session history, CSV/JSON export, and daily activity aggregates (suitable for charts).
+- **Fully configurable** — all parameters (SSID, password, seconds-per-pulse, thresholds, timezone, …) are stored in NVS and survive reboots.
 
-Optional: If necessary, modify the other choices to suit your needs.
+---
 
-### Build and Flash
+## Web UI
 
-Build the project and flash it to the board, then run the monitor tool to view the serial output:
+The built-in HTTP server provides two pages and a JSON API, accessible from any browser on the same network.
 
-Run `idf.py -p PORT flash monitor` to build, flash and monitor the project.
+### Status Dashboard (`/`)
 
-(To exit the serial monitor, type ``Ctrl-]``.)
+![Status Dashboard](docs/imgs/dashboard-1.png)
 
-## Example Output
+![Status Dashboard](docs/imgs/dashboard-2.png)
 
-There is the console output for this example:
+Shows in real time:
+- Time counter (credits remaining)
+- Reward AP status (on / off) and connected clients
+- Current exercise session info (speed, duration)
+- NTP sync status
+- Session history table
+
+### Configuration Page (`/config`)
+
+![Configuration Page](docs/imgs/config.png)
+
+Lets you set all parameters without reflashing:
+- Home Wi-Fi credentials
+- Reward AP SSID & password
+- Seconds earned per pulse, warm-up threshold
+- Wheel circumference (for speed calculation)
+- Session detection timings, debounce
+- Traffic threshold for countdown pause
+- Timezone (POSIX TZ string)
+
+---
+
+## Hardware
+
+| Item             | Details                                               |
+| ---------------- | ----------------------------------------------------- |
+| MCU              | ESP32-C6                                              |
+| Bike sensor GPIO | GPIO 10 (configurable via `CONFIG_ESPORT_PULSE_GPIO`) |
+| GPIO pull        | Internal pull-up (sensor closes to GND)               |
+| Active edge      | Falling edge                                          |
+
+Connect the exercise bike's reed switch or hall-effect sensor between **GPIO 10** and **GND**.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- [ESP-IDF v5.x](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/)
+- ESP32-C6 development board
+
+### Build & Flash
+
+```bash
+idf.py set-target esp32c6
+idf.py build
+idf.py -p PORT flash monitor
+```
+
+### First-time configuration
+
+1. On first boot (or when home Wi-Fi credentials are not yet configured) the device creates a fallback AP:
+   - **SSID:** `esport-fi32_config`
+   - **Password:** `esport-fi32_config`
+2. Connect to that network and open **http://192.168.4.1/config** in a browser.
+3. Enter your home Wi-Fi credentials, the Reward AP name/password, and any other settings.
+4. Save and reboot. The device will connect to your home network.
+5. The configuration page remains accessible via the home network IP from that point on.
+
+---
+
+## Configuration Parameters
+
+All parameters are stored in NVS and can be changed at runtime via the web UI.
+
+| Parameter                               | Default       | Description                                             |
+| --------------------------------------- | ------------- | ------------------------------------------------------- |
+| `wifi_ssid`                             | _(empty)_     | Home network SSID                                       |
+| `wifi_password`                         | _(empty)_     | Home network password                                   |
+| `soft_ap_ssid`                          | `esport-fi32` | Reward AP SSID                                          |
+| `soft_ap_password`                      | `esport-fi32` | Reward AP password                                      |
+| `seconds_per_pulse`                     | `3`           | Seconds of internet time earned per bike pulse          |
+| `soft_ap_start_threshold_s`             | `300`         | Warm-up pedalling time (s) before AP is enabled         |
+| `centimeters_per_pulse`                 | `25`          | Wheel travel per pulse (cm), used for speed display     |
+| `idle_session_interval_s`               | `30`          | Gap (s) with no pulses that closes a session            |
+| `start_session_interval_s`              | `10`          | Continuous pedalling (s) required to open a session     |
+| `pulse_debounce_time_ms`                | `200`         | Minimum time (ms) between two accepted pulses           |
+| `timezone`                              | `UTC0`        | POSIX TZ string (e.g. `CET-1CEST,M3.5.0,M10.5.0/3`)     |
+| `soft_ap_dec_time_above_threshold_kbps` | `1`           | Traffic threshold (kbps) below which countdown pauses   |
+| `soft_ap_idle_throughput_timeout_s`     | `30`          | Seconds of low traffic before countdown actually pauses |
+
+---
+
+## REST API
+
+| Endpoint               | Method     | Description                   |
+| ---------------------- | ---------- | ----------------------------- |
+| `/`                    | GET        | Status dashboard (HTML)       |
+| `/config`              | GET / POST | Configuration form (HTML)     |
+| `/api/status`          | GET        | Live state as JSON            |
+| `/api/sessions`        | GET        | Session history as JSON       |
+| `/api/sessions/export` | GET        | Download CSV or JSON report   |
+| `/api/sessions/daily`  | GET        | Daily aggregates for charting |
+
+---
+
+## Project Structure
 
 ```
-I (680) WiFi SoftAP: ESP_WIFI_MODE_AP
-I (690) WiFi SoftAP: wifi_init_softap finished. SSID:myssid password:mypassword channel:1
-I (690) WiFi Sta: ESP_WIFI_MODE_STA
-I (690) WiFi Sta: wifi_init_sta finished.
-I (700) phy_init: phy_version 4670,719f9f6,Feb 18 2021,17:07:07
-I (800) wifi:mode : sta (58:bf:25:e0:41:00) + softAP (58:bf:25:e0:41:01)
-I (800) wifi:enable tsf
-I (810) wifi:Total power save buffer number: 16
-I (810) wifi:Init max length of beacon: 752/752
-I (810) wifi:Init max length of beacon: 752/752
-I (820) WiFi Sta: Station started
-I (820) wifi:new:<1,1>, old:<1,1>, ap:<1,1>, sta:<1,1>, prof:1
-I (820) wifi:state: init -> auth (b0)
-I (830) wifi:state: auth -> assoc (0)
-E (840) wifi:Association refused temporarily, comeback time 1536 mSec
-I (2380) wifi:state: assoc -> assoc (0)
-I (2390) wifi:state: assoc -> run (10)
-I (2400) wifi:connected with myssid_c3, aid = 1, channel 1, 40U, bssid = 84:f7:03:60:86:1d
-I (2400) wifi:security: WPA2-PSK, phy: bgn, rssi: -14
-I (2410) wifi:pm start, type: 1
-
-I (2410) wifi:AP's beacon interval = 102400 us, DTIM period = 2
-I (3920) WiFi Sta: Got IP:192.168.5.2
-I (3920) esp_netif_handlers: sta ip: 192.168.5.2, mask: 255.255.255.0, gw: 192.168.5.1
-I (3920) WiFi Sta: connected to ap SSID:myssid_c3 password:mypassword_c3
+main/
+  inc/           # Header files for all modules
+  src/
+    main.c             # Startup & module initialisation
+    config_manager.c   # NVS-backed configuration
+    wifi_manager.c     # AP+STA+NAT Wi-Fi management
+    time_manager.c     # SNTP / timezone
+    pulse_input.c      # GPIO interrupt & debounce
+    time_counter.c     # Credit counter & reward AP state machine
+    session_tracker.c  # Exercise session detection
+    session_log.c      # NVS ring-buffer session log
+    http_server.c      # Web UI & REST API
+docs/
+  1-specification.md   # Full firmware specification
+  2-development_plan.md
 ```
 
-## Running the example on ESP Chips without Wi-Fi
-
-This example can run on ESP Chips without Wi-Fi using ESP-Hosted. See the [Two-Chip Solution](../README.md#wi-fi-examples-with-two-chip-solution) section in the upper level `README.md` for information.
-
-## Troubleshooting
-
-For any technical queries, please open an [issue](https://github.com/espressif/esp-idf/issues) on GitHub. We will get back to you soon.
