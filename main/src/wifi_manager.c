@@ -22,7 +22,6 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "lwip/lwip_napt.h"
 #include "lwip/netif.h"
 #include "lwip/stats.h"
 
@@ -54,6 +53,9 @@
 /** Reward AP subnet netmask. */
 #define WIFI_MNGR_REWARD_AP_NETMASK ("255.255.255.0")
 
+/** DHCP server option flag to offer a DNS server address to clients (DHCP option 6). */
+#define DHCPS_OFFER_DNS (0x02U)
+
 //==================================================================================================
 // Variables/Data
 //==================================================================================================
@@ -79,6 +81,9 @@ static esp_timer_handle_t gp_reconnect_timer = NULL;
 /** true if the config AP is currently enabled. */
 static volatile bool gb_config_ap_active = false;
 
+/** true when NAPT should be armed on the next WIFI_EVENT_AP_START. */
+static volatile bool gb_napt_pending = false;
+
 /** Previous RX byte count snapshot for throughput measurement. */
 static uint64_t g_prev_rx_bytes = 0U;
 
@@ -92,6 +97,7 @@ static uint64_t g_prev_tx_bytes = 0U;
 static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, int32_t event_id,
     void * p_event_data);
 static void wifi_mngr_reconnect_timer_cb(void * p_arg);
+static void wifi_mngr_ap_dns_forward(void);
 static esp_err_t wifi_mngr_config_ap_enable(void);
 static esp_err_t wifi_mngr_config_ap_disable(void);
 static esp_err_t wifi_mngr_sta_connect(void);
@@ -214,10 +220,15 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
         config_mngr_soft_ap_ssid_get(ap_ssid, sizeof(ap_ssid));
         config_mngr_soft_ap_password_get(ap_password, sizeof(ap_password));
 
+        /* Arm NAPT before triggering the mode change so the flag is visible
+         * to the WIFI_EVENT_AP_START handler regardless of task scheduling. */
+        gb_napt_pending = true;
+
         /* Bring the AP interface up if it is not already running. */
         ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
         if (ESP_OK != ret)
         {
+            gb_napt_pending = false;
             ESP_LOGE(gp_tag, "esp_wifi_set_mode(APSTA) for reward AP failed: 0x%x", ret);
             return ret;
         }
@@ -248,6 +259,7 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
             return ret;
         }
 
+
         /* Configure the AP interface. */
         wifi_config_t ap_cfg;
         memset(&ap_cfg, 0, sizeof(ap_cfg));
@@ -265,24 +277,15 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
             return ret;
         }
 
-        /* Enable NAPT on the AP netif so connected devices can reach the internet. */
-        esp_netif_ip_info_t active_ip;
-        if (ESP_OK == esp_netif_get_ip_info(gp_netif_ap, &active_ip))
-        {
-            ip_napt_enable(active_ip.ip.addr, 1);
-        }
-
         gb_reward_ap_active = true;
         ESP_LOGI(gp_tag, "Reward AP enabled: SSID='%s'", ap_ssid);
     }
     else
     {
-        /* Disable NAPT and restore config AP subnet so the config portal stays reachable. */
-        esp_netif_ip_info_t active_ip;
-        if (ESP_OK == esp_netif_get_ip_info(gp_netif_ap, &active_ip))
-        {
-            ip_napt_enable(active_ip.ip.addr, 0);
-        }
+        /* Disarm any pending NAPT request and disable NAPT.  The AP netif is
+         * still up here so esp_netif_napt_disable() will succeed. */
+        gb_napt_pending = false;
+        esp_netif_napt_disable(gp_netif_ap);
 
         /* Restore default AP config (config AP may take over). */
         esp_netif_dhcps_stop(gp_netif_ap);
@@ -565,6 +568,36 @@ static void wifi_mngr_reconnect_timer_cb(void * p_arg)
 //--------------------------------------------------------------------------------------------------
 
 /**
+ * \brief Forward the STA's primary DNS server into the AP DHCP server response.
+ *
+ * Reads the DNS address obtained from the home network via the STA interface
+ * and injects it into the AP DHCP server (DHCP option 6) so that clients
+ * connected to the reward AP receive a working name server.  The DHCP server
+ * is stopped and restarted to pick up the new option value.
+ */
+static void wifi_mngr_ap_dns_forward(void)
+{
+    esp_netif_dns_info_t dns;
+
+    if (ESP_OK != esp_netif_get_dns_info(gp_netif_sta, ESP_NETIF_DNS_MAIN, &dns))
+    {
+        ESP_LOGW(gp_tag, "ap_dns_forward: could not read STA DNS");
+        return;
+    }
+
+    uint8_t dhcps_offer_dns = DHCPS_OFFER_DNS;
+    esp_netif_dhcps_stop(gp_netif_ap);
+    esp_netif_dhcps_option(gp_netif_ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER,
+        &dhcps_offer_dns, sizeof(dhcps_offer_dns));
+    esp_netif_set_dns_info(gp_netif_ap, ESP_NETIF_DNS_MAIN, &dns);
+    esp_netif_dhcps_start(gp_netif_ap);
+
+    ESP_LOGI(gp_tag, "AP DNS forwarded from STA (" IPSTR ")", IP2STR(&dns.ip.u_addr.ip4));
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
  * \brief Unified event handler for WIFI_EVENT and IP_EVENT.
  *
  * \param[in] p_arg        Unused handler argument.
@@ -580,7 +613,42 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
 
     if (WIFI_EVENT == event_base)
     {
-        if (WIFI_EVENT_STA_DISCONNECTED == event_id)
+        if (WIFI_EVENT_AP_START == event_id)
+        {
+            /* The AP netif is now UP.  This event fires once when
+             * esp_wifi_set_mode(APSTA) starts the AP, and AGAIN when
+             * esp_wifi_set_config(WIFI_IF_AP,...) causes the WiFi driver to
+             * restart the AP (AP_STOP + AP_START).  On the second restart,
+             * esp_netif_stop_api() calls esp_netif_lwip_remove() which removes
+             * the lwIP struct netif and re-adds it on the following start, which
+             * resets napt=0.  Therefore we must re-enable NAPT on every AP_START
+             * when the reward AP is supposed to be active, not just the first. */
+            if (gb_reward_ap_active)
+            {
+                /* Forward DNS from STA to AP DHCP so clients receive a working
+                 * name server on their first lease. */
+                if (gb_sta_connected)
+                {
+                    wifi_mngr_ap_dns_forward();
+                }
+                /* Assert STA as the default netif so that the lwIP routing layer
+                 * sends outbound traffic (incl. NATted AP-client traffic) through
+                 * the home network. */
+                esp_netif_set_default_netif(gp_netif_sta);
+                esp_err_t napt_err = esp_netif_napt_enable(gp_netif_ap);
+                if (ESP_OK != napt_err)
+                {
+                    ESP_LOGE(gp_tag, "esp_netif_napt_enable failed: 0x%x", napt_err);
+                }
+                else
+                {
+                    ESP_LOGI(gp_tag, "NAPT enabled on reward AP");
+                }
+            }
+            /* Consume the pending flag regardless. */
+            gb_napt_pending = false;
+        }
+        else if (WIFI_EVENT_STA_DISCONNECTED == event_id)
         {
             gb_sta_connected = false;
 
@@ -604,11 +672,25 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
         {
             gb_sta_connected = true;
 
+            /* Make STA the default netif so that the lwIP routing layer sends
+             * outbound traffic (including NATted AP-client traffic) through
+             * the home network.  Must be set before NAPT can route correctly. */
+            esp_netif_set_default_netif(gp_netif_sta);
+
             /* Stop pending reconnect timer. */
             esp_timer_stop(gp_reconnect_timer);
 
             /* Disable config AP — STA now connected. */
             wifi_mngr_config_ap_disable();
+
+            /* If the reward AP is already active (edge case: STA reconnected
+             * while AP was up), re-apply DNS and re-assert the default netif
+             * so NAPT resumes routing correctly. */
+            if (gb_reward_ap_active)
+            {
+                wifi_mngr_ap_dns_forward();
+                esp_netif_set_default_netif(gp_netif_sta);
+            }
 
             /* Notify application. */
             esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_STA_CONNECTED, NULL, 0,
