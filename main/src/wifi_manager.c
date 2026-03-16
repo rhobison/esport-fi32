@@ -11,6 +11,7 @@
 
 #include "wifi_manager.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -23,7 +24,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/netif.h"
-#include "lwip/stats.h"
 
 #include "config_manager.h"
 #include "event_ids.h"
@@ -85,10 +85,31 @@ static volatile bool gb_config_ap_active = false;
 static volatile bool gb_napt_pending = false;
 
 /** Previous RX byte count snapshot for throughput measurement. */
-static uint64_t g_prev_rx_bytes = 0U;
+static uint32_t g_prev_rx_bytes = 0U;
 
 /** Previous TX byte count snapshot for throughput measurement. */
-static uint64_t g_prev_tx_bytes = 0U;
+static uint32_t g_prev_tx_bytes = 0U;
+
+/**
+ * Cumulative AP RX byte counter, incremented by #wifi_mngr_ap_input_hook on every
+ * frame received from an AP client.  Updated from the WiFi driver task.
+ */
+static volatile uint32_t g_ap_rx_bytes = 0U;
+
+/**
+ * Cumulative AP TX byte counter, incremented by #wifi_mngr_ap_linkoutput_hook on
+ * every frame sent to an AP client.  Updated from the lwIP core task.
+ */
+static volatile uint32_t g_ap_tx_bytes = 0U;
+
+/** Saved AP netif \c input function pointer, replaced by #wifi_mngr_ap_input_hook. */
+static netif_input_fn gp_orig_ap_input = NULL;
+
+/** Saved AP netif \c linkoutput function pointer, replaced by #wifi_mngr_ap_linkoutput_hook. */
+static netif_linkoutput_fn gp_orig_ap_linkoutput = NULL;
+
+/** Spinlock protecting #g_ap_rx_bytes and #g_ap_tx_bytes against concurrent access. */
+static portMUX_TYPE g_ap_bytes_mux = portMUX_INITIALIZER_UNLOCKED;
 
 //==================================================================================================
 // Internal Function Prototypes
@@ -101,6 +122,10 @@ static void wifi_mngr_ap_dns_forward(void);
 static esp_err_t wifi_mngr_config_ap_enable(void);
 static esp_err_t wifi_mngr_config_ap_disable(void);
 static esp_err_t wifi_mngr_sta_connect(void);
+static err_t     wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp);
+static err_t     wifi_mngr_ap_linkoutput_hook(struct netif * netif, struct pbuf * p);
+static void      wifi_mngr_ap_hooks_install(void);
+static void      wifi_mngr_ap_hooks_uninstall(void);
 
 //==================================================================================================
 // Public Functions
@@ -287,6 +312,9 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
         gb_napt_pending = false;
         esp_netif_napt_disable(gp_netif_ap);
 
+        /* Uninstall the byte-count netif hooks before tearing down the AP. */
+        wifi_mngr_ap_hooks_uninstall();
+
         /* Restore default AP config (config AP may take over). */
         esp_netif_dhcps_stop(gp_netif_ap);
 
@@ -301,9 +329,13 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
         esp_netif_dhcps_start(gp_netif_ap);
 
         gb_reward_ap_active = false;
-        /* Reset throughput measurement baseline so the next enable starts clean. */
-        g_prev_rx_bytes     = 0U;
-        g_prev_tx_bytes     = 0U;
+        /* Reset throughput measurement counters so the next enable starts clean. */
+        portENTER_CRITICAL(&g_ap_bytes_mux);
+        g_ap_rx_bytes = 0U;
+        g_ap_tx_bytes = 0U;
+        portEXIT_CRITICAL(&g_ap_bytes_mux);
+        g_prev_rx_bytes = 0U;
+        g_prev_tx_bytes = 0U;
 
         if (!gb_config_ap_active)
         {
@@ -391,11 +423,12 @@ bool wifi_mngr_config_ap_is_active(void)
 /**
  * \brief Return the combined RX+TX throughput on the reward AP in kbps.
  *
- * Reads cumulative byte counters from the underlying lwip netif
- * (\c mib2_counters.ifinoctets and \c mib2_counters.ifoutoctets), computes
- * the delta since the previous call, and converts to kbps.  Designed to be
- * called exactly once per second from the tick callback.  Returns \c 0 when
- * the reward AP is inactive or on the first call after activation.
+ * Reads cumulative byte counters maintained by the netif input/linkoutput
+ * hooks (#wifi_mngr_ap_input_hook and #wifi_mngr_ap_linkoutput_hook),
+ * computes the delta since the previous call, and converts to kbps.
+ * Designed to be called exactly once per second from the tick callback.
+ * Returns \c 0 when the reward AP is inactive or on the first call after
+ * activation.
  *
  * \return Combined RX+TX throughput in kbps.
  */
@@ -406,18 +439,14 @@ uint32_t wifi_mngr_reward_ap_throughput_kbps(void)
         return 0U;
     }
 
-    /* Obtain the underlying lwip struct netif from the esp_netif handle. */
-    struct netif * p_netif = (struct netif *)esp_netif_get_netif_impl(gp_netif_ap);
-    if (NULL == p_netif)
-    {
-        return 0U;
-    }
-
-    uint64_t cur_rx = (uint64_t)p_netif->mib2_counters.ifinoctets;
-    uint64_t cur_tx = (uint64_t)p_netif->mib2_counters.ifoutoctets;
+    /* Read hook-maintained byte counters under spinlock. */
+    portENTER_CRITICAL(&g_ap_bytes_mux);
+    uint32_t cur_rx = g_ap_rx_bytes;
+    uint32_t cur_tx = g_ap_tx_bytes;
+    portEXIT_CRITICAL(&g_ap_bytes_mux);
 
     /* Guard against 32-bit counter wrap: treat wrapped values as 0 delta. */
-    uint64_t delta_bytes = 0U;
+    uint32_t delta_bytes = 0U;
     if ((cur_rx >= g_prev_rx_bytes) && (cur_tx >= g_prev_tx_bytes))
     {
         delta_bytes = (cur_rx - g_prev_rx_bytes) + (cur_tx - g_prev_tx_bytes);
@@ -427,7 +456,11 @@ uint32_t wifi_mngr_reward_ap_throughput_kbps(void)
     g_prev_tx_bytes = cur_tx;
 
     /* Convert bytes to kbps: multiply by 8 (bits) then divide by 1000 (kilo). */
-    return (uint32_t)(delta_bytes * 8U / 1000U);
+    uint32_t kbps = delta_bytes * 8U / 1000U;
+    ESP_LOGI(gp_tag,
+        "throughput: rx=%" PRIu32 " tx=%" PRIu32 " delta=%" PRIu32 " bytes -> %" PRIu32 " kbps",
+        cur_rx, cur_tx, delta_bytes, kbps);
+    return kbps;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -598,6 +631,122 @@ static void wifi_mngr_ap_dns_forward(void)
 //--------------------------------------------------------------------------------------------------
 
 /**
+ * \brief Netif input hook that counts inbound bytes from AP clients.
+ *
+ * Intercepts #gp_netif_ap 's \c input function pointer.  Adds the pbuf length
+ * to #g_ap_rx_bytes under #g_ap_bytes_mux, then delegates to the original
+ * input function saved in #gp_orig_ap_input.
+ *
+ * \param[in] p    Received Ethernet frame as a pbuf chain.
+ * \param[in] inp  Netif the frame arrived on (the AP lwIP netif).
+ *
+ * \return Error code from the original input handler.
+ */
+static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
+{
+    portENTER_CRITICAL(&g_ap_bytes_mux);
+    g_ap_rx_bytes += (uint32_t)p->tot_len;
+    portEXIT_CRITICAL(&g_ap_bytes_mux);
+    return gp_orig_ap_input(p, inp);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Netif linkoutput hook that counts outbound bytes to AP clients.
+ *
+ * Intercepts #gp_netif_ap 's \c linkoutput function pointer.  Adds the pbuf
+ * length to #g_ap_tx_bytes under #g_ap_bytes_mux, then delegates to the
+ * original linkoutput function saved in #gp_orig_ap_linkoutput.
+ *
+ * \param[in] netif  Netif sending the frame (the AP lwIP netif).
+ * \param[in] p      Ethernet frame to transmit as a pbuf chain.
+ *
+ * \return Error code from the original linkoutput handler.
+ */
+static err_t wifi_mngr_ap_linkoutput_hook(struct netif * netif, struct pbuf * p)
+{
+    portENTER_CRITICAL(&g_ap_bytes_mux);
+    g_ap_tx_bytes += (uint32_t)p->tot_len;
+    portEXIT_CRITICAL(&g_ap_bytes_mux);
+    return gp_orig_ap_linkoutput(netif, p);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Install byte-count hooks on the AP lwIP netif.
+ *
+ * Replaces \c netif->input and \c netif->linkoutput with
+ * #wifi_mngr_ap_input_hook and #wifi_mngr_ap_linkoutput_hook respectively,
+ * saving the originals in #gp_orig_ap_input and #gp_orig_ap_linkoutput.
+ * Must be called after every #WIFI_EVENT_AP_START because the lwIP
+ * \c struct \c netif is removed and re-added on each AP restart, resetting
+ * the function pointers to their defaults.  Resets #g_ap_rx_bytes and
+ * #g_ap_tx_bytes so the new interval starts clean.
+ */
+static void wifi_mngr_ap_hooks_install(void)
+{
+    struct netif * p_netif = (struct netif *)esp_netif_get_netif_impl(gp_netif_ap);
+    if (NULL == p_netif)
+    {
+        ESP_LOGW(gp_tag, "hooks_install: AP lwIP netif unavailable");
+        return;
+    }
+
+    /* Guard against double-install: if our hook is already in place, skip. */
+    if (p_netif->input == wifi_mngr_ap_input_hook)
+    {
+        return;
+    }
+
+    gp_orig_ap_input      = p_netif->input;
+    gp_orig_ap_linkoutput = p_netif->linkoutput;
+    p_netif->input        = wifi_mngr_ap_input_hook;
+    p_netif->linkoutput   = wifi_mngr_ap_linkoutput_hook;
+
+    portENTER_CRITICAL(&g_ap_bytes_mux);
+    g_ap_rx_bytes = 0U;
+    g_ap_tx_bytes = 0U;
+    portEXIT_CRITICAL(&g_ap_bytes_mux);
+    g_prev_rx_bytes = 0U;
+    g_prev_tx_bytes = 0U;
+
+    ESP_LOGI(gp_tag, "AP byte-count hooks installed (input=%p linkoutput=%p)",
+        (void *)gp_orig_ap_input, (void *)gp_orig_ap_linkoutput);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Uninstall byte-count hooks from the AP lwIP netif.
+ *
+ * Restores \c netif->input and \c netif->linkoutput to the functions saved by
+ * the last call to #wifi_mngr_ap_hooks_install.  Safe to call if hooks were
+ * never installed (no-op in that case).
+ */
+static void wifi_mngr_ap_hooks_uninstall(void)
+{
+    if (NULL == gp_orig_ap_input)
+    {
+        return; /* Hooks were never installed. */
+    }
+
+    struct netif * p_netif = (struct netif *)esp_netif_get_netif_impl(gp_netif_ap);
+    if ((NULL != p_netif) && (p_netif->input == wifi_mngr_ap_input_hook))
+    {
+        p_netif->input      = gp_orig_ap_input;
+        p_netif->linkoutput = gp_orig_ap_linkoutput;
+    }
+
+    gp_orig_ap_input      = NULL;
+    gp_orig_ap_linkoutput = NULL;
+    ESP_LOGI(gp_tag, "AP byte-count hooks uninstalled");
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
  * \brief Unified event handler for WIFI_EVENT and IP_EVENT.
  *
  * \param[in] p_arg        Unused handler argument.
@@ -644,6 +793,11 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
                 {
                     ESP_LOGI(gp_tag, "NAPT enabled on reward AP");
                 }
+                /* Install byte-count hooks on the AP netif after each (re-)start so that
+                 * wifi_mngr_reward_ap_throughput_kbps() receives actual traffic data.
+                 * The lwIP struct netif is re-created on every AP restart, so we must
+                 * re-hook on every WIFI_EVENT_AP_START. */
+                wifi_mngr_ap_hooks_install();
             }
             /* Consume the pending flag regardless. */
             gb_napt_pending = false;
