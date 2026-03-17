@@ -67,12 +67,12 @@ Key behaviour:
 
 ## 2. Hardware
 
-| Item                   | Details                                                                |
-| ---------------------- | ---------------------------------------------------------------------- |
-| MCU                    | ESP32-C6                                                               |
+| Item                   | Details                                                                 |
+| ---------------------- | ----------------------------------------------------------------------- |
+| MCU                    | ESP32-C6                                                                |
 | Bike sensor input GPIO | **GPIO 10** (configurable at build time via `CONFIG_ESPORT_PULSE_GPIO`) |
-| GPIO internal pull     | Pull-up (sensor contact closes to GND)                                 |
-| GPIO active edge       | **Falling edge** (sensor closes → logic low pulse)                     |
+| GPIO internal pull     | Pull-up (sensor contact closes to GND)                                  |
+| GPIO active edge       | **Falling edge** (sensor closes → logic low pulse)                      |
 
 > The GPIO number and active edge can be changed via Kconfig without changing source code.
 
@@ -82,21 +82,21 @@ Key behaviour:
 
 All parameters are stored at runtime in NVS and survive reboots. They are initialised from the factory defaults below if the NVS key is absent or the NVS partition is corrupt.
 
-| Parameter                   | NVS Key       | Type   | Default         | Min | Max         | Description                                           |
-| --------------------------- | ------------- | ------ | --------------- | --- | ----------- | ----------------------------------------------------- |
-| `wifi_ssid`                 | `wifi_ssid`   | string | `""`            | —   | 32 chars    | Home network SSID                                     |
-| `wifi_password`             | `wifi_pwd`    | string | `""`            | —   | 64 chars    | Home network WPA2 password                            |
-| `soft_ap_ssid`              | `ap_ssid`     | string | `"esport-fi32"` | —   | 32 chars    | Reward Soft AP SSID                                   |
-| `soft_ap_password`          | `ap_pwd`      | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                          |
-| `seconds_per_pulse`         | `spp`         | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse              |
-| `soft_ap_start_threshold_s` | `ap_thresh`   | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP     |
-| `centimeters_per_pulse`     | `cpp`         | uint32 | `25`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed           |
-| `idle_session_interval_s`   | `idle_s`      | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session          |
-| `start_session_interval_s`  | `start_s`     | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session   |
-| `pulse_debounce_time_ms`    | `debounce_ms` | uint16 | `200`           | 10  | 5000        | Minimum time (ms) between two accepted pulses         |
-| `timezone`                  | `tz`          | string | `"UTC0"`        | —   | 63 chars    | POSIX TZ string (e.g. `"CET-1CEST,M3.5.0,M10.5.0/3"`) |
-| `soft_ap_dec_time_above_threshold_kbps` | `ap_thr_kbps` | uint16 | `1` | 0 | 65535 | Combined RX+TX throughput (kbps) below which the countdown is considered idle. |
-| `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo` | uint16 | `30` | 0 | 65535 | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses. |
+| Parameter                               | NVS Key       | Type   | Default         | Min | Max         | Description                                                                                                |
+| --------------------------------------- | ------------- | ------ | --------------- | --- | ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `wifi_ssid`                             | `wifi_ssid`   | string | `""`            | —   | 32 chars    | Home network SSID                                                                                          |
+| `wifi_password`                         | `wifi_pwd`    | string | `""`            | —   | 64 chars    | Home network WPA2 password                                                                                 |
+| `soft_ap_ssid`                          | `ap_ssid`     | string | `"esport-fi32"` | —   | 32 chars    | Reward Soft AP SSID                                                                                        |
+| `soft_ap_password`                      | `ap_pwd`      | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                                                                               |
+| `seconds_per_pulse`                     | `spp`         | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse                                                                   |
+| `soft_ap_start_threshold_s`             | `ap_thresh`   | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP                                                          |
+| `centimeters_per_pulse`                 | `cpp`         | uint32 | `25`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed                                                                |
+| `idle_session_interval_s`               | `idle_s`      | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session                                                               |
+| `start_session_interval_s`              | `start_s`     | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session                                                        |
+| `pulse_debounce_time_ms`                | `debounce_ms` | uint16 | `10`            | 1   | 5000        | Minimum time (ms) between two accepted pulses                                                              |
+| `timezone`                              | `tz`          | string | `"UTC0"`        | —   | 63 chars    | POSIX TZ string (e.g. `"CET-1CEST,M3.5.0,M10.5.0/3"`)                                                      |
+| `soft_ap_dec_time_above_threshold_kbps` | `ap_thr_kbps` | uint16 | `1`             | 0   | 65535       | Combined RX+TX throughput (kbps) below which the countdown is considered idle.                             |
+| `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo` | uint16 | `30`            | 0   | 65535       | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses. |
 
 ---
 
@@ -528,15 +528,15 @@ Serves a self-contained HTML page (embedded as a C string literal or embedded fi
 
 **Displayed information:**
 
-| Section          | Fields                                                                                                  |
-| ---------------- | ------------------------------------------------------------------------------------------------------- |
-| System           | Current local time, NTP sync status, uptime                                                             |
-| Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status                                   |
-| Reward AP        | SSID, active/inactive, connected clients count                                                          |
+| Section          | Fields                                                                                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| System           | Current local time, NTP sync status, uptime                                                                                                                            |
+| Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status                                                                                                  |
+| Reward AP        | SSID, active/inactive, connected clients count                                                                                                                         |
 | Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled, reward AP throughput (kbps), countdown status (Decrementing / ⏸ Paused (low traffic)) |
-| Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average) |
-| Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count        |
-| Session Graphs   | Bar charts with day-of-month on X axis: average speed and total session duration per day                |
+| Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average)                                                                |
+| Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count                                                                       |
+| Session Graphs   | Bar charts with day-of-month on X axis: average speed and total session duration per day                                                                               |
 
 Dashboard requirements for reports:
 
@@ -799,21 +799,21 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 
 ### Namespace: `esport_cfg`
 
-| Key           | Type   | Content                   |
-| ------------- | ------ | ------------------------- |
-| `wifi_ssid`   | string | Home SSID                 |
-| `wifi_pwd`    | string | Home password             |
-| `ap_ssid`     | string | Reward AP SSID            |
-| `ap_pwd`      | string | Reward AP password        |
-| `spp`         | uint16 | seconds_per_pulse         |
-| `ap_thresh`   | uint32 | soft_ap_start_threshold_s |
-| `cpp`         | uint32 | centimeters_per_pulse     |
-| `idle_s`      | uint16 | idle_session_interval_s   |
-| `start_s`     | uint16 | start_session_interval_s  |
-| `debounce_ms` | uint16 | pulse_debounce_time_ms    |
-| `tz`          | string | POSIX TZ string           |
+| Key           | Type   | Content                               |
+| ------------- | ------ | ------------------------------------- |
+| `wifi_ssid`   | string | Home SSID                             |
+| `wifi_pwd`    | string | Home password                         |
+| `ap_ssid`     | string | Reward AP SSID                        |
+| `ap_pwd`      | string | Reward AP password                    |
+| `spp`         | uint16 | seconds_per_pulse                     |
+| `ap_thresh`   | uint32 | soft_ap_start_threshold_s             |
+| `cpp`         | uint32 | centimeters_per_pulse                 |
+| `idle_s`      | uint16 | idle_session_interval_s               |
+| `start_s`     | uint16 | start_session_interval_s              |
+| `debounce_ms` | uint16 | pulse_debounce_time_ms                |
+| `tz`          | string | POSIX TZ string                       |
 | `ap_thr_kbps` | uint16 | soft_ap_dec_time_above_threshold_kbps |
-| `ap_idle_tmo` | uint16 | soft_ap_idle_throughput_timeout_s |
+| `ap_idle_tmo` | uint16 | soft_ap_idle_throughput_timeout_s     |
 
 ### Namespace: `esport_log`
 
@@ -844,16 +844,16 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 
 **Event base:** `ESPORT_EVENT_BASE`
 
-| Event ID                        | Payload type             | Posted by         | Consumed by                       |
-| ------------------------------- | ------------------------ | ----------------- | --------------------------------- |
-| `ESPORT_EVENT_PULSE`            | none (NULL)               | `pulse_input`     | `time_counter`, `session_tracker` |
-| `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s)   | `time_counter`    | `http_server` (status cache)      |
-| `ESPORT_EVENT_REWARD_AP_ON`     | —                        | `time_counter`    | (logging, status)                 |
-| `ESPORT_EVENT_REWARD_AP_OFF`    | —                        | `time_counter`    | (logging, status)                 |
-| `ESPORT_EVENT_SESSION_OPENED`   | —                        | `session_tracker` | `time_counter`                    |
-| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t`   | `session_tracker` | `time_counter`, `session_log`     |
-| `ESPORT_EVENT_STA_CONNECTED`    | —                        | `wifi_manager`    | `time_manager` (start SNTP)       |
-| `ESPORT_EVENT_STA_DISCONNECTED` | —                        | `wifi_manager`    | (logging, status)                 |
+| Event ID                        | Payload type           | Posted by         | Consumed by                       |
+| ------------------------------- | ---------------------- | ----------------- | --------------------------------- |
+| `ESPORT_EVENT_PULSE`            | none (NULL)            | `pulse_input`     | `time_counter`, `session_tracker` |
+| `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s) | `time_counter`    | `http_server` (status cache)      |
+| `ESPORT_EVENT_REWARD_AP_ON`     | —                      | `time_counter`    | (logging, status)                 |
+| `ESPORT_EVENT_REWARD_AP_OFF`    | —                      | `time_counter`    | (logging, status)                 |
+| `ESPORT_EVENT_SESSION_OPENED`   | —                      | `session_tracker` | `time_counter`                    |
+| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t` | `session_tracker` | `time_counter`, `session_log`     |
+| `ESPORT_EVENT_STA_CONNECTED`    | —                      | `wifi_manager`    | `time_manager` (start SNTP)       |
+| `ESPORT_EVENT_STA_DISCONNECTED` | —                      | `wifi_manager`    | (logging, status)                 |
 
 ---
 

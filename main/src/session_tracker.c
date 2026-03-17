@@ -33,6 +33,16 @@
 #define SESSION_TRK_MS_PER_S (1000U)
 
 /**
+ * \brief Milliseconds after the last pulse beyond which live speed is reported as 0.
+ *
+ * Prevents the display from showing a stale speed when the rider has paused but
+ * the idle timer has not yet fired.  3 seconds represents roughly 2 km/h on a
+ * standard bicycle (for any wheel circumference >= ~170 cm), so anything slower
+ * is treated as stopped for display purposes.
+ */
+#define SESSION_TRK_LIVE_SPEED_STALE_MS (3000U)
+
+/**
  * \brief Internal state of the session tracker state machine.
  */
 typedef enum session_trk_state_tag
@@ -61,6 +71,11 @@ static int64_t g_potential_start_ms = 0;
 
 /** Millisecond timestamp of the most recently accepted pulse. */
 static int64_t g_last_pulse_ms = 0;
+
+/** Millisecond timestamp of the pulse immediately before #g_last_pulse_ms.
+ * Used to compute the inter-pulse interval for live speed.  Zero until the
+ * second pulse of a session has been accepted. */
+static int64_t g_prev_pulse_ms = 0;
 
 /** Number of accepted pulses since the current session (or potential session) began. */
 static uint32_t g_pulse_count = 0U;
@@ -161,11 +176,29 @@ void session_trk_live_status_get(session_trk_live_status_t * p_out)
         int64_t elapsed   = now_s - g_session_start_utc;
         p_out->duration_s = (elapsed > 0LL) ? (uint32_t)elapsed : 0U;
 
-        uint64_t total_cm = (uint64_t)g_pulse_count * (uint64_t)g_centimeters_per_pulse;
-        p_out->live_speed_kmh_x10 =
-            (0U < p_out->duration_s) ?
-                (uint16_t)(total_cm * 36ULL / ((uint64_t)p_out->duration_s * 1000ULL)) :
-                0U;
+        /* Live speed from the most recent inter-pulse interval.
+         *
+         * speed (km/h x10) = cpp_cm * 360 / inter_pulse_ms
+         *
+         * Derivation: speed_km_h = cpp_cm/100000 / (inter_ms/3600000)
+         *           = cpp_cm * 36 / inter_ms  →  x10: cpp_cm * 360 / inter_ms
+         *
+         * Only computed after the second pulse has been accepted (g_prev_pulse_ms > 0)
+         * and while the last pulse is recent enough to be considered current. */
+        int64_t inter_ms = g_last_pulse_ms - g_prev_pulse_ms;
+        int64_t now_ms   = esp_timer_get_time() / 1000LL;
+        int64_t stale_ms = now_ms - g_last_pulse_ms;
+
+        if ((g_prev_pulse_ms > 0LL) && (inter_ms > 0LL) &&
+            (stale_ms < (int64_t)SESSION_TRK_LIVE_SPEED_STALE_MS))
+        {
+            uint64_t raw = (uint64_t)g_centimeters_per_pulse * 360ULL / (uint64_t)inter_ms;
+            p_out->live_speed_kmh_x10 = (raw > (uint64_t)UINT16_MAX) ? UINT16_MAX : (uint16_t)raw;
+        }
+        else
+        {
+            p_out->live_speed_kmh_x10 = 0U;
+        }
     }
     else
     {
@@ -195,6 +228,7 @@ static void session_trk_state_reset(void)
     g_pulse_count        = 0U;
     g_potential_start_ms = 0;
     g_last_pulse_ms      = 0;
+    g_prev_pulse_ms      = 0;
     g_session_start_utc  = 0;
     gb_session_confirmed = false;
 }
@@ -226,8 +260,11 @@ static void session_trk_pulse_handler(void * p_handler_arg, esp_event_base_t bas
 
     int64_t timestamp_ms = esp_timer_get_time() / 1000LL;
 
+    g_prev_pulse_ms = g_last_pulse_ms;
     g_last_pulse_ms = timestamp_ms;
     g_pulse_count++;
+
+    ESP_LOGI(gp_tag, "Pulse: %" PRIu16 " (%d ms)", g_pulse_count, g_last_pulse_ms - g_prev_pulse_ms);
 
     if (SESSION_TRK_STATE_IDLE == g_state)
     {
@@ -314,9 +351,11 @@ static void session_trk_idle_timer_cb(TimerHandle_t p_timer)
             (raw_duration > (int64_t)UINT32_MAX) ? UINT32_MAX : (uint32_t)raw_duration;
 
         uint64_t total_cm = (uint64_t)g_pulse_count * (uint64_t)g_centimeters_per_pulse;
+        /* avg speed (km/h x10) = total_cm * 36 / (duration_s * 100)
+         * Derivation: speed_km_h = total_cm/100000 / (duration_s/3600)
+         *           = total_cm * 36 / (duration_s * 1000)  →  x10: / 100 */
         uint16_t avg_speed_kmh_x10 =
-            (0U < duration_s) ? (uint16_t)(total_cm * 36ULL / ((uint64_t)duration_s * 1000ULL)) :
-                                0U;
+            (0U < duration_s) ? (uint16_t)(total_cm * 36ULL / ((uint64_t)duration_s * 100ULL)) : 0U;
 
         session_trk_record_t record = {
             .start_time_utc    = g_session_start_utc,

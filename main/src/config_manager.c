@@ -26,34 +26,34 @@
 #define CONFIG_MNGR_NAMESPACE ("esport_cfg")
 
 /* NVS key strings (spec §8). */
-#define CONFIG_MNGR_KEY_WIFI_SSID   ("wifi_ssid")
-#define CONFIG_MNGR_KEY_WIFI_PWD    ("wifi_pwd")
-#define CONFIG_MNGR_KEY_AP_SSID     ("ap_ssid")
-#define CONFIG_MNGR_KEY_AP_PWD      ("ap_pwd")
-#define CONFIG_MNGR_KEY_SPP         ("spp")
-#define CONFIG_MNGR_KEY_AP_THRESH   ("ap_thresh")
-#define CONFIG_MNGR_KEY_CPP         ("cpp")
-#define CONFIG_MNGR_KEY_IDLE_S      ("idle_s")
-#define CONFIG_MNGR_KEY_START_S     ("start_s")
-#define CONFIG_MNGR_KEY_DEBOUNCE_MS ("debounce_ms")
-#define CONFIG_MNGR_KEY_TZ          ("tz")
-#define CONFIG_MNGR_KEY_AP_THR_KBPS ("ap_thr_kbps")
-#define CONFIG_MNGR_KEY_AP_IDLE_TMO ("ap_idle_tmo")
+#define CONFIG_MNGR_KEY_WIFI_SSID         ("wifi_ssid")
+#define CONFIG_MNGR_KEY_WIFI_PWD          ("wifi_pwd")
+#define CONFIG_MNGR_KEY_AP_SSID           ("ap_ssid")
+#define CONFIG_MNGR_KEY_AP_PWD            ("ap_pwd")
+#define CONFIG_MNGR_KEY_SECONDS_PER_PULSE ("spp")
+#define CONFIG_MNGR_KEY_AP_THRESH         ("ap_thresh")
+#define CONFIG_MNGR_KEY_CM_PER_PULSE      ("cpp")
+#define CONFIG_MNGR_KEY_IDLE_SESSION_S    ("idle_s")
+#define CONFIG_MNGR_KEY_START_SESSION_S   ("start_s")
+#define CONFIG_MNGR_KEY_DEBOUNCE_MS       ("debounce_ms")
+#define CONFIG_MNGR_KEY_TZ                ("tz")
+#define CONFIG_MNGR_KEY_AP_THR_KBPS       ("ap_thr_kbps")
+#define CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S ("ap_idle_tmo")
 
 /* Factory defaults (spec §3). */
-#define CONFIG_MNGR_DEF_WIFI_SSID   (CONFIG_ESPORT_WIFI_SSID)
-#define CONFIG_MNGR_DEF_WIFI_PWD    (CONFIG_ESPORT_WIFI_PASSWORD)
-#define CONFIG_MNGR_DEF_AP_SSID     (CONFIG_ESPORT_REWARD_AP_SSID)
-#define CONFIG_MNGR_DEF_AP_PWD      (CONFIG_ESPORT_REWARD_AP_PASSWORD)
-#define CONFIG_MNGR_DEF_SPP         ((uint16_t)3U)
-#define CONFIG_MNGR_DEF_AP_THRESH   ((uint32_t)300U)
-#define CONFIG_MNGR_DEF_CPP         ((uint32_t)25U)
-#define CONFIG_MNGR_DEF_IDLE_S      ((uint16_t)30U)
-#define CONFIG_MNGR_DEF_START_S     ((uint16_t)10U)
-#define CONFIG_MNGR_DEF_DEBOUNCE_MS ((uint16_t)200U)
-#define CONFIG_MNGR_DEF_TZ          ("UTC0")
-#define CONFIG_MNGR_DEF_AP_THR_KBPS ((uint16_t)CONFIG_ESPORT_AP_THRESHOLD_KBPS)
-#define CONFIG_MNGR_DEF_AP_IDLE_TMO ((uint16_t)CONFIG_ESPORT_AP_IDLE_TIMEOUT_S)
+#define CONFIG_MNGR_DEF_WIFI_SSID         (CONFIG_ESPORT_WIFI_SSID)
+#define CONFIG_MNGR_DEF_WIFI_PWD          (CONFIG_ESPORT_WIFI_PASSWORD)
+#define CONFIG_MNGR_DEF_AP_SSID           (CONFIG_ESPORT_REWARD_AP_SSID)
+#define CONFIG_MNGR_DEF_AP_PWD            (CONFIG_ESPORT_REWARD_AP_PASSWORD)
+#define CONFIG_MNGR_DEF_SECONDS_PER_PULSE ((uint16_t)3U)
+#define CONFIG_MNGR_DEF_AP_THRESH         ((uint32_t)300U)
+#define CONFIG_MNGR_DEF_CM_PER_PULSE      ((uint32_t)25U)
+#define CONFIG_MNGR_DEF_IDLE_SESSION_S    ((uint16_t)30U)
+#define CONFIG_MNGR_DEF_START_SESSION_S   ((uint16_t)10U)
+#define CONFIG_MNGR_DEF_DEBOUNCE_MS       ((uint16_t)10U)
+#define CONFIG_MNGR_DEF_TZ                ("UTC0")
+#define CONFIG_MNGR_DEF_AP_THR_KBPS       ((uint16_t)CONFIG_ESPORT_AP_THRESHOLD_KBPS)
+#define CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S ((uint16_t)CONFIG_ESPORT_AP_IDLE_TIMEOUT_S)
 
 /* String size limits (spec §5.1). */
 #define CONFIG_MNGR_MAX_SSID_LEN (32U) /* max 32 chars + NUL */
@@ -129,19 +129,23 @@ esp_err_t config_mngr_init(void)
         config_mngr_default_str_write(handle, CONFIG_MNGR_KEY_WIFI_PWD, CONFIG_MNGR_DEF_WIFI_PWD);
     ret |= config_mngr_default_str_write(handle, CONFIG_MNGR_KEY_AP_SSID, CONFIG_MNGR_DEF_AP_SSID);
     ret |= config_mngr_default_str_write(handle, CONFIG_MNGR_KEY_AP_PWD, CONFIG_MNGR_DEF_AP_PWD);
-    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_SPP, CONFIG_MNGR_DEF_SPP);
+    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_SECONDS_PER_PULSE,
+        CONFIG_MNGR_DEF_SECONDS_PER_PULSE);
     ret |=
         config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_AP_THRESH, CONFIG_MNGR_DEF_AP_THRESH);
-    ret |= config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_CPP, CONFIG_MNGR_DEF_CPP);
-    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_IDLE_S, CONFIG_MNGR_DEF_IDLE_S);
-    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_START_S, CONFIG_MNGR_DEF_START_S);
+    ret |= config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_CM_PER_PULSE,
+        CONFIG_MNGR_DEF_CM_PER_PULSE);
+    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_IDLE_SESSION_S,
+        CONFIG_MNGR_DEF_IDLE_SESSION_S);
+    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_START_SESSION_S,
+        CONFIG_MNGR_DEF_START_SESSION_S);
     ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_DEBOUNCE_MS,
         CONFIG_MNGR_DEF_DEBOUNCE_MS);
     ret |= config_mngr_default_str_write(handle, CONFIG_MNGR_KEY_TZ, CONFIG_MNGR_DEF_TZ);
     ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_AP_THR_KBPS,
         CONFIG_MNGR_DEF_AP_THR_KBPS);
-    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_AP_IDLE_TMO,
-        CONFIG_MNGR_DEF_AP_IDLE_TMO);
+    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S,
+        CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S);
 
     if (ESP_OK == ret)
     {
@@ -189,7 +193,8 @@ void config_mngr_soft_ap_password_get(char * p_buf, size_t len)
 
 uint16_t config_mngr_seconds_per_pulse_get(void)
 {
-    return config_mngr_u16_get(CONFIG_MNGR_KEY_SPP, CONFIG_MNGR_DEF_SPP);
+    return config_mngr_u16_get(CONFIG_MNGR_KEY_SECONDS_PER_PULSE,
+        CONFIG_MNGR_DEF_SECONDS_PER_PULSE);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -203,21 +208,21 @@ uint32_t config_mngr_soft_ap_start_threshold_s_get(void)
 
 uint32_t config_mngr_centimeters_per_pulse_get(void)
 {
-    return config_mngr_u32_get(CONFIG_MNGR_KEY_CPP, CONFIG_MNGR_DEF_CPP);
+    return config_mngr_u32_get(CONFIG_MNGR_KEY_CM_PER_PULSE, CONFIG_MNGR_DEF_CM_PER_PULSE);
 }
 
 //--------------------------------------------------------------------------------------------------
 
 uint16_t config_mngr_idle_session_interval_s_get(void)
 {
-    return config_mngr_u16_get(CONFIG_MNGR_KEY_IDLE_S, CONFIG_MNGR_DEF_IDLE_S);
+    return config_mngr_u16_get(CONFIG_MNGR_KEY_IDLE_SESSION_S, CONFIG_MNGR_DEF_IDLE_SESSION_S);
 }
 
 //--------------------------------------------------------------------------------------------------
 
 uint16_t config_mngr_start_session_interval_s_get(void)
 {
-    return config_mngr_u16_get(CONFIG_MNGR_KEY_START_S, CONFIG_MNGR_DEF_START_S);
+    return config_mngr_u16_get(CONFIG_MNGR_KEY_START_SESSION_S, CONFIG_MNGR_DEF_START_SESSION_S);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -266,7 +271,7 @@ esp_err_t config_mngr_soft_ap_password_set(const char * p_val)
 
 esp_err_t config_mngr_seconds_per_pulse_set(uint16_t val)
 {
-    return config_mngr_u16_set(CONFIG_MNGR_KEY_SPP, val, 1U, 60U);
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_SECONDS_PER_PULSE, val, 1U, 60U);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -280,28 +285,28 @@ esp_err_t config_mngr_soft_ap_start_threshold_s_set(uint32_t val)
 
 esp_err_t config_mngr_centimeters_per_pulse_set(uint32_t val)
 {
-    return config_mngr_u32_set(CONFIG_MNGR_KEY_CPP, val, 1U, UINT32_MAX);
+    return config_mngr_u32_set(CONFIG_MNGR_KEY_CM_PER_PULSE, val, 1U, UINT32_MAX);
 }
 
 //--------------------------------------------------------------------------------------------------
 
 esp_err_t config_mngr_idle_session_interval_s_set(uint16_t val)
 {
-    return config_mngr_u16_set(CONFIG_MNGR_KEY_IDLE_S, val, 5U, 600U);
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_IDLE_SESSION_S, val, 5U, 600U);
 }
 
 //--------------------------------------------------------------------------------------------------
 
 esp_err_t config_mngr_start_session_interval_s_set(uint16_t val)
 {
-    return config_mngr_u16_set(CONFIG_MNGR_KEY_START_S, val, 1U, 300U);
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_START_SESSION_S, val, 1U, 300U);
 }
 
 //--------------------------------------------------------------------------------------------------
 
 esp_err_t config_mngr_pulse_debounce_time_ms_set(uint16_t val)
 {
-    return config_mngr_u16_set(CONFIG_MNGR_KEY_DEBOUNCE_MS, val, 10U, 5000U);
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_DEBOUNCE_MS, val, 1U, 5000U);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -330,7 +335,8 @@ esp_err_t config_mngr_soft_ap_dec_threshold_kbps_set(uint16_t val)
 
 uint16_t config_mngr_soft_ap_idle_throughput_timeout_s_get(void)
 {
-    return config_mngr_u16_get(CONFIG_MNGR_KEY_AP_IDLE_TMO, CONFIG_MNGR_DEF_AP_IDLE_TMO);
+    return config_mngr_u16_get(CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S,
+        CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -338,7 +344,7 @@ uint16_t config_mngr_soft_ap_idle_throughput_timeout_s_get(void)
 esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val)
 {
     /* Full uint16_t range 0–65535 is valid per spec §3. */
-    return config_mngr_u16_set(CONFIG_MNGR_KEY_AP_IDLE_TMO, val, 0U, UINT16_MAX);
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S, val, 0U, UINT16_MAX);
 }
 
 //--------------------------------------------------------------------------------------------------
