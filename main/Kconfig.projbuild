@@ -6,10 +6,27 @@ menu "esport-fi32 Configuration"
         range 0 30
         help
             GPIO number connected to the bike sensor pulse output.
-            The pin is configured with an internal pull-up resistor;
-            valid pulses are detected on the falling edge
+            Valid pulses are detected on the falling edge
             (sensor contact closes to GND).  Build-time constant;
             cannot be changed at runtime.
+
+    config ESPORT_PULSE_PULLUP_EN
+        int "Enable internal pull-up on pulse input GPIO (0=disable, 1=enable)"
+        range 0 1
+        default 0
+        help
+            Set to 1 to activate the ESP32 internal pull-up resistor on the
+            pulse input GPIO pin.  Set to 0 when an external pull-up is
+            already present on the board.
+
+    config ESPORT_PULSE_PULLDOWN_EN
+        int "Enable internal pull-down on pulse input GPIO (0=disable, 1=enable)"
+        range 0 1
+        default 0
+        help
+            Set to 1 to activate the ESP32 internal pull-down resistor on
+            the pulse input GPIO pin.  Should not be set to 1 at the same
+            time as the pull-up option.
 
     config ESPORT_WIFI_SSID
         string "Home Wi-Fi SSID"

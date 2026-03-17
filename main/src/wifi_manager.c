@@ -457,9 +457,11 @@ uint32_t wifi_mngr_reward_ap_throughput_kbps(void)
 
     /* Convert bytes to kbps: multiply by 8 (bits) then divide by 1000 (kilo). */
     uint32_t kbps = delta_bytes * 8U / 1000U;
-    ESP_LOGI(gp_tag,
-        "throughput: rx=%" PRIu32 " tx=%" PRIu32 " delta=%" PRIu32 " bytes -> %" PRIu32 " kbps",
-        cur_rx, cur_tx, delta_bytes, kbps);
+
+    // ESP_LOGI(gp_tag,
+    //     "throughput: rx=%" PRIu32 " tx=%" PRIu32 " delta=%" PRIu32 " bytes -> %" PRIu32 " kbps",
+    //     cur_rx, cur_tx, delta_bytes, kbps);
+
     return kbps;
 }
 

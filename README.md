@@ -104,21 +104,21 @@ idf.py -p PORT flash monitor
 
 All parameters are stored in NVS and can be changed at runtime via the web UI.
 
-| Parameter                               | Default       | Description                                             |
-| --------------------------------------- | ------------- | ------------------------------------------------------- |
-| `wifi_ssid`                             | _(empty)_     | Home network SSID                                       |
-| `wifi_password`                         | _(empty)_     | Home network password                                   |
-| `soft_ap_ssid`                          | `esport-fi32` | Reward AP SSID                                          |
-| `soft_ap_password`                      | `esport-fi32` | Reward AP password                                      |
-| `seconds_per_pulse`                     | `3`           | Seconds of internet time earned per bike pulse          |
-| `soft_ap_start_threshold_s`             | `300`         | Warm-up pedalling time (s) before AP is enabled         |
-| `centimeters_per_pulse`                 | `25`          | Wheel travel per pulse (cm), used for speed display     |
-| `idle_session_interval_s`               | `30`          | Gap (s) with no pulses that closes a session            |
-| `start_session_interval_s`              | `10`          | Continuous pedalling (s) required to open a session     |
-| `pulse_debounce_time_ms`                | `200`         | Minimum time (ms) between two accepted pulses           |
-| `timezone`                              | `UTC0`        | POSIX TZ string (e.g. `CET-1CEST,M3.5.0,M10.5.0/3`)     |
-| `soft_ap_dec_time_above_threshold_kbps` | `1`           | Traffic threshold (kbps) below which countdown pauses   |
-| `soft_ap_idle_throughput_timeout_s`     | `30`          | Seconds of low traffic before countdown actually pauses |
+| Parameter                               | Description                                             |
+| --------------------------------------- | ------------------------------------------------------- |
+| `wifi_ssid`                             | Home network SSID                                       |
+| `wifi_password`                         | Home network password                                   |
+| `soft_ap_ssid`                          | Reward AP SSID                                          |
+| `soft_ap_password`                      | Reward AP password                                      |
+| `seconds_per_pulse`                     | Seconds of internet time earned per bike pulse          |
+| `soft_ap_start_threshold_s`             | Warm-up pedalling time (s) before AP is enabled         |
+| `centimeters_per_pulse`                 | Wheel travel per pulse (cm), used for speed display     |
+| `idle_session_interval_s`               | Gap (s) with no pulses that closes a session            |
+| `start_session_interval_s`              | Continuous pedalling (s) required to open a session     |
+| `pulse_debounce_time_ms`                | Minimum time (ms) between two accepted pulses           |
+| `timezone`                              | POSIX TZ string (e.g. `CET-1CEST,M3.5.0,M10.5.0/3`)     |
+| `soft_ap_dec_time_above_threshold_kbps` | Traffic threshold (kbps) below which countdown pauses   |
+| `soft_ap_idle_throughput_timeout_s`     | Seconds of low traffic before countdown actually pauses |
 
 ---
 
