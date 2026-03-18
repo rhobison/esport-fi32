@@ -79,6 +79,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     uint16_t    debounce_ms = config_mngr_pulse_debounce_time_ms_get();
     uint16_t    ap_thr_kbps = config_mngr_soft_ap_dec_threshold_kbps_get();
     uint16_t    ap_idle_tmo = config_mngr_soft_ap_idle_throughput_timeout_s_get();
+    uint16_t    min_spd_x10 = config_mngr_min_speed_to_increment_time_kmh_x10_get();
     static char tz[64];
 
     config_mngr_wifi_ssid_get(wifi_ssid, sizeof(wifi_ssid));
@@ -226,6 +227,14 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Idle throughput timeout (s)</label>"
         "<input type=\"number\" name=\"soft_ap_idle_throughput_timeout_s\" value=\"");
+    (void)httpd_resp_sendstr_chunk(p_req, num);
+    (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
+
+    /* min_speed_to_increment_time_kmh_x10 */
+    snprintf(num, sizeof(num), "%" PRIu16, min_spd_x10);
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<p><label>Minimum speed to earn credits (km/h &times; 10)</label>"
+        "<input type=\"number\" name=\"min_speed_to_increment_time_kmh_x10\" value=\"");
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
 
@@ -522,6 +531,26 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
         {
             httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
                 "Invalid soft_ap_idle_throughput_timeout_s");
+            return ESP_FAIL;
+        }
+    }
+
+    /* min_speed_to_increment_time_kmh_x10 (uint16, range 0–65535) */
+    if (ESP_OK == http_srv_form_field_get(body, "min_speed_to_increment_time_kmh_x10", num_str,
+                      sizeof(num_str)))
+    {
+        char *        endptr;
+        unsigned long val = strtoul(num_str, &endptr, 10);
+        if (('\0' != *endptr) || (val > 65535UL))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "min_speed_to_increment_time_kmh_x10 must be 0-65535");
+            return ESP_FAIL;
+        }
+        if (ESP_OK != config_mngr_min_speed_to_increment_time_kmh_x10_set((uint16_t)val))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "Invalid min_speed_to_increment_time_kmh_x10");
             return ESP_FAIL;
         }
     }

@@ -60,6 +60,14 @@ static volatile uint32_t g_dropped_count = 0U;
 static volatile esp_err_t g_last_post_err = ESP_OK;
 
 /**
+ * \brief Elapsed time in milliseconds between the two most recent accepted pulses.
+ *
+ * Set to \c UINT32_MAX on boot (speed indeterminate until two pulses have been
+ * accepted).  Updated by the ISR only; safe to read from any task as a volatile.
+ */
+static volatile uint32_t g_last_interval_ms = UINT32_MAX;
+
+/**
  * \brief True when the GPIO was HIGH at the last ISR call.
  *
  * Used together with GPIO_INTR_ANYEDGE to distinguish genuine HIGH→LOW
@@ -191,6 +199,13 @@ esp_err_t pulse_in_last_post_err_get(void)
 
 //--------------------------------------------------------------------------------------------------
 
+uint32_t pulse_in_last_interval_ms_get(void)
+{
+    return g_last_interval_ms;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 //==================================================================================================
 // Private Functions
 //==================================================================================================
@@ -240,6 +255,16 @@ static void IRAM_ATTR pulse_in_gpio_isr(void * p_arg)
     {
         return;
     }
+
+    /* Compute inter-pulse interval before updating g_last_accepted_us. */
+    if (0 != g_last_accepted_us)
+    {
+        uint64_t interval_us = (uint64_t)(now_us - g_last_accepted_us);
+        g_last_interval_ms   = (interval_us > ((uint64_t)UINT32_MAX * 1000ULL)) ?
+                                   UINT32_MAX :
+                                   (uint32_t)(interval_us / 1000U);
+    }
+    /* When g_last_accepted_us == 0 (first pulse ever), leave g_last_interval_ms = UINT32_MAX. */
 
     g_last_accepted_us = now_us;
     g_total_count++;

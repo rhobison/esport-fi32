@@ -83,6 +83,17 @@ uint32_t time_ctr_get(void);
  */
 bool time_ctr_is_paused(void);
 
+/**
+ * \brief Return the most recently computed instantaneous speed in km/h \u00d7 10.
+ *
+ * Updated on every accepted pulse.  Returns \c 0 when the state machine is in
+ * #TIME_CTR_STATE_IDLE or when fewer than two pulses have been accepted.
+ * Thread-safe: acquires and releases the internal spinlock.
+ *
+ * \return Current speed in km/h \u00d7 10 (e.g. 123 = 12.3 km/h), or 0 when idle.
+ */
+uint32_t time_ctr_current_speed_x10_get(void);
+
 #ifdef __cplusplus
 }
 #endif

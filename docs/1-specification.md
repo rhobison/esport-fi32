@@ -82,21 +82,22 @@ Key behaviour:
 
 All parameters are stored at runtime in NVS and survive reboots. They are initialised from the factory defaults below if the NVS key is absent or the NVS partition is corrupt.
 
-| Parameter                               | NVS Key       | Type   | Default         | Min | Max         | Description                                                                                                |
-| --------------------------------------- | ------------- | ------ | --------------- | --- | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| `wifi_ssid`                             | `wifi_ssid`   | string | `""`            | —   | 32 chars    | Home network SSID                                                                                          |
-| `wifi_password`                         | `wifi_pwd`    | string | `""`            | —   | 64 chars    | Home network WPA2 password                                                                                 |
-| `soft_ap_ssid`                          | `ap_ssid`     | string | `"esport-fi32"` | —   | 32 chars    | Reward Soft AP SSID                                                                                        |
-| `soft_ap_password`                      | `ap_pwd`      | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                                                                               |
-| `seconds_per_pulse`                     | `spp`         | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse                                                                   |
-| `soft_ap_start_threshold_s`             | `ap_thresh`   | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP                                                          |
-| `centimeters_per_pulse`                 | `cpp`         | uint32 | `25`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed                                                                |
-| `idle_session_interval_s`               | `idle_s`      | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session                                                               |
-| `start_session_interval_s`              | `start_s`     | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session                                                        |
-| `pulse_debounce_time_ms`                | `debounce_ms` | uint16 | `10`            | 1   | 5000        | Minimum time (ms) between two accepted pulses                                                              |
-| `timezone`                              | `tz`          | string | `"UTC0"`        | —   | 63 chars    | POSIX TZ string (e.g. `"CET-1CEST,M3.5.0,M10.5.0/3"`)                                                      |
-| `soft_ap_dec_time_above_threshold_kbps` | `ap_thr_kbps` | uint16 | `1`             | 0   | 65535       | Combined RX+TX throughput (kbps) below which the countdown is considered idle.                             |
-| `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo` | uint16 | `30`            | 0   | 65535       | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses. |
+| Parameter                               | NVS Key       | Type   | Default         | Min | Max         | Description                                                                                                          |
+| --------------------------------------- | ------------- | ------ | --------------- | --- | ----------- | -------------------------------------------------------------------------------------------------------------------- |
+| `wifi_ssid`                             | `wifi_ssid`   | string | `""`            | —   | 32 chars    | Home network SSID                                                                                                    |
+| `wifi_password`                         | `wifi_pwd`    | string | `""`            | —   | 64 chars    | Home network WPA2 password                                                                                           |
+| `soft_ap_ssid`                          | `ap_ssid`     | string | `"esport-fi32"` | —   | 32 chars    | Reward Soft AP SSID                                                                                                  |
+| `soft_ap_password`                      | `ap_pwd`      | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                                                                                         |
+| `seconds_per_pulse`                     | `spp`         | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse                                                                             |
+| `soft_ap_start_threshold_s`             | `ap_thresh`   | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP                                                                    |
+| `centimeters_per_pulse`                 | `cpp`         | uint32 | `25`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed                                                                          |
+| `idle_session_interval_s`               | `idle_s`      | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session                                                                         |
+| `start_session_interval_s`              | `start_s`     | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session                                                                  |
+| `pulse_debounce_time_ms`                | `debounce_ms` | uint16 | `10`            | 1   | 5000        | Minimum time (ms) between two accepted pulses                                                                        |
+| `timezone`                              | `tz`          | string | `"UTC0"`        | —   | 63 chars    | POSIX TZ string (e.g. `"CET-1CEST,M3.5.0,M10.5.0/3"`)                                                                |
+| `soft_ap_dec_time_above_threshold_kbps` | `ap_thr_kbps` | uint16 | `1`             | 0   | 65535       | Combined RX+TX throughput (kbps) below which the countdown is considered idle.                                       |
+| `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo` | uint16 | `30`            | 0   | 65535       | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses.           |
+| `min_speed_to_increment_time_kmh_x10`   | `min_spd_x10` | uint16 | `30`            | 0   | 65535       | Minimum instantaneous speed in km/h × 10 required for a pulse to earn time credits.  Set to `0` to disable the gate. |
 
 ---
 
@@ -219,6 +220,8 @@ uint16_t  config_mngr_soft_ap_dec_threshold_kbps_get(void);
 esp_err_t config_mngr_soft_ap_dec_threshold_kbps_set(uint16_t val);
 uint16_t  config_mngr_soft_ap_idle_throughput_timeout_s_get(void);
 esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val);
+uint16_t  config_mngr_min_speed_to_increment_time_kmh_x10_get(void);
+esp_err_t config_mngr_min_speed_to_increment_time_kmh_x10_set(uint16_t val);
 ```
 
 **Validation rules (setters reject values outside this range with `ESP_ERR_INVALID_ARG`):**
@@ -341,6 +344,7 @@ These are **build-time** constants set via `idf.py menuconfig`. They are not sto
 ```c
 esp_err_t pulse_in_init(void);
 uint32_t  pulse_in_total_count_get(void);
+uint32_t  pulse_in_last_interval_ms_get(void);   /* UINT32_MAX if fewer than 2 pulses accepted */
 ```
 
 ---
@@ -417,12 +421,33 @@ else:
 
 **Thread safety:** The counter variable is accessed from the FreeRTOS timer callback and from ESP event loop callbacks. Protect it with a `portMUX_TYPE` spinlock or a FreeRTOS mutex.
 
+**Speed-gated pulse crediting:** When a `ESPORT_EVENT_PULSE` is received, the instantaneous speed is computed from `pulse_in_last_interval_ms_get()` and `config_mngr_centimeters_per_pulse_get()`:
+
+```
+interval_ms = pulse_in_last_interval_ms_get()
+cpp         = config_mngr_centimeters_per_pulse_get()
+min_spd     = config_mngr_min_speed_to_increment_time_kmh_x10_get()
+
+if interval_ms == UINT32_MAX or interval_ms == 0:
+    speed_x10 = 0
+else:
+    speed_x10 = cpp * 36 / interval_ms
+
+if min_spd > 0 and speed_x10 < min_spd:
+    skip credit addition (pulse still counted for session tracking)
+```
+
+- `min_spd = 0` disables the gate entirely (all pulses earn credits, original behaviour).
+- The first pulse of a session (`UINT32_MAX` interval) never earns credits when `min_spd > 0`.
+- `ESPORT_EVENT_COUNTER_CHANGED` is still posted for every accepted pulse.
+
 **API:**
 
 ```c
 esp_err_t time_ctr_init(void);
 uint32_t  time_ctr_get(void);
-bool      time_ctr_is_paused(void);  /* true when countdown is paused due to below-threshold traffic */
+bool      time_ctr_is_paused(void);        /* true when countdown is paused due to below-threshold traffic */
+uint32_t  time_ctr_current_speed_x10_get(void);  /* most recent instantaneous speed in km/h × 10; 0 when idle */
 ```
 
 ---
@@ -524,19 +549,19 @@ esp_err_t http_srv_init(void);
 
 ### 6.1 Status Dashboard — `GET /`
 
-Serves a self-contained HTML page (embedded as a C string literal or embedded file via `EMBED_FILES`). The page auto-refreshes every 5 seconds using `<meta http-equiv="refresh" content="5">`.
+Serves a self-contained HTML page (generated as chunked C string literals). All live fields are updated in-place every 2 seconds by a JavaScript `fetch('/api/status')` polling loop (`setInterval`, 2 000 ms), which fires once immediately on page load. There is no `<meta http-equiv="refresh">` full-page reload; the session history table and SVG graphs are static until the user manually refreshes the page.
 
 **Displayed information:**
 
-| Section          | Fields                                                                                                                                                                 |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| System           | Current local time, NTP sync status, uptime                                                                                                                            |
-| Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status                                                                                                  |
-| Reward AP        | SSID, active/inactive, connected clients count                                                                                                                         |
-| Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled, reward AP throughput (kbps), countdown status (Decrementing / ⏸ Paused (low traffic)) |
-| Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average)                                                                |
-| Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count                                                                       |
-| Session Graphs   | Bar charts with day-of-month on X axis: average speed and total session duration per day                                                                               |
+| Section          | Fields                                                                                                                                                                                                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| System           | Current local time, NTP sync status, uptime                                                                                                                                                                                                                                   |
+| Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status                                                                                                                                                                                                         |
+| Reward AP        | SSID, active/inactive, connected clients count                                                                                                                                                                                                                                |
+| Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled, reward AP throughput (kbps), countdown status (Decrementing / ⏸ Paused (low traffic)), current speed (km/h, one decimal place), pulse-crediting status (Crediting / ⊘ Gated (speed too low)) |
+| Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average)                                                                                                                                                                       |
+| Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count                                                                                                                                                                              |
+| Session Graphs   | Bar charts with day-of-month on X axis: average speed and total session duration per day                                                                                                                                                                                      |
 
 Dashboard requirements for reports:
 
@@ -597,7 +622,8 @@ Returns JSON:
   "session_pulse_count": 1800,
   "live_speed_kmh_x10": 123,
   "reward_ap_throughput_kbps": 42,
-  "countdown_paused": false
+  "countdown_paused": false,
+  "current_speed_kmh_x10": 0
 }
 ```
 
@@ -814,6 +840,7 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | `tz`          | string | POSIX TZ string                       |
 | `ap_thr_kbps` | uint16 | soft_ap_dec_time_above_threshold_kbps |
 | `ap_idle_tmo` | uint16 | soft_ap_idle_throughput_timeout_s     |
+| `min_spd_x10` | uint16 | min_speed_to_increment_time_kmh_x10   |
 
 ### Namespace: `esport_log`
 

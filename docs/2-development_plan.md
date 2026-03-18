@@ -535,7 +535,8 @@ Add the HTML status dashboard (`GET /`) to `http_server.c`.
 1. **`GET /`** handler:
    - Gather live state from all modules (same data as `/api/status` plus session history).
    - Generate an HTML page as a C string using `snprintf` into a heap-allocated buffer.
-   - Include `<meta http-equiv="refresh" content="5">` for auto-refresh.
+   - Render all live fields inside named `<span id="...">` elements with initial values pre-populated by C; no `<meta http-equiv="refresh">`.
+   - Include an inline `<script>` block with a `setInterval(refresh, 2000)` loop (plus an immediate `refresh()` call on load) that fetches `/api/status` and updates every live span in-place.
    - Sections and fields as specified in §6.1:
      - **System**: current local time (formatted), NTP sync status, uptime.
      - **Wi-Fi**: STA status + SSID + IP, config AP status, reward AP status.
@@ -560,7 +561,8 @@ Add the HTML status dashboard (`GET /`) to `http_server.c`.
 - [ ] `GET /` returns HTTP 200 with valid HTML.
 - [ ] Page renders correctly in a browser (test via `curl` for structure validation).
 - [ ] All data sections from spec §6.1 are present.
-- [ ] Auto-refresh meta tag is present.
+- [ ] Live fields (System, Wi-Fi, Exercise Counter, Current Session) update every 2 s via JS fetch without a full page reload.
+- [ ] No `<meta http-equiv="refresh">` tag is present.
 - [ ] Session history table shows up to 20 rows.
 - [ ] Unsynced sessions are marked with `(*)`.
 - [ ] Session graph panel renders both required bar charts with day-of-month X axis.
@@ -872,30 +874,30 @@ Wire all modules together in `main.c`, add final integration, and verify end-to-
 
 6. **End-to-end checklist** (document test results in `docs/TEST_RESULTS.md`):
 
-   | #   | Test                                                                            | Pass/Fail |
-   | --- | ------------------------------------------------------------------------------- | --------- |
-   | 1   | Boot with no wifi_ssid: config AP `esport-fi32_config` appears                  |           |
-   | 2   | Connect to config AP, open `192.168.4.1/config`, submit valid wifi credentials  |           |
-   | 3   | Device reboots/reconnects as STA; config AP disappears                          |           |
-   | 4   | Simulate N pulses exceeding threshold; reward AP appears                        |           |
-   | 5   | Counter decrements in real time; AP disappears at 0                             |           |
-   | 6   | More pulses during countdown extend the time                                    |           |
-   | 7   | Device connected to reward AP can reach the internet (ping test)                |           |
-   | 8   | Sustained pedalling > `start_session_interval_s` creates a session log entry    |           |
-   | 9   | Short pedalling < `start_session_interval_s` creates NO session log entry       |           |
-   | 10  | After 50+ sessions, ring buffer discards oldest, keeps 50 newest                |           |
-   | 11  | `/api/status` JSON has all required keys                                        |           |
-   | 12  | `/api/sessions` returns correct session data                                    |           |
-   | 13  | Status dashboard renders all sections; auto-refreshes                           |           |
-   | 14  | Config page: change timezone & verify local time display change                 |           |
-   | 15  | Power cycle: counter = 0 (not persisted), config persists, session log persists |           |
-   | 16  | STA disconnect mid-run: config AP reappears; reconnects; config AP disappears   |           |
-   | 17  | NTP sync: after connecting to internet, timestamps are real UTC                 |           |
-   | 18  | Debounce: rapid GPIO pulses filtered to one per debounce window                 |           |
-   | 19  | `/api/sessions/export?format=csv` downloads CSV with expected columns           |           |
-   | 20  | `/api/sessions/export?format=json` downloads JSON report                        |           |
-   | 21  | `/api/sessions/daily` drives dashboard charts with correct daily bins           |           |
-   | 22  | Dashboard shows two bar charts (avg speed, duration) and export controls        |           |
+   | #   | Test                                                                                    | Pass/Fail |
+   | --- | --------------------------------------------------------------------------------------- | --------- |
+   | 1   | Boot with no wifi_ssid: config AP `esport-fi32_config` appears                          |           |
+   | 2   | Connect to config AP, open `192.168.4.1/config`, submit valid wifi credentials          |           |
+   | 3   | Device reboots/reconnects as STA; config AP disappears                                  |           |
+   | 4   | Simulate N pulses exceeding threshold; reward AP appears                                |           |
+   | 5   | Counter decrements in real time; AP disappears at 0                                     |           |
+   | 6   | More pulses during countdown extend the time                                            |           |
+   | 7   | Device connected to reward AP can reach the internet (ping test)                        |           |
+   | 8   | Sustained pedalling > `start_session_interval_s` creates a session log entry            |           |
+   | 9   | Short pedalling < `start_session_interval_s` creates NO session log entry               |           |
+   | 10  | After 50+ sessions, ring buffer discards oldest, keeps 50 newest                        |           |
+   | 11  | `/api/status` JSON has all required keys                                                |           |
+   | 12  | `/api/sessions` returns correct session data                                            |           |
+   | 13  | Status dashboard renders all sections; live fields update every 2 s without page reload |           |
+   | 14  | Config page: change timezone & verify local time display change                         |           |
+   | 15  | Power cycle: counter = 0 (not persisted), config persists, session log persists         |           |
+   | 16  | STA disconnect mid-run: config AP reappears; reconnects; config AP disappears           |           |
+   | 17  | NTP sync: after connecting to internet, timestamps are real UTC                         |           |
+   | 18  | Debounce: rapid GPIO pulses filtered to one per debounce window                         |           |
+   | 19  | `/api/sessions/export?format=csv` downloads CSV with expected columns                   |           |
+   | 20  | `/api/sessions/export?format=json` downloads JSON report                                |           |
+   | 21  | `/api/sessions/daily` drives dashboard charts with correct daily bins                   |           |
+   | 22  | Dashboard shows two bar charts (avg speed, duration) and export controls                |           |
 
 ### Acceptance Criteria
 
@@ -1273,10 +1275,9 @@ else:
 - [ ] `/api/status` JSON contains `"countdown_paused"` key in all states.
 - [ ] `/api/status` JSON contains `"reward_ap_throughput_kbps"` key in all states (0 when AP inactive).
 - [ ] Dashboard Exercise Counter section shows current reward AP throughput in kbps.
-- [ ] Dashboard throughput display updates on each auto-refresh cycle.
+- [ ] Dashboard throughput display updates on each JS fetch cycle.
 - [ ] Dashboard pause indicator is hidden when `countdown_paused` is `false`.
 - [ ] Dashboard pause indicator shows "⏸ Paused (low traffic)" when `countdown_paused` is `true`.
-- [ ] Dashboard auto-refresh interval is unchanged.
 
 ---
 
@@ -1301,7 +1302,7 @@ A value of `30` represents 3.0 km/h.  A value of `0` disables the gate entirely 
 Instantaneous speed is derived from the most recent inter-pulse interval measured in the pulse input ISR:
 
 ```
-speed_kmh_x10 = (centimeters_per_pulse * 36) / last_pulse_interval_ms
+speed_kmh_x10 = (centimeters_per_pulse * 360) / last_pulse_interval_ms
 ```
 
 - `last_pulse_interval_ms` is the elapsed time in milliseconds between the two most recent accepted pulses, computed from `esp_timer_get_time()` timestamps already captured in the ISR.
@@ -1483,12 +1484,25 @@ speed_kmh_x10 = (centimeters_per_pulse * 36) / last_pulse_interval_ms
 
 2. **`main/src/http_server_api.c`**:
    - In the `/api/status` JSON response, append `"current_speed_kmh_x10": <value>` using `time_ctr_current_speed_x10_get()`.  Always present; `0` when idle.
+   - Append `"speed_gate_active": <bool>` — `true` when `min_speed_to_increment_time_kmh_x10 > 0` and `current_speed_kmh_x10 < min_speed_to_increment_time_kmh_x10`, otherwise `false`.  Always present.
 
 3. **`main/src/http_server_dashboard.c`**:
-   - Add a "Current speed" display line in the live stats section, e.g. `<span id="current-speed">0</span> km/h × 10`.
-   - In the dashboard JS auto-refresh handler, update the element:
+   - Show current speed as decimal km/h (e.g. `<span id="current-speed">0.0</span> km/h`), dividing the `×10` internal value by 10.  The label must read "km/h", not "km/h × 10".
+   - Add a "Pulse crediting" status line in the Exercise Counter section with two mutually exclusive spans driven by `speed_gate_active`:
+     ```html
+     <span id="speed-gate-indicator" style="display:none;">⊘ Gated (speed too low)</span>
+     <span id="speed-credit-indicator" style="display:inline;">Crediting</span>
+     ```
+   - In the dashboard's JavaScript auto-refresh handler, format speed as one decimal place and update both spans:
      ```js
-     document.getElementById('current-speed').textContent = data.current_speed_kmh_x10;
+     var cs = document.getElementById('current-speed');
+     if (cs) cs.innerHTML = '<b>' + (d.current_speed_kmh_x10 / 10).toFixed(1) + '</b>';
+     var sg = document.getElementById('speed-gate-indicator');
+     var sc = document.getElementById('speed-credit-indicator');
+     if (sg && sc) {
+         sg.style.display = d.speed_gate_active ? 'inline' : 'none';
+         sc.style.display = d.speed_gate_active ? 'none'   : 'inline';
+     }
      ```
 
 **Acceptance Criteria**
@@ -1498,5 +1512,9 @@ speed_kmh_x10 = (centimeters_per_pulse * 36) / last_pulse_interval_ms
 - [ ] Submitting `0` and `65535` saves and reflects correctly on reload.
 - [ ] Submitting `65536` or a non-numeric string returns HTTP 400.
 - [ ] `/api/status` JSON contains `"current_speed_kmh_x10"` in all states.
-- [ ] Dashboard live speed display updates on each auto-refresh cycle.
-- [ ] Dashboard auto-refresh interval is unchanged.
+- [ ] `/api/status` JSON contains `"speed_gate_active"` in all states; `false` when gate is disabled (`min_spd = 0`).
+- [ ] Dashboard speed display shows decimal km/h (e.g. "12.3 km/h"), not a raw `×10` integer.
+- [ ] Dashboard speed display updates on each JS fetch cycle.
+- [ ] Dashboard "Pulse crediting" line shows "⊘ Gated (speed too low)" when `speed_gate_active` is `true`.
+- [ ] Dashboard "Pulse crediting" line shows "Crediting" when `speed_gate_active` is `false`.
+- [ ] Both "Pulse crediting" spans update on each JS fetch cycle.
