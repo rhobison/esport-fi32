@@ -1010,6 +1010,10 @@ This section tracks incremental improvements beyond the base specification.  Eac
 | 2.3   | 2       | Config Manager — speed threshold param         | `config_manager.c/h`, `Kconfig.projbuild`                              |
 | 2.4   | 2       | Time Counter — speed-gated pulse crediting     | `time_counter.c/h`                                                     |
 | 2.5   | 2       | Web UI & API — speed threshold config & status | `http_server_config.c`, `http_server_api.c`, `http_server_dashboard.c` |
+| 3.1   | 3       | Spec update — counter persistence              | `docs/1-specification.md`                                              |
+| 3.2   | 3       | Config Manager — reward counter param          | `config_manager.c/h`                                                   |
+| 3.3   | 3       | Time Counter — NVS persistence & counter set   | `time_counter.c/h`                                                     |
+| 3.4   | 3       | Web UI — reward counter config field           | `http_server_config.c`                                                 |
 
 ---
 
@@ -1518,3 +1522,201 @@ speed_kmh_x10 = (centimeters_per_pulse * 360) / last_pulse_interval_ms
 - [ ] Dashboard "Pulse crediting" line shows "⊘ Gated (speed too low)" when `speed_gate_active` is `true`.
 - [ ] Dashboard "Pulse crediting" line shows "Crediting" when `speed_gate_active` is `false`.
 - [ ] Both "Pulse crediting" spans update on each JS fetch cycle.
+
+---
+
+## Feature 3 — Reward Counter Persistence & Editability
+
+### Overview
+
+Currently the reward time counter is not persisted: a power cycle discards all earned internet time.  This feature saves the counter to NVS regularly and restores it on boot, so earned time is never lost.  It also exposes the counter as an editable field on the configuration page, so a parent can manually grant or adjust internet time without pedalling.
+
+Key behaviours:
+- Counter restored from NVS on boot; reward AP enabled immediately if the restored value is non-zero.
+- Counter saved to NVS every 60 seconds (hardcoded constant `TIME_CTR_SAVE_INTERVAL_S = 60`).
+- Counter saved immediately when it reaches 0 (before AP is disabled).
+- Manual edits via the config page take effect immediately at runtime (via `time_ctr_counter_set()`).
+- The config page field uses `hh:mm:ss` format for human-readable input.
+
+### New Configuration Parameter
+
+| Parameter          | Type     | NVS key        | Default | Valid range  |
+| ------------------ | -------- | -------------- | ------- | ------------ |
+| `reward_counter_s` | `uint32` | `reward_ctr_s` | `0`     | 0–UINT32_MAX |
+
+---
+
+### Phase 3.1 — Spec Update
+
+**Goal:** Update `docs/1-specification.md` to document the new parameter, the NVS persistence behaviour, the `time_ctr_counter_set()` API, the `hh:mm:ss` config field format, and all affected sections.
+
+**Inputs**
+- `docs/0-draft-input.md` §Improvements item 3
+- `docs/1-specification.md` (current)
+
+**Tasks**
+
+1. **§3 Configuration Parameters table** — add one row:
+   - `reward_counter_s` — `uint32`, NVS key `"reward_ctr_s"`, default `0`, range `0–(unlimited)`, description: "Reward internet time counter (seconds remaining). Persisted to NVS every 60 s and immediately on AP disable; restored on boot. Setting a non-zero value via the config page enables the reward AP immediately."
+
+2. **§5.1 NVS Configuration Manager** — add getter/setter to the public API:
+   ```c
+   uint32_t  config_mngr_reward_counter_s_get(void);
+   esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
+   ```
+
+3. **§5.5 Time Counter** — add:
+   - Two new responsibility bullets: **NVS persistence** (boot restore + periodic save + save-on-zero) and **Runtime counter override** (`time_ctr_counter_set()`).
+   - A **Boot restore** note before the **Thread safety** note.
+   - `time_ctr_counter_set(uint32_t val)` → `esp_err_t` to the public API.
+
+4. **§6.2 Configuration Page** — add "Reward Counter" (`hh:mm:ss` text field) to the fields table; add a note explaining the format and immediate-effect behaviour.
+
+5. **§7.1 Boot Sequence** — annotate step 8 (`time_ctr_init`) to mention counter restore.
+
+6. **§7.6 Config Change via Web** — add a `reward_counter_s` branch that calls `time_ctr_counter_set()`.
+
+7. **§8 NVS Layout — namespace `esport_cfg`** — add `"reward_ctr_s"` (`uint32`) row.
+
+**Acceptance Criteria**
+
+- [ ] `reward_counter_s` appears in §3 with correct type, NVS key, default, and range.
+- [ ] Getter/setter appear in §5.1 API.
+- [ ] §5.5 lists the two new responsibility bullets.
+- [ ] `time_ctr_counter_set()` is in the §5.5 public API.
+- [ ] §6.2 fields table contains "Reward Counter" with `hh:mm:ss` format note.
+- [ ] §7.1 step 8 mentions counter restore.
+- [ ] §7.6 includes `reward_counter_s` handling.
+- [ ] `"reward_ctr_s"` appears in §8.
+
+---
+
+### Phase 3.2 — Config Manager: Reward Counter Parameter
+
+**Goal:** Add getter and setter for `reward_counter_s` to the configuration manager.  No Kconfig entry is needed — the default is hardcoded `0` because there is no useful build-time starting value.
+
+**Inputs**
+- `docs/1-specification.md` §3, §5.1 (Phase 3.1 output)
+- `main/inc/config_manager.h`, `main/src/config_manager.c` (existing)
+
+**Tasks**
+
+1. **`main/src/config_manager.c`** — add:
+   - `#define CONFIG_MNGR_KEY_REWARD_COUNTER_S  ("reward_ctr_s")`
+   - `#define CONFIG_MNGR_DEF_REWARD_COUNTER_S  ((uint32_t)0U)`
+   - In `config_mngr_init()`: call `config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_REWARD_COUNTER_S, CONFIG_MNGR_DEF_REWARD_COUNTER_S)`.
+
+2. **`main/inc/config_manager.h`** — declare (with Doxygen, following existing style):
+   ```c
+   uint32_t  config_mngr_reward_counter_s_get(void);
+   esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
+   ```
+
+3. **`main/src/config_manager.c`** — implement:
+   - `config_mngr_reward_counter_s_get()`: `config_mngr_u32_get(CONFIG_MNGR_KEY_REWARD_COUNTER_S, CONFIG_MNGR_DEF_REWARD_COUNTER_S)`.
+   - `config_mngr_reward_counter_s_set(val)`: `config_mngr_u32_set(CONFIG_MNGR_KEY_REWARD_COUNTER_S, val, 0U, UINT32_MAX)`.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `config_mngr_reward_counter_s_set(0)` returns `ESP_OK`.
+- [ ] `config_mngr_reward_counter_s_set(UINT32_MAX)` returns `ESP_OK`.
+- [ ] Value survives `config_mngr_init()` reinit (simulated reboot).
+- [ ] Factory default `0` applied when NVS key absent.
+
+---
+
+### Phase 3.3 — Time Counter: NVS Persistence & Counter Set
+
+**Goal:** Implement counter restore on boot, periodic NVS save (60 s), save-on-zero, and `time_ctr_counter_set()`.
+
+**Inputs**
+- `docs/1-specification.md` §5.5 (Phase 3.1 output)
+- `main/inc/time_counter.h`, `main/src/time_counter.c` (existing)
+- `config_manager` (Phase 3.2 output)
+
+**Tasks**
+
+1. **`main/src/time_counter.c`** — add:
+   ```c
+   #define TIME_CTR_SAVE_INTERVAL_S (60U)
+   ```
+   And a file-scope `static esp_timer_handle_t g_save_timer`.
+
+2. In `time_ctr_init()`:
+   - Read `config_mngr_reward_counter_s_get()` → `restored_val`.
+   - If `restored_val > 0`:
+     - **Inside spinlock**: set `g_counter_s = restored_val`, set state to `TIME_CTR_STATE_AP_ACTIVE`.
+     - **Outside spinlock**: call `wifi_mngr_reward_ap_set(true)`, post `ESPORT_EVENT_REWARD_AP_ON`, start the decrement tick timer.
+   - Create and start the periodic save timer (`TIME_CTR_SAVE_INTERVAL_S * 1 000 000 µs`, periodic) with callback `time_ctr_save_cb`.
+
+3. **`time_ctr_save_cb()`** — static callback: calls `config_mngr_reward_counter_s_set(time_ctr_get())`.
+
+4. In the zero-reached-handling code inside the tick callback: call `config_mngr_reward_counter_s_set(0U)` **before** calling `wifi_mngr_reward_ap_set(false)`.
+
+5. **`time_ctr_counter_set(uint32_t val)`** (new public function):
+   - **Inside spinlock**: set `g_counter_s = val`; capture `old_state = g_state`.
+   - **Outside spinlock**: call `config_mngr_reward_counter_s_set(val)`.
+   - If `val > 0` and `old_state == TIME_CTR_STATE_IDLE`: transition to `AP_ACTIVE` (call `wifi_mngr_reward_ap_set(true)`, post `ESPORT_EVENT_REWARD_AP_ON`, start tick timer, reset pause state). Post `ESPORT_EVENT_COUNTER_CHANGED`.
+   - If `val == 0`: post `ESPORT_EVENT_COUNTER_CHANGED`; the running tick timer handles AP shutdown on the next tick (≤ 1 s).
+   - Return `ESP_OK`.
+
+6. **`main/inc/time_counter.h`** — declare (with Doxygen):
+   ```c
+   esp_err_t time_ctr_counter_set(uint32_t val);
+   ```
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] On simulated reboot after setting a non-zero counter value: counter is restored and reward AP is enabled.
+- [ ] Counter value is persisted to NVS within 60 s of any change.
+- [ ] When counter reaches 0: NVS reads back `0` after the tick.
+- [ ] `time_ctr_counter_set(300)` while IDLE enables the reward AP within one event loop cycle.
+- [ ] `time_ctr_counter_set(300)` while AP_ACTIVE updates the live counter immediately.
+- [ ] `time_ctr_counter_set(0)` while AP_ACTIVE results in AP being disabled within 1 s.
+- [ ] `ESPORT_EVENT_COUNTER_CHANGED` is posted by `time_ctr_counter_set()`.
+- [ ] No race conditions under concurrent pulse events and timer callbacks.
+
+---
+
+### Phase 3.4 — Web UI: Reward Counter Config Field
+
+**Goal:** Add the `reward_counter_s` field (in `hh:mm:ss` format) to the configuration web page and wire the POST handler to call `time_ctr_counter_set()` for immediate effect.
+
+**Inputs**
+- `docs/1-specification.md` §6.2 (Phase 3.1 output)
+- `main/src/http_server_config.c` (existing)
+- `time_counter` (Phase 3.3 output), `config_manager` (Phase 3.2 output)
+
+**Tasks**
+
+1. **GET handler** — add one field to the config form HTML:
+   - Label: "Reward Counter (hh:mm:ss)"
+   - `<input type="text" name="reward_counter_s" placeholder="0:00:00" value="%s">`
+   - Populate by formatting `config_mngr_reward_counter_s_get()` as `hh:mm:ss`:
+     ```c
+     uint32_t secs = config_mngr_reward_counter_s_get();
+     snprintf(ctr_buf, sizeof(ctr_buf), "%u:%02u:%02u",
+              secs / 3600U, (secs % 3600U) / 60U, secs % 60U);
+     ```
+
+2. **POST handler** — parse `reward_counter_s`:
+   - Read raw string from form body.
+   - Split on `:` expecting exactly two `:` separators (three tokens: hours, minutes, seconds).
+   - Convert each token with `strtoul`; compute `total_s = h*3600 + m*60 + s`.
+   - On parse failure (non-numeric, wrong number of separators): return HTTP 400 with error message.
+   - Call `time_ctr_counter_set(total_s)` — this applies immediately and saves to NVS. Do **not** call `config_mngr_reward_counter_s_set()` separately.
+
+3. Confirm that `ESPORT_EVENT_CONFIG_CHANGED` is posted after the successful save (this is already done by the existing POST handler; verify `reward_counter_s` is handled in the same commit path).
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] Config page renders the "Reward Counter" field pre-populated with the current value in `hh:mm:ss` format.
+- [ ] Submitting `1:30:00` sets the counter to 5400 s and enables the reward AP if it was inactive.
+- [ ] Submitting `0:00:00` sets the counter to 0 s; AP shuts down within 1 s if active.
+- [ ] Submitting an empty string, `abc`, or a value with too few/many `:` returns HTTP 400.
+- [ ] After submit, the page reloads and shows the updated value in `hh:mm:ss`.
+- [ ] The live counter on the dashboard (`counter_s` in `/api/status`) reflects the new value within 2 s.
+- [ ] NVS persists the value (verified by simulated reboot reading `config_mngr_reward_counter_s_get()`).

@@ -32,6 +32,9 @@
 /** Periodic decrement interval in microseconds (1 second). */
 #define TIME_CTR_TICK_PERIOD_US (1000000U)
 
+/** Interval in seconds between periodic NVS saves of the counter value. */
+#define TIME_CTR_SAVE_INTERVAL_S (60U)
+
 /**
  * \brief Internal state of the time counter state machine.
  */
@@ -66,6 +69,9 @@ static esp_timer_handle_t gp_tick_timer = NULL;
 
 /** Handle for the one-shot threshold timer that fires after #soft_ap_start_threshold_s seconds. */
 static esp_timer_handle_t gp_threshold_timer = NULL;
+
+/** Handle for the periodic NVS save timer created in #time_ctr_init. */
+static esp_timer_handle_t g_save_timer = NULL;
 
 /**
  * \brief Cached runtime configuration values; loaded at #time_ctr_init() and
@@ -107,6 +113,7 @@ static void time_ctr_config_changed_handler(void * p_handler_arg, esp_event_base
     int32_t event_id, void * p_event_data);
 static void time_ctr_threshold_cb(void * p_arg);
 static void time_ctr_tick_cb(void * p_arg);
+static void time_ctr_save_cb(void * p_arg);
 
 //==================================================================================================
 // Public Functions
@@ -191,7 +198,60 @@ esp_err_t time_ctr_init(void)
         return ret;
     }
 
-    ESP_LOGI(gp_tag, "init complete — counter 0, reward AP off");
+    /* Boot restore: if a non-zero counter was persisted before the last shutdown, resume. */
+    uint32_t restored_val = config_mngr_reward_counter_s_get();
+    if (restored_val > 0U)
+    {
+        portENTER_CRITICAL(&g_spinlock);
+        g_counter_s = restored_val;
+        g_state     = TIME_CTR_STATE_AP_ACTIVE;
+        portEXIT_CRITICAL(&g_spinlock);
+
+        esp_err_t ap_ret = wifi_mngr_reward_ap_set(true);
+        if (ESP_OK != ap_ret)
+        {
+            ESP_LOGW(gp_tag, "boot restore: wifi_mngr_reward_ap_set(true) failed: %s",
+                esp_err_to_name(ap_ret));
+        }
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
+        esp_err_t tmr_ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
+        if (ESP_OK != tmr_ret)
+        {
+            ESP_LOGE(gp_tag, "boot restore: esp_timer_start_periodic failed: %s",
+                esp_err_to_name(tmr_ret));
+        }
+        ESP_LOGI(gp_tag, "boot restore: counter = %" PRIu32 " s, reward AP on", restored_val);
+    }
+
+    /* Create and start the periodic NVS save timer (always active regardless of state). */
+    const esp_timer_create_args_t save_args = {
+        .callback        = time_ctr_save_cb,
+        .arg             = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name            = "time_ctr_save",
+    };
+    ret = esp_timer_create(&save_args, &g_save_timer);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_timer_create (save) failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = esp_timer_start_periodic(g_save_timer, (uint64_t)TIME_CTR_SAVE_INTERVAL_S * 1000000ULL);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_timer_start_periodic (save) failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    if (restored_val > 0U)
+    {
+        ESP_LOGI(gp_tag, "init complete — counter %" PRIu32 " s restored, reward AP on",
+            restored_val);
+    }
+    else
+    {
+        ESP_LOGI(gp_tag, "init complete — counter 0, reward AP off");
+    }
     return ESP_OK;
 }
 
@@ -220,6 +280,81 @@ bool time_ctr_is_paused(void)
 uint32_t time_ctr_current_speed_x10_get(void)
 {
     return pulse_in_speed_kmh_x10_get();
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t time_ctr_counter_set(uint32_t val)
+{
+    portENTER_CRITICAL(&g_spinlock);
+    g_counter_s                      = val;
+    time_ctr_state_t const old_state = g_state;
+    portEXIT_CRITICAL(&g_spinlock);
+
+    /* Persist to NVS immediately. */
+    (void)config_mngr_reward_counter_s_set(val);
+
+    if ((val > 0U) && (TIME_CTR_STATE_IDLE == old_state))
+    {
+        /* Transition IDLE → AP_ACTIVE. */
+        portENTER_CRITICAL(&g_spinlock);
+        g_state       = TIME_CTR_STATE_AP_ACTIVE;
+        g_below_ticks = 0U;
+        g_paused      = false;
+        portEXIT_CRITICAL(&g_spinlock);
+
+        esp_err_t ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGE(gp_tag, "time_ctr_counter_set: esp_timer_start_periodic failed: %s",
+                esp_err_to_name(ret));
+        }
+
+        ret = wifi_mngr_reward_ap_set(true);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGW(gp_tag, "time_ctr_counter_set: wifi_mngr_reward_ap_set(true) failed: %s",
+                esp_err_to_name(ret));
+        }
+
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
+        ESP_LOGI(gp_tag, "IDLE->AP_ACTIVE via counter_set: val = %" PRIu32, val);
+    }
+    else if ((0U == val) && (TIME_CTR_STATE_AP_ACTIVE == old_state))
+    {
+        /* Transition AP_ACTIVE → IDLE immediately — do not wait for the next tick. */
+        (void)esp_timer_stop(gp_tick_timer);
+
+        portENTER_CRITICAL(&g_spinlock);
+        g_state       = TIME_CTR_STATE_IDLE;
+        g_below_ticks = 0U;
+        g_paused      = false;
+        portEXIT_CRITICAL(&g_spinlock);
+
+        esp_err_t ret = wifi_mngr_reward_ap_set(false);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGW(gp_tag, "time_ctr_counter_set: wifi_mngr_reward_ap_set(false) failed: %s",
+                esp_err_to_name(ret));
+        }
+
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_OFF, NULL, 0U, 0U);
+        ESP_LOGI(gp_tag, "AP_ACTIVE->IDLE via counter_set: val=0, reward AP off");
+    }
+    else if ((0U == val) && (TIME_CTR_STATE_SESSION == old_state))
+    {
+        /* Cancel the pending threshold timer and return to IDLE. */
+        (void)esp_timer_stop(gp_threshold_timer);
+
+        portENTER_CRITICAL(&g_spinlock);
+        g_state = TIME_CTR_STATE_IDLE;
+        portEXIT_CRITICAL(&g_spinlock);
+
+        ESP_LOGI(gp_tag, "SESSION->IDLE via counter_set: val=0, threshold timer cancelled");
+    }
+
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &val, sizeof(val), 0U);
+    return ESP_OK;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -523,6 +658,9 @@ static void time_ctr_tick_cb(void * p_arg)
         g_paused      = false;
         portEXIT_CRITICAL(&g_spinlock);
 
+        /* Persist zero counter before disabling the AP (spec §5.5). */
+        (void)config_mngr_reward_counter_s_set(0U);
+
         esp_err_t ret = wifi_mngr_reward_ap_set(false);
         if (ESP_OK != ret)
         {
@@ -530,8 +668,24 @@ static void time_ctr_tick_cb(void * p_arg)
         }
 
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_OFF, NULL, 0U, 0U);
-        ESP_LOGI(gp_tag, "AP_ACTIVE→IDLE: reward AP off, counter reached 0");
+        ESP_LOGI(gp_tag, "AP_ACTIVE->IDLE: reward AP off, counter reached 0");
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Periodic timer callback that saves the current counter to NVS.
+ *
+ * Fired every #TIME_CTR_SAVE_INTERVAL_S seconds.  Reads the current counter
+ * value and persists it via #config_mngr_reward_counter_s_set().
+ *
+ * \param[in] p_arg  Unused context pointer.
+ */
+static void time_ctr_save_cb(void * p_arg)
+{
+    (void)p_arg;
+    (void)config_mngr_reward_counter_s_set(time_ctr_get());
 }
 
 //--------------------------------------------------------------------------------------------------
