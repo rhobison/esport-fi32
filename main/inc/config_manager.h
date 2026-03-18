@@ -249,7 +249,7 @@ esp_err_t config_mngr_timezone_set(const char * p_val);
  *
  * \return Threshold in kbps (range 0\u201365535; 0 = pause immediately).
  */
-uint16_t config_mngr_soft_ap_dec_threshold_kbps_get(void);
+uint16_t  config_mngr_soft_ap_dec_threshold_kbps_get(void);
 
 /**
  * \brief Set and persist the reward AP idle throughput threshold.
@@ -277,6 +277,25 @@ uint16_t config_mngr_soft_ap_idle_throughput_timeout_s_get(void);
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */
 esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val);
+
+/**
+ * \brief Return the minimum instantaneous speed required to earn time credits.
+ *
+ * Speed is expressed in km/h \u00d7 10 (e.g. 30 = 3.0 km/h).  A value of \c 0
+ * disables the gate: all pulses earn credits regardless of speed.
+ *
+ * \return Minimum speed threshold in km/h \u00d7 10 (range 0\u201365535).
+ */
+uint16_t config_mngr_min_speed_to_increment_time_kmh_x10_get(void);
+
+/**
+ * \brief Set and persist the minimum speed threshold for time credit earning.
+ *
+ * \param[in] val  Threshold in km/h \u00d7 10 (range 0\u201365535; 0 = gate disabled).
+ *
+ * \return \c ESP_OK on success, or an NVS error code on write failure.
+ */
+esp_err_t config_mngr_min_speed_to_increment_time_kmh_x10_set(uint16_t val);
 #ifdef __cplusplus
 }
 #endif

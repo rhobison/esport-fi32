@@ -98,4 +98,13 @@ menu "esport-fi32 Configuration"
             the threshold before the countdown pauses.  Set to 0 to pause
             on the very first below-threshold tick.
 
+    config ESPORT_MIN_SPEED_KMH_X10
+        int "Minimum speed to earn time credits (km/h \u00d7 10)"
+        range 0 65535
+        default 30
+        help
+            Minimum instantaneous speed in km/h \u00d7 10 required for a pulse to
+            earn time credits.  A value of 30 represents 3.0 km/h.  Set to 0
+            to disable the gate and credit all pulses regardless of speed.
+
 endmenu

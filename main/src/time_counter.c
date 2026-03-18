@@ -22,6 +22,7 @@
 
 #include "config_manager.h"
 #include "event_ids.h"
+#include "pulse_input.h"
 #include "wifi_manager.h"
 
 //==================================================================================================
@@ -72,13 +73,21 @@ static esp_timer_handle_t gp_threshold_timer = NULL;
  * Protected by #g_spinlock; reset to 0 when AP is disabled or throughput
  * rises above threshold.
  */
-static          uint16_t g_below_ticks = 0U;
+static uint16_t g_below_ticks = 0U;
 
 /**
  * \brief True when the countdown is currently paused due to low AP traffic;
  * protected by #g_spinlock.
  */
 static volatile bool g_paused = false;
+
+/**
+ * \brief Most recently computed instantaneous speed in km/h \u00d7 10.
+ *
+ * Updated by the pulse event handler; protected by #g_spinlock.  Reset to 0
+ * when the state machine returns to #TIME_CTR_STATE_IDLE.
+ */
+static volatile uint32_t g_current_speed_x10 = 0U;
 
 //==================================================================================================
 // Internal Function Prototypes
@@ -179,6 +188,16 @@ bool time_ctr_is_paused(void)
 
 //--------------------------------------------------------------------------------------------------
 
+uint32_t time_ctr_current_speed_x10_get(void)
+{
+    portENTER_CRITICAL(&g_spinlock);
+    uint32_t speed = g_current_speed_x10;
+    portEXIT_CRITICAL(&g_spinlock);
+    return speed;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 //==================================================================================================
 // Private Functions
 //==================================================================================================
@@ -187,9 +206,11 @@ bool time_ctr_is_paused(void)
  * \brief ESP event loop handler called for each accepted debounced pulse.
  *
  * Adds #config_mngr_seconds_per_pulse_get() credits to #g_counter_s when the
- * state machine is in #TIME_CTR_STATE_SESSION or #TIME_CTR_STATE_AP_ACTIVE.
- * Pulses received in #TIME_CTR_STATE_IDLE (before a session is confirmed open)
- * are ignored.
+ * state machine is in #TIME_CTR_STATE_SESSION or #TIME_CTR_STATE_AP_ACTIVE
+ * and the rider's instantaneous speed meets or exceeds
+ * #config_mngr_min_speed_to_increment_time_kmh_x10_get().  When the gate
+ * threshold is 0 all pulses earn credits (original behaviour).  Pulses in
+ * #TIME_CTR_STATE_IDLE are ignored.
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
@@ -204,10 +225,35 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
     (void)event_id;
     (void)p_event_data;
 
-    uint16_t spp = config_mngr_seconds_per_pulse_get();
+    uint16_t spp         = config_mngr_seconds_per_pulse_get();
+    uint32_t cpp         = config_mngr_centimeters_per_pulse_get();
+    uint16_t min_spd     = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    uint32_t interval_ms = pulse_in_last_interval_ms_get();
+
+    /* Compute instantaneous speed (km/h × 10) from latest inter-pulse interval. */
+    uint32_t speed_x10;
+    if ((UINT32_MAX == interval_ms) || (0U == interval_ms))
+    {
+        speed_x10 = 0U;
+    }
+    else
+    {
+        /* speed (km/h\u00d710) = cpp (cm) * 360 / interval_ms
+         *   derivation: v (km/h) = (cpp/100 m) / (interval_ms/3600000 h)
+         *             = cpp * 36000 / interval_ms    [km/h]
+         *   \u00d710: cpp * 360000 / interval_ms        [km/h\u00d710]
+         *   simplified with cpp in cm: cpp * 360 / interval_ms */
+        speed_x10 = (cpp * 360U) / interval_ms;
+    }
 
     portENTER_CRITICAL(&g_spinlock);
+    g_current_speed_x10 = speed_x10;
     bool b_credit = (TIME_CTR_STATE_SESSION == g_state) || (TIME_CTR_STATE_AP_ACTIVE == g_state);
+    /* Apply speed gate: skip credit if threshold > 0 and speed is below it. */
+    if (b_credit && (min_spd > 0U) && (speed_x10 < (uint32_t)min_spd))
+    {
+        b_credit = false;
+    }
     if (b_credit)
     {
         g_counter_s += (uint32_t)spp;
@@ -215,11 +261,9 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
     uint32_t counter_snapshot = g_counter_s;
     portEXIT_CRITICAL(&g_spinlock);
 
-    if (b_credit)
-    {
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_snapshot,
-            sizeof(counter_snapshot), 0U);
-    }
+    /* Always post COUNTER_CHANGED so consumers stay up to date. */
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_snapshot,
+        sizeof(counter_snapshot), 0U);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -309,8 +353,9 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     bool b_cancel = (TIME_CTR_STATE_SESSION == g_state);
     if (b_cancel)
     {
-        g_state     = TIME_CTR_STATE_IDLE;
-        g_counter_s = 0U;
+        g_state             = TIME_CTR_STATE_IDLE;
+        g_counter_s         = 0U;
+        g_current_speed_x10 = 0U;
     }
     portEXIT_CRITICAL(&g_spinlock);
 
@@ -318,8 +363,8 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     {
         (void)esp_timer_stop(gp_threshold_timer);
         uint32_t zero = 0U;
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &zero,
-            sizeof(zero), 0U);
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &zero, sizeof(zero),
+            0U);
         ESP_LOGI(gp_tag, "SESSION→IDLE: session closed before threshold, counter reset");
     }
 }
@@ -368,8 +413,7 @@ static void time_ctr_threshold_cb(void * p_arg)
     }
 
     (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
-    ESP_LOGI(gp_tag, "SESSION→AP_ACTIVE: reward AP on, counter = %" PRIu32 " s",
-        counter_snapshot);
+    ESP_LOGI(gp_tag, "SESSION→AP_ACTIVE: reward AP on, counter = %" PRIu32 " s", counter_snapshot);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -442,8 +486,9 @@ static void time_ctr_tick_cb(void * p_arg)
 
         /* Reset sliding-window state when leaving AP_ACTIVE. */
         portENTER_CRITICAL(&g_spinlock);
-        g_below_ticks = 0U;
-        g_paused      = false;
+        g_below_ticks       = 0U;
+        g_paused            = false;
+        g_current_speed_x10 = 0U;
         portEXIT_CRITICAL(&g_spinlock);
 
         esp_err_t ret = wifi_mngr_reward_ap_set(false);

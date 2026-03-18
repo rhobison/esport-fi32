@@ -125,16 +125,19 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
     char time_local_str[24];
     strftime(time_local_str, sizeof(time_local_str), "%Y-%m-%dT%H:%M:%S", &tm_local);
 
-    int64_t  uptime_s   = (int64_t)(esp_timer_get_time() / 1000000LL);
-    bool     b_synced   = time_mngr_is_synced();
-    bool     b_sta      = wifi_mngr_sta_is_connected();
-    bool     b_cfg_ap   = wifi_mngr_config_ap_is_active();
-    bool     b_rew_ap   = wifi_mngr_reward_ap_is_active();
-    uint8_t  ap_clients = wifi_mngr_reward_ap_client_count();
-    uint32_t counter_s  = time_ctr_get();
-    uint32_t threshold  = config_mngr_soft_ap_start_threshold_s_get();
-    bool     b_paused   = time_ctr_is_paused();
-    uint32_t throughput = wifi_mngr_reward_ap_throughput_kbps();
+    int64_t  uptime_s      = (int64_t)(esp_timer_get_time() / 1000000LL);
+    bool     b_synced      = time_mngr_is_synced();
+    bool     b_sta         = wifi_mngr_sta_is_connected();
+    bool     b_cfg_ap      = wifi_mngr_config_ap_is_active();
+    bool     b_rew_ap      = wifi_mngr_reward_ap_is_active();
+    uint8_t  ap_clients    = wifi_mngr_reward_ap_client_count();
+    uint32_t counter_s     = time_ctr_get();
+    uint32_t threshold     = config_mngr_soft_ap_start_threshold_s_get();
+    bool     b_paused      = time_ctr_is_paused();
+    uint32_t throughput    = wifi_mngr_reward_ap_throughput_kbps();
+    uint32_t speed_x10     = time_ctr_current_speed_x10_get();
+    uint16_t min_spd_cfg   = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    bool     b_speed_gated = (min_spd_cfg > 0U) && (speed_x10 < (uint32_t)min_spd_cfg);
 
     char sta_ip[20];
     char sta_ssid[33];
@@ -167,13 +170,16 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         "  \"session_pulse_count\": %" PRIu32 ",\n"
         "  \"live_speed_kmh_x10\": %" PRIu16 ",\n"
         "  \"reward_ap_throughput_kbps\": %" PRIu32 ",\n"
-        "  \"countdown_paused\": %s\n"
+        "  \"countdown_paused\": %s,\n"
+        "  \"current_speed_kmh_x10\": %" PRIu32 ",\n"
+        "  \"speed_gate_active\": %s\n"
         "}\n",
         (int64_t)now_utc, time_local_str, b_synced ? "true" : "false", uptime_s,
         b_sta ? "true" : "false", sta_ssid, sta_ip, b_cfg_ap ? "true" : "false",
         b_rew_ap ? "true" : "false", rew_ap_ssid, ap_clients, counter_s, threshold,
         sess.p_state_name, sess.start_utc, sess.duration_s, sess.pulse_count,
-        sess.live_speed_kmh_x10, throughput, b_paused ? "true" : "false");
+        sess.live_speed_kmh_x10, throughput, b_paused ? "true" : "false", speed_x10,
+        b_speed_gated ? "true" : "false");
 
     if (n >= (int)HTTP_SRV_JSON_BUF_LEN)
     {

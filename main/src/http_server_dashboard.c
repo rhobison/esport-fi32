@@ -125,13 +125,18 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     bool    b_rew_ap   = wifi_mngr_reward_ap_is_active();
     uint8_t ap_clients = wifi_mngr_reward_ap_client_count();
 
-    uint32_t counter_s  = time_ctr_get();
-    uint32_t threshold  = config_mngr_soft_ap_start_threshold_s_get();
-    bool     b_paused   = time_ctr_is_paused();
-    uint32_t throughput = wifi_mngr_reward_ap_throughput_kbps();
-    uint32_t ctr_h      = counter_s / 3600U;
-    uint32_t ctr_m      = (counter_s % 3600U) / 60U;
-    uint32_t ctr_s_r    = counter_s % 60U;
+    uint32_t counter_s     = time_ctr_get();
+    uint32_t threshold     = config_mngr_soft_ap_start_threshold_s_get();
+    bool     b_paused      = time_ctr_is_paused();
+    uint32_t throughput    = wifi_mngr_reward_ap_throughput_kbps();
+    uint32_t speed_x10     = time_ctr_current_speed_x10_get();
+    uint32_t spd_ctr_int   = speed_x10 / 10U;
+    uint32_t spd_ctr_dec   = speed_x10 % 10U;
+    uint16_t min_spd_cfg   = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    bool     b_speed_gated = (min_spd_cfg > 0U) && (speed_x10 < (uint32_t)min_spd_cfg);
+    uint32_t ctr_h         = counter_s / 3600U;
+    uint32_t ctr_m         = (counter_s % 3600U) / 60U;
+    uint32_t ctr_s_r       = counter_s % 60U;
 
     char sta_ip[20];
     char sta_ssid[33];
@@ -184,7 +189,6 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     static const char sc_page_hdr[] =
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<meta http-equiv=\"refresh\" content=\"5\">"
         "<title>esport-fi32 Dashboard</title>"
         "<style>"
         "body{font-family:sans-serif;max-width:720px;margin:1em auto;padding:0 .8em;"
@@ -206,10 +210,10 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     /* System section */
     (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>System</h3>");
     snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-        "<p>Time:&nbsp;<b>%s</b></p>"
-        "<p>NTP:&nbsp;<span class=\"%s\">%s</span></p>"
-        "<p>Uptime:&nbsp;<b>%" PRId32 "d&nbsp;%" PRId32 "h&nbsp;%" PRId32 "m&nbsp;%" PRId32
-        "s</b></p></div>",
+        "<p>Time:&nbsp;<b><span id=\"sys-time\">%s</span></b></p>"
+        "<p>NTP:&nbsp;<span id=\"sys-ntp\" class=\"%s\">%s</span></p>"
+        "<p>Uptime:&nbsp;<b><span id=\"sys-uptime\">%" PRId32 "d&nbsp;%" PRId32 "h&nbsp;%" PRId32
+        "m&nbsp;%" PRId32 "s</span></b></p></div>",
         time_local_str, b_synced ? "ok" : "err", b_synced ? "Synced" : "Not synced", up_d, up_h,
         up_m, up_s_rem);
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
@@ -217,13 +221,13 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     /* Wi-Fi section */
     (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>Wi-Fi</h3>");
     snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-        "<p>STA:&nbsp;<span class=\"%s\">%s</span>"
-        "&nbsp; SSID:&nbsp;<b>%s</b>"
-        "&nbsp; IP:&nbsp;<b>%s</b></p>"
-        "<p>Config AP:&nbsp;<span class=\"%s\">%s</span></p>"
-        "<p>Reward AP:&nbsp;<span class=\"%s\">%s</span>"
-        "&nbsp; SSID:&nbsp;<b>%s</b>"
-        "&nbsp; Clients:&nbsp;<b>%" PRIu8 "</b></p></div>",
+        "<p>STA:&nbsp;<span id=\"wifi-sta\" class=\"%s\">%s</span>"
+        "&nbsp; SSID:&nbsp;<b><span id=\"wifi-sta-ssid\">%s</span></b>"
+        "&nbsp; IP:&nbsp;<b><span id=\"wifi-sta-ip\">%s</span></b></p>"
+        "<p>Config AP:&nbsp;<span id=\"wifi-cfg-ap\" class=\"%s\">%s</span></p>"
+        "<p>Reward AP:&nbsp;<span id=\"wifi-rew-ap\" class=\"%s\">%s</span>"
+        "&nbsp; SSID:&nbsp;<b><span id=\"wifi-rew-ap-ssid\">%s</span></b>"
+        "&nbsp; Clients:&nbsp;<b><span id=\"wifi-rew-ap-clients\">%" PRIu8 "</span></b></p></div>",
         b_sta ? "ok" : "err", b_sta ? "Connected" : "Disconnected", sta_ssid, sta_ip,
         b_cfg_ap ? "ok" : "err", b_cfg_ap ? "Active" : "Inactive", b_rew_ap ? "ok" : "err",
         b_rew_ap ? "Active" : "Inactive", rew_ap_ssid, ap_clients);
@@ -232,26 +236,36 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     /* Exercise Counter section */
     (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>Exercise Counter</h3>");
     snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-        "<p>Counter:&nbsp;<b>%" PRIu32 "s</b>"
-        "&nbsp;(%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 ")"
-        "&nbsp; Threshold:&nbsp;<b>%" PRIu32 "s</b></p>"
-        "<p>Reward AP:&nbsp;<span class=\"%s\">%s</span></p>"
+        "<p>Counter:&nbsp;<b><span id=\"ctr-seconds\">%" PRIu32 "s</span></b>"
+        "&nbsp;(<span id=\"ctr-hms\">%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 "</span>)"
+        "&nbsp; Threshold:&nbsp;<b><span id=\"ctr-threshold\">%" PRIu32 "s</span></b></p>"
+        "<p>Reward AP:&nbsp;<span id=\"ctr-rew-ap\" class=\"%s\">%s</span></p>"
         "<p>Traffic:&nbsp;<span id=\"ap-throughput\"><b>%" PRIu32 "</b></span>&nbsp;kbps</p>"
+        "<p>Current speed:&nbsp;<span id=\"current-speed\"><b>%" PRIu32 ".%" PRIu32
+        "</b></span>&nbsp;km/h</p>"
+        "<p>Pulse crediting:&nbsp;"
+        "<span id=\"speed-gate-indicator\" style=\"display:%s;\">&#8856; Gated (speed too "
+        "low)</span>"
+        "<span id=\"speed-credit-indicator\" style=\"display:%s;\">Crediting</span>"
+        "</p>"
         "<p>Countdown:&nbsp;"
         "<span id=\"pause-indicator\" style=\"display:%s;\">&#9208; Paused (low traffic)</span>"
         "<span id=\"decrement-indicator\" style=\"display:%s;\">Decrementing</span>"
         "</p></div>",
         counter_s, ctr_h, ctr_m, ctr_s_r, threshold, b_rew_ap ? "ok" : "err",
-        b_rew_ap ? "Active" : "Inactive", throughput, b_paused ? "inline" : "none",
-        b_paused ? "none" : "inline");
+        b_rew_ap ? "Active" : "Inactive", throughput, spd_ctr_int, spd_ctr_dec,
+        b_speed_gated ? "inline" : "none", b_speed_gated ? "none" : "inline",
+        b_paused ? "inline" : "none", b_paused ? "none" : "inline");
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
 
     /* Current Session section */
     (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>Current Session</h3>");
     snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-        "<p>State:&nbsp;<b>%s</b></p>"
-        "<p>Live Speed:&nbsp;<b>%" PRIu16 ".%" PRIu16 "&nbsp;km/h</b></p>"
-        "<p>Duration:&nbsp;<b>%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 "</b></p></div>",
+        "<p>State:&nbsp;<b><span id=\"sess-state\">%s</span></b></p>"
+        "<p>Live Speed:&nbsp;<b><span id=\"sess-speed\">%" PRIu16 ".%" PRIu16
+        "&nbsp;km/h</span></b></p>"
+        "<p>Duration:&nbsp;<b><span id=\"sess-duration\">%" PRIu32 ":%02" PRIu32 ":%02" PRIu32
+        "</span></b></p></div>",
         sess.p_state_name, spd_int, spd_dec, sess_h, sess_m, sess_sr);
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
 
@@ -380,18 +394,59 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "</div>"
         "<script>"
         "(function(){"
+        "function pad2(n){return('0'+n).slice(-2);}"
+        "function fmtHms(s){return "
+        "Math.floor(s/3600)+':'+pad2(Math.floor((s%3600)/60))+':'+pad2(s%60);}"
         "function refresh(){"
         "fetch('/api/status').then(function(r){return r.json();}).then(function(d){"
+        "var e;"
+        "e=document.getElementById('sys-time');if(e)e.textContent=d.time_local;"
+        "e=document.getElementById('sys-ntp');"
+        "if(e){e.textContent=d.time_synced?'Synced':'Not "
+        "synced';e.className=d.time_synced?'ok':'err';}"
+        "e=document.getElementById('sys-uptime');"
+        "if(e){var u=d.uptime_s;"
+        "e.textContent=Math.floor(u/86400)+'d '+Math.floor((u%86400)/3600)+'h "
+        "'+Math.floor((u%3600)/60)+'m '+(u%60)+'s';}"
+        "e=document.getElementById('wifi-sta');"
+        "if(e){e.textContent=d.sta_connected?'Connected':'Disconnected';e.className=d.sta_"
+        "connected?'ok':'err';}"
+        "e=document.getElementById('wifi-sta-ssid');if(e)e.textContent=d.sta_ssid;"
+        "e=document.getElementById('wifi-sta-ip');if(e)e.textContent=d.sta_ip;"
+        "e=document.getElementById('wifi-cfg-ap');"
+        "if(e){e.textContent=d.config_ap_active?'Active':'Inactive';e.className=d.config_ap_active?"
+        "'ok':'err';}"
+        "e=document.getElementById('wifi-rew-ap');"
+        "if(e){e.textContent=d.reward_ap_active?'Active':'Inactive';e.className=d.reward_ap_active?"
+        "'ok':'err';}"
+        "e=document.getElementById('wifi-rew-ap-ssid');if(e)e.textContent=d.reward_ap_ssid;"
+        "e=document.getElementById('wifi-rew-ap-clients');if(e)e.textContent=d.reward_ap_clients;"
+        "e=document.getElementById('ctr-seconds');if(e)e.textContent=d.counter_s+'s';"
+        "e=document.getElementById('ctr-hms');if(e)e.textContent=fmtHms(d.counter_s);"
+        "e=document.getElementById('ctr-threshold');if(e)e.textContent=d.threshold_s+'s';"
+        "e=document.getElementById('ctr-rew-ap');"
+        "if(e){e.textContent=d.reward_ap_active?'Active':'Inactive';e.className=d.reward_ap_active?"
+        "'ok':'err';}"
+        "e=document.getElementById('ap-throughput');"
+        "if(e)e.innerHTML='<b>'+d.reward_ap_throughput_kbps+'</b>';"
+        "e=document.getElementById('current-speed');"
+        "if(e)e.innerHTML='<b>'+(d.current_speed_kmh_x10/10).toFixed(1)+'</b>';"
+        "var sg=document.getElementById('speed-gate-indicator');"
+        "var sci=document.getElementById('speed-credit-indicator');"
+        "if(sg&&sci){sg.style.display=d.speed_gate_active?'inline':'none';sci.style.display=d."
+        "speed_gate_active?'none':'inline';}"
         "var pi=document.getElementById('pause-indicator');"
         "var di=document.getElementById('decrement-indicator');"
-        "var at=document.getElementById('ap-throughput');"
-        "if(pi&&di){"
-        "pi.style.display=d.countdown_paused?'inline':'none';"
-        "di.style.display=d.countdown_paused?'none':'inline';"
-        "}"
-        "if(at)at.innerHTML='<b>'+d.reward_ap_throughput_kbps+'</b>';"
+        "if(pi&&di){pi.style.display=d.countdown_paused?'inline':'none';di.style.display=d."
+        "countdown_paused?'none':'inline';}"
+        "e=document.getElementById('sess-state');if(e)e.textContent=d.session_state;"
+        "e=document.getElementById('sess-speed');"
+        "if(e)e.innerHTML=(d.live_speed_kmh_x10/10).toFixed(1)+'&nbsp;km/h';"
+        "e=document.getElementById('sess-duration');if(e)e.textContent=fmtHms(d.session_duration_s)"
+        ";"
         "}).catch(function(){});"
         "}"
+        "refresh();"
         "setInterval(refresh,2000);"
         "})();"
         "</script>"

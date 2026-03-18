@@ -75,6 +75,17 @@ uint32_t pulse_in_dropped_count_get(void);
  */
 esp_err_t pulse_in_last_post_err_get(void);
 
+/**
+ * \brief Return the elapsed time in milliseconds between the two most recent
+ * accepted pulses.
+ *
+ * Returns \c UINT32_MAX if fewer than two pulses have been accepted since boot
+ * (speed is indeterminate).  Safe to call from any task context (volatile read).
+ *
+ * \return Inter-pulse interval in milliseconds, or \c UINT32_MAX if unavailable.
+ */
+uint32_t pulse_in_last_interval_ms_get(void);
+
 #ifdef __cplusplus
 }
 #endif

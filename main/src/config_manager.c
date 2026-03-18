@@ -39,6 +39,7 @@
 #define CONFIG_MNGR_KEY_TZ                ("tz")
 #define CONFIG_MNGR_KEY_AP_THR_KBPS       ("ap_thr_kbps")
 #define CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S ("ap_idle_tmo")
+#define CONFIG_MNGR_KEY_MIN_SPEED_X10     ("min_spd_x10")
 
 /* Factory defaults (spec §3). */
 #define CONFIG_MNGR_DEF_WIFI_SSID         (CONFIG_ESPORT_WIFI_SSID)
@@ -54,6 +55,7 @@
 #define CONFIG_MNGR_DEF_TZ                ("UTC0")
 #define CONFIG_MNGR_DEF_AP_THR_KBPS       ((uint16_t)CONFIG_ESPORT_AP_THRESHOLD_KBPS)
 #define CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S ((uint16_t)CONFIG_ESPORT_AP_IDLE_TIMEOUT_S)
+#define CONFIG_MNGR_DEF_MIN_SPEED_X10     ((uint16_t)CONFIG_ESPORT_MIN_SPEED_KMH_X10)
 
 /* String size limits (spec §5.1). */
 #define CONFIG_MNGR_MAX_SSID_LEN (32U) /* max 32 chars + NUL */
@@ -146,6 +148,8 @@ esp_err_t config_mngr_init(void)
         CONFIG_MNGR_DEF_AP_THR_KBPS);
     ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S,
         CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S);
+    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_MIN_SPEED_X10,
+        CONFIG_MNGR_DEF_MIN_SPEED_X10);
 
     if (ESP_OK == ret)
     {
@@ -345,6 +349,21 @@ esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val)
 {
     /* Full uint16_t range 0–65535 is valid per spec §3. */
     return config_mngr_u16_set(CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S, val, 0U, UINT16_MAX);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+uint16_t config_mngr_min_speed_to_increment_time_kmh_x10_get(void)
+{
+    return config_mngr_u16_get(CONFIG_MNGR_KEY_MIN_SPEED_X10, CONFIG_MNGR_DEF_MIN_SPEED_X10);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t config_mngr_min_speed_to_increment_time_kmh_x10_set(uint16_t val)
+{
+    /* Full uint16_t range 0–65535 is valid per spec §3. */
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_MIN_SPEED_X10, val, 0U, UINT16_MAX);
 }
 
 //--------------------------------------------------------------------------------------------------
