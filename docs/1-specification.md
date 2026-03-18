@@ -82,22 +82,23 @@ Key behaviour:
 
 All parameters are stored at runtime in NVS and survive reboots. They are initialised from the factory defaults below if the NVS key is absent or the NVS partition is corrupt.
 
-| Parameter                               | NVS Key       | Type   | Default         | Min | Max         | Description                                                                                                          |
-| --------------------------------------- | ------------- | ------ | --------------- | --- | ----------- | -------------------------------------------------------------------------------------------------------------------- |
-| `wifi_ssid`                             | `wifi_ssid`   | string | `""`            | —   | 32 chars    | Home network SSID                                                                                                    |
-| `wifi_password`                         | `wifi_pwd`    | string | `""`            | —   | 64 chars    | Home network WPA2 password                                                                                           |
-| `soft_ap_ssid`                          | `ap_ssid`     | string | `"esport-fi32"` | —   | 32 chars    | Reward Soft AP SSID                                                                                                  |
-| `soft_ap_password`                      | `ap_pwd`      | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                                                                                         |
-| `seconds_per_pulse`                     | `spp`         | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse                                                                             |
-| `soft_ap_start_threshold_s`             | `ap_thresh`   | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP                                                                    |
-| `centimeters_per_pulse`                 | `cpp`         | uint32 | `25`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed                                                                          |
-| `idle_session_interval_s`               | `idle_s`      | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session                                                                         |
-| `start_session_interval_s`              | `start_s`     | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session                                                                  |
-| `pulse_debounce_time_ms`                | `debounce_ms` | uint16 | `10`            | 1   | 5000        | Minimum time (ms) between two accepted pulses                                                                        |
-| `timezone`                              | `tz`          | string | `"UTC0"`        | —   | 63 chars    | POSIX TZ string (e.g. `"CET-1CEST,M3.5.0,M10.5.0/3"`)                                                                |
-| `soft_ap_dec_time_above_threshold_kbps` | `ap_thr_kbps` | uint16 | `1`             | 0   | 65535       | Combined RX+TX throughput (kbps) below which the countdown is considered idle.                                       |
-| `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo` | uint16 | `30`            | 0   | 65535       | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses.           |
-| `min_speed_to_increment_time_kmh_x10`   | `min_spd_x10` | uint16 | `30`            | 0   | 65535       | Minimum instantaneous speed in km/h × 10 required for a pulse to earn time credits.  Set to `0` to disable the gate. |
+| Parameter                               | NVS Key        | Type   | Default         | Min | Max         | Description                                                                                                                                                                                                              |
+| --------------------------------------- | -------------- | ------ | --------------- | --- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `wifi_ssid`                             | `wifi_ssid`    | string | `""`            | —   | 32 chars    | Home network SSID                                                                                                                                                                                                        |
+| `wifi_password`                         | `wifi_pwd`     | string | `""`            | —   | 64 chars    | Home network WPA2 password                                                                                                                                                                                               |
+| `soft_ap_ssid`                          | `ap_ssid`      | string | `"esport-fi32"` | —   | 32 chars    | Reward Soft AP SSID                                                                                                                                                                                                      |
+| `soft_ap_password`                      | `ap_pwd`       | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                                                                                                                                                                                             |
+| `seconds_per_pulse`                     | `spp`          | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse                                                                                                                                                                                 |
+| `soft_ap_start_threshold_s`             | `ap_thresh`    | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP                                                                                                                                                                        |
+| `centimeters_per_pulse`                 | `cpp`          | uint32 | `25`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed                                                                                                                                                                              |
+| `idle_session_interval_s`               | `idle_s`       | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session                                                                                                                                                                             |
+| `start_session_interval_s`              | `start_s`      | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session                                                                                                                                                                      |
+| `pulse_debounce_time_ms`                | `debounce_ms`  | uint16 | `10`            | 1   | 5000        | Minimum time (ms) between two accepted pulses                                                                                                                                                                            |
+| `timezone`                              | `tz`           | string | `"UTC0"`        | —   | 63 chars    | POSIX TZ string (e.g. `"CET-1CEST,M3.5.0,M10.5.0/3"`)                                                                                                                                                                    |
+| `soft_ap_dec_time_above_threshold_kbps` | `ap_thr_kbps`  | uint16 | `1`             | 0   | 65535       | Combined RX+TX throughput (kbps) below which the countdown is considered idle.                                                                                                                                           |
+| `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo`  | uint16 | `30`            | 0   | 65535       | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses.                                                                                                               |
+| `min_speed_to_increment_time_kmh_x10`   | `min_spd_x10`  | uint16 | `30`            | 0   | 65535       | Minimum instantaneous speed in km/h × 10 required for a pulse to earn time credits.  Set to `0` to disable the gate.                                                                                                     |
+| `reward_counter_s`                      | `reward_ctr_s` | uint32 | `0`             | 0   | (unlimited) | Reward internet time counter (seconds remaining). Persisted to NVS every 60 s and immediately when the AP is disabled; restored on boot. Setting a non-zero value via the config page enables the reward AP immediately. |
 
 ---
 
@@ -222,6 +223,8 @@ uint16_t  config_mngr_soft_ap_idle_throughput_timeout_s_get(void);
 esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val);
 uint16_t  config_mngr_min_speed_to_increment_time_kmh_x10_get(void);
 esp_err_t config_mngr_min_speed_to_increment_time_kmh_x10_set(uint16_t val);
+uint32_t  config_mngr_reward_counter_s_get(void);
+esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
 ```
 
 **Validation rules (setters reject values outside this range with `ESP_ERR_INVALID_ARG`):**
@@ -367,6 +370,8 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
   - Once the reward AP is enabled, it stays enabled until the counter reaches 0.
 - Post `ESPORT_EVENT_COUNTER_CHANGED` (payload: `uint32_t counter_s`) after every change (pulse or tick), including paused ticks.
 - Post `ESPORT_EVENT_REWARD_AP_ON` and `ESPORT_EVENT_REWARD_AP_OFF` when AP transitions occur.
+- **NVS persistence:** On `time_ctr_init()`, restore `g_counter_s` from `config_mngr_reward_counter_s_get()`. If > 0, transition directly to `TIME_CTR_STATE_AP_ACTIVE`: call `wifi_mngr_reward_ap_set(true)`, post `ESPORT_EVENT_REWARD_AP_ON`, and start the decrement timer (bypassing IDLE/SESSION/threshold flow). A hardcoded periodic save timer (`TIME_CTR_SAVE_INTERVAL_S = 60` s) persists the current counter to NVS via `config_mngr_reward_counter_s_set()`. The counter is also saved immediately when it reaches 0, before the reward AP is disabled.
+- **Runtime counter override:** `time_ctr_counter_set(val)` sets the counter to the supplied value, saves to NVS immediately, and handles all state transitions synchronously: if `val > 0` and the state machine is `TIME_CTR_STATE_IDLE`, transitions to `TIME_CTR_STATE_AP_ACTIVE` (enables reward AP, starts decrement timer); if `val == 0` and the state is `TIME_CTR_STATE_AP_ACTIVE`, disables the reward AP and transitions to `TIME_CTR_STATE_IDLE` immediately (does not wait for the next tick); if `val == 0` and the state is `TIME_CTR_STATE_SESSION`, cancels the threshold timer and returns to `TIME_CTR_STATE_IDLE`.
 - **Traffic-gated decrement (sliding window, evaluated once per 1-second tick):** When the reward AP is active, the counter is only decremented if throughput on the reward AP exceeds the configured threshold or the timeout has not yet elapsed since throughput dropped below threshold:
 
 ```
@@ -421,6 +426,8 @@ else:
                     back to IDLE state
 ```
 
+**Boot restore:** If `config_mngr_reward_counter_s_get()` returns a non-zero value during `time_ctr_init()`, the state machine bypasses IDLE and SESSION states and enters `TIME_CTR_STATE_AP_ACTIVE` directly.
+
 **Thread safety:** The counter variable is accessed from the FreeRTOS timer callback and from ESP event loop callbacks. Protect it with a `portMUX_TYPE` spinlock or a FreeRTOS mutex.
 
 **Speed-gated pulse crediting:** When a `ESPORT_EVENT_PULSE` is received, the instantaneous speed is obtained from `pulse_in_speed_kmh_x10_get()` — the single source of truth owned by the Pulse Input module:
@@ -444,6 +451,7 @@ esp_err_t time_ctr_init(void);
 uint32_t  time_ctr_get(void);
 bool      time_ctr_is_paused(void);        /* true when countdown is paused due to below-threshold traffic */
 uint32_t  time_ctr_current_speed_x10_get(void);  /* most recent instantaneous speed in km/h × 10; 0 when idle */
+esp_err_t time_ctr_counter_set(uint32_t val);    /* set counter; save to NVS; handles IDLE↔AP_ACTIVE transitions immediately */
 ```
 
 ---
@@ -588,6 +596,9 @@ Serves a form pre-populated with current config values.
 | Session Start Window (s) | number     | `start_session_interval_s`  |
 | Pulse Debounce (ms)      | number     | `pulse_debounce_time_ms`    |
 | Timezone (POSIX TZ)      | text       | `timezone`                  |
+| Reward Counter           | text       | `reward_counter_s`          |
+
+The **Reward Counter** field uses `hh:mm:ss` format with zero-padded two-digit hours (e.g. `02:01:00`). The GET handler formats the stored seconds value as `%02h:%02m:%02s`; the POST handler parses it back to seconds (`h*3600 + m*60 + s`). An unparseable value returns HTTP 400. Setting a non-zero value enables the reward AP immediately; setting it to `00:00:00` disables the reward AP immediately. The input field has `maxlength="8"` and an `oninput` JS mask that strips all non-digit characters and auto-inserts colons at positions 2 and 5 as the user types, so the user only types digits and the `hh:mm:ss` format is enforced automatically without needing a `pattern` attribute.
 
 On submit: `POST /config` with `application/x-www-form-urlencoded` body.
 On success: redirect to `/config` with a success banner.
@@ -714,7 +725,7 @@ Aggregation rules:
 5. http_srv_init()            ← start web server (reachable immediately via config AP)
 6. time_mngr_init()           ← register callback: sync SNTP on STA_GOT_IP
 7. pulse_in_init()
-8. time_ctr_init()
+8. time_ctr_init()            ← restore counter from NVS; if counter > 0, enter AP_ACTIVE directly
 9. session_trk_init()
 10. session_log_init()
 ```
@@ -808,6 +819,8 @@ POST /config
       schedule wifi_manager reconnect after 1 s
   → if timezone changed:
       time_mngr_timezone_apply()
+  → if reward_counter_s changed:
+      time_ctr_counter_set(new_val)  ← applies immediately; enables AP if val > 0, disables AP if val == 0
   → redirect to GET /config with success message
 ```
 
@@ -821,22 +834,23 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 
 ### Namespace: `esport_cfg`
 
-| Key           | Type   | Content                               |
-| ------------- | ------ | ------------------------------------- |
-| `wifi_ssid`   | string | Home SSID                             |
-| `wifi_pwd`    | string | Home password                         |
-| `ap_ssid`     | string | Reward AP SSID                        |
-| `ap_pwd`      | string | Reward AP password                    |
-| `spp`         | uint16 | seconds_per_pulse                     |
-| `ap_thresh`   | uint32 | soft_ap_start_threshold_s             |
-| `cpp`         | uint32 | centimeters_per_pulse                 |
-| `idle_s`      | uint16 | idle_session_interval_s               |
-| `start_s`     | uint16 | start_session_interval_s              |
-| `debounce_ms` | uint16 | pulse_debounce_time_ms                |
-| `tz`          | string | POSIX TZ string                       |
-| `ap_thr_kbps` | uint16 | soft_ap_dec_time_above_threshold_kbps |
-| `ap_idle_tmo` | uint16 | soft_ap_idle_throughput_timeout_s     |
-| `min_spd_x10` | uint16 | min_speed_to_increment_time_kmh_x10   |
+| Key            | Type   | Content                               |
+| -------------- | ------ | ------------------------------------- |
+| `wifi_ssid`    | string | Home SSID                             |
+| `wifi_pwd`     | string | Home password                         |
+| `ap_ssid`      | string | Reward AP SSID                        |
+| `ap_pwd`       | string | Reward AP password                    |
+| `spp`          | uint16 | seconds_per_pulse                     |
+| `ap_thresh`    | uint32 | soft_ap_start_threshold_s             |
+| `cpp`          | uint32 | centimeters_per_pulse                 |
+| `idle_s`       | uint16 | idle_session_interval_s               |
+| `start_s`      | uint16 | start_session_interval_s              |
+| `debounce_ms`  | uint16 | pulse_debounce_time_ms                |
+| `tz`           | string | POSIX TZ string                       |
+| `ap_thr_kbps`  | uint16 | soft_ap_dec_time_above_threshold_kbps |
+| `ap_idle_tmo`  | uint16 | soft_ap_idle_throughput_timeout_s     |
+| `min_spd_x10`  | uint16 | min_speed_to_increment_time_kmh_x10   |
+| `reward_ctr_s` | uint32 | reward_counter_s (persisted counter)  |
 
 ### Namespace: `esport_log`
 

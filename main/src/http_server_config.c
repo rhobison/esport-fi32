@@ -24,6 +24,7 @@
 
 #include "config_manager.h"
 #include "event_ids.h"
+#include "time_counter.h"
 #include "time_manager.h"
 #include "wifi_manager.h"
 
@@ -81,6 +82,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     uint16_t    ap_thr_kbps = config_mngr_soft_ap_dec_threshold_kbps_get();
     uint16_t    ap_idle_tmo = config_mngr_soft_ap_idle_throughput_timeout_s_get();
     uint16_t    min_spd_x10 = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    uint32_t    reward_ctr  = time_ctr_get();
     static char tz[64];
 
     config_mngr_wifi_ssid_get(wifi_ssid, sizeof(wifi_ssid));
@@ -171,7 +173,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     /* soft_ap_start_threshold_s */
     snprintf(num, sizeof(num), "%" PRIu32, ap_thresh);
     (void)httpd_resp_sendstr_chunk(p_req,
-        "<p><label>Counter Threshold (s)</label>"
+        "<p><label>AP Start Threshold (s)</label>"
         "<input type=\"number\" name=\"soft_ap_start_threshold_s\" value=\"");
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\"></p>");
@@ -238,6 +240,26 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "<input type=\"number\" name=\"min_speed_to_increment_time_kmh_x10\" value=\"");
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
+
+    /* reward_counter_s — displayed in hh:mm:ss format */
+    {
+        uint32_t rc_h = reward_ctr / 3600U;
+        uint32_t rc_m = (reward_ctr % 3600U) / 60U;
+        uint32_t rc_s = reward_ctr % 60U;
+        /* Allocate a small buffer on the stack — fits any uint32 hours value. */
+        char     rc_str[20];
+        snprintf(rc_str, sizeof(rc_str), "%02" PRIu32 ":%02" PRIu32 ":%02" PRIu32, rc_h, rc_m, rc_s);
+        (void)httpd_resp_sendstr_chunk(p_req,
+            "<p><label>Reward Counter (hh:mm:ss)</label>"
+            "<input type=\"text\" name=\"reward_counter_s\" value=\"");
+        (void)httpd_resp_sendstr_chunk(p_req, rc_str);
+        (void)httpd_resp_sendstr_chunk(p_req,
+            "\" placeholder=\"hh:mm:ss\" maxlength=\"8\""
+            " oninput=\"var d=this.value.replace(/\\D/g,'').slice(0,6);"
+            "if(d.length>4)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4);"
+            "else if(d.length>2)this.value=d.slice(0,2)+':'+d.slice(2);"
+            "else this.value=d;\"></p>");
+    }
 
     /* ---- Footer ---- */
     static const char sc_footer[] = "<p style=\"margin-top:1em\">"
@@ -554,6 +576,63 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
                 "Invalid min_speed_to_increment_time_kmh_x10");
             return ESP_FAIL;
         }
+    }
+
+    /* reward_counter_s — parsed from hh:mm:ss text field */
+    char rc_str[20];
+    if (ESP_OK == http_srv_form_field_get(body, "reward_counter_s", rc_str, sizeof(rc_str)))
+    {
+        /* Expect at least one ':' separating h from mm:ss. */
+        char * colon1 = strchr(rc_str, ':');
+        char * colon2 = colon1 ? strchr(colon1 + 1, ':') : NULL;
+
+        if ((NULL == colon1) || (NULL == colon2) || (strchr(colon2 + 1, ':') != NULL))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "reward_counter_s must be in hh:mm:ss format");
+            return ESP_FAIL;
+        }
+
+        *colon1          = '\0';
+        *colon2          = '\0';
+        const char * p_h = rc_str;
+        const char * p_m = colon1 + 1;
+        const char * p_s = colon2 + 1;
+
+        char *        endptr;
+        unsigned long h = strtoul(p_h, &endptr, 10);
+        if ('\0' != *endptr)
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "reward_counter_s: hours must be a valid integer");
+            return ESP_FAIL;
+        }
+        unsigned long m = strtoul(p_m, &endptr, 10);
+        if (('\0' != *endptr) || (m > 59UL))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "reward_counter_s: minutes must be 0-59");
+            return ESP_FAIL;
+        }
+        unsigned long s = strtoul(p_s, &endptr, 10);
+        if (('\0' != *endptr) || (s > 59UL))
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "reward_counter_s: seconds must be 0-59");
+            return ESP_FAIL;
+        }
+
+        /* Overflow check: UINT32_MAX / 3600 ≈ 1193046. */
+        if (h > 1193046UL)
+        {
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                "reward_counter_s: value exceeds maximum representable seconds");
+            return ESP_FAIL;
+        }
+
+        uint32_t total_s = (uint32_t)(h * 3600UL + m * 60UL + s);
+        /* Apply immediately — also saves to NVS; do NOT call config_mngr_reward_counter_s_set. */
+        (void)time_ctr_counter_set(total_s);
     }
 
     /* Notify all modules that have cached config values. */

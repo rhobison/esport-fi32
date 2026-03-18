@@ -94,6 +94,28 @@ bool time_ctr_is_paused(void);
  */
 uint32_t time_ctr_current_speed_x10_get(void);
 
+/**
+ * \brief Set the counter to \p val, persist to NVS immediately, and enable
+ * the reward AP if the state machine is currently idle and \p val > 0.
+ *
+ * If \p val is \c 0 while the AP is active (#TIME_CTR_STATE_AP_ACTIVE), the
+ * AP is disabled and the state machine transitions to #TIME_CTR_STATE_IDLE
+ * immediately.  If \p val is \c 0 while a session is pending
+ * (#TIME_CTR_STATE_SESSION), the threshold timer is cancelled and the state
+ * returns to #TIME_CTR_STATE_IDLE.
+ *
+ * Calling this function is the correct way for the web UI to grant or edit
+ * internet time at runtime.  Do \b not call
+ * \c config_mngr_reward_counter_s_set() separately afterwards.
+ *
+ * Thread-safe: acquires and releases the internal spinlock.
+ *
+ * \param[in] val  New counter value in seconds (0 \u2013 UINT32_MAX).
+ *
+ * \return \c ESP_OK.
+ */
+esp_err_t time_ctr_counter_set(uint32_t val);
+
 #ifdef __cplusplus
 }
 #endif

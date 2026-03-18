@@ -295,14 +295,22 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
         ap_cfg.ap.max_connection = WIFI_MNGR_REWARD_AP_MAX_STA;
         ap_cfg.ap.authmode       = (ap_password[0] != '\0') ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
+        /* Set the active flag BEFORE esp_wifi_set_config so that the
+         * WIFI_EVENT_AP_START which fires from the AP's config-change restart
+         * finds gb_reward_ap_active == true and enables NAPT.  Without this,
+         * the event-loop task can process that AP_START before the calling
+         * task returns from esp_wifi_set_config and sets the flag, leaving
+         * gb_napt_pending=false and gb_reward_ap_active=false → NAPT skipped. */
+        gb_reward_ap_active = true;
+
         ret = esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
         if (ESP_OK != ret)
         {
+            gb_reward_ap_active = false; /* rollback */
             ESP_LOGE(gp_tag, "esp_wifi_set_config(AP) for reward AP failed: 0x%x", ret);
             return ret;
         }
 
-        gb_reward_ap_active = true;
         ESP_LOGI(gp_tag, "Reward AP enabled: SSID='%s'", ap_ssid);
     }
     else
@@ -773,8 +781,15 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
              * esp_netif_stop_api() calls esp_netif_lwip_remove() which removes
              * the lwIP struct netif and re-adds it on the following start, which
              * resets napt=0.  Therefore we must re-enable NAPT on every AP_START
-             * when the reward AP is supposed to be active, not just the first. */
-            if (gb_reward_ap_active)
+             * when the reward AP is supposed to be active, not just the first.
+             *
+             * Use (gb_napt_pending || gb_reward_ap_active) rather than
+             * gb_reward_ap_active alone to avoid a race condition: when the AP is
+             * first enabled (e.g. counter set via the config page from a low-priority
+             * HTTP task), the event loop task may process WIFI_EVENT_AP_START before
+             * the caller has set gb_reward_ap_active = true.  gb_napt_pending is
+             * set before any mode/config call, so it is always visible here. */
+            if (gb_napt_pending || gb_reward_ap_active)
             {
                 /* Forward DNS from STA to AP DHCP so clients receive a working
                  * name server on their first lease. */

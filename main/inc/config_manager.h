@@ -296,6 +296,28 @@ uint16_t config_mngr_min_speed_to_increment_time_kmh_x10_get(void);
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */
 esp_err_t config_mngr_min_speed_to_increment_time_kmh_x10_set(uint16_t val);
+
+/**
+ * \brief Return the persisted reward time counter value in seconds.
+ *
+ * This value is saved to NVS periodically and on counter reaching 0.  On
+ * boot, the time counter module reads this value to restore the counter.
+ *
+ * \return Reward counter in seconds (0 when no time is stored).
+ */
+uint32_t config_mngr_reward_counter_s_get(void);
+
+/**
+ * \brief Set and persist the reward time counter value.
+ *
+ * Called by the time counter module to save the live counter to NVS.  The
+ * full uint32_t range is valid.
+ *
+ * \param[in] val  Counter value in seconds (range 0–UINT32_MAX).
+ *
+ * \return \c ESP_OK on success, or an NVS error code on write failure.
+ */
+esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
 #ifdef __cplusplus
 }
 #endif
