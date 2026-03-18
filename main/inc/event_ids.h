@@ -74,7 +74,7 @@ typedef enum
     ESPORT_EVENT_REWARD_AP_OFF = 3,
 
     /**
-     * \brief An exercise session is confirmed open (QUALIFYING\u2192ACTIVE transition).
+     * \brief An exercise session is confirmed open (QUALIFYING->ACTIVE transition).
      *
      * No payload.  Posted by \c session_tracker once the qualification window
      * (#start_session_interval_s) elapses without a disqualifying idle gap.
@@ -94,6 +94,14 @@ typedef enum
      * No payload.
      */
     ESPORT_EVENT_STA_CONNECTED = 6,
+
+    /**
+     * \brief One or more configuration values were saved via the web portal.
+     *
+     * No payload.  Modules that cache runtime configuration values must
+     * re-read them from #config_manager in response to this event.
+     */
+    ESPORT_EVENT_CONFIG_CHANGED = 8,
 
     /**
      * \brief STA interface lost its connection or IP address.
