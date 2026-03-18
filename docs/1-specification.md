@@ -324,6 +324,7 @@ void       time_mngr_timezone_apply(void);   /* call after timezone config chang
 - Implement software debounce: ignore any edge that arrives less than `pulse_debounce_time_ms` milliseconds after the previous accepted edge. Use `esp_timer_get_time()` for sub-millisecond resolution.
 - For each accepted pulse, post an `ESPORT_EVENT_PULSE` event on the app event loop with no payload. The ISR inline payload is limited to 4 bytes; an `int64_t` µs timestamp does not fit. Handlers call `esp_timer_get_time()` directly — the sub-ms handler latency is negligible for all second-resolution consumers.
 - Expose `pulse_in_total_count_get()` for diagnostic use.
+- Compute and expose `pulse_in_speed_kmh_x10_get()` as the single source of truth for instantaneous speed, so that all consumers use a consistent formula and data source (the ISR-maintained inter-pulse interval).
 
 **Notes:**
 - The GPIO ISR must be minimal (set a flag / use `esp_event_isr_post()`). All business logic is handled in event callbacks outside the ISR.
@@ -345,6 +346,7 @@ These are **build-time** constants set via `idf.py menuconfig`. They are not sto
 esp_err_t pulse_in_init(void);
 uint32_t  pulse_in_total_count_get(void);
 uint32_t  pulse_in_last_interval_ms_get(void);   /* UINT32_MAX if fewer than 2 pulses accepted */
+uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval_ms; 0 when indeterminate */
 ```
 
 ---
@@ -421,17 +423,11 @@ else:
 
 **Thread safety:** The counter variable is accessed from the FreeRTOS timer callback and from ESP event loop callbacks. Protect it with a `portMUX_TYPE` spinlock or a FreeRTOS mutex.
 
-**Speed-gated pulse crediting:** When a `ESPORT_EVENT_PULSE` is received, the instantaneous speed is computed from `pulse_in_last_interval_ms_get()` and `config_mngr_centimeters_per_pulse_get()`:
+**Speed-gated pulse crediting:** When a `ESPORT_EVENT_PULSE` is received, the instantaneous speed is obtained from `pulse_in_speed_kmh_x10_get()` — the single source of truth owned by the Pulse Input module:
 
 ```
-interval_ms = pulse_in_last_interval_ms_get()
-cpp         = config_mngr_centimeters_per_pulse_get()
-min_spd     = config_mngr_min_speed_to_increment_time_kmh_x10_get()
-
-if interval_ms == UINT32_MAX or interval_ms == 0:
-    speed_x10 = 0
-else:
-    speed_x10 = cpp * 36 / interval_ms
+speed_x10 = pulse_in_speed_kmh_x10_get()   /* 0 when fewer than 2 pulses accepted */
+min_spd   = config_mngr_min_speed_to_increment_time_kmh_x10_get()
 
 if min_spd > 0 and speed_x10 < min_spd:
     skip credit addition (pulse still counted for session tracking)
@@ -871,16 +867,19 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 
 **Event base:** `ESPORT_EVENT_BASE`
 
-| Event ID                        | Payload type           | Posted by         | Consumed by                       |
-| ------------------------------- | ---------------------- | ----------------- | --------------------------------- |
-| `ESPORT_EVENT_PULSE`            | none (NULL)            | `pulse_input`     | `time_counter`, `session_tracker` |
-| `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s) | `time_counter`    | `http_server` (status cache)      |
-| `ESPORT_EVENT_REWARD_AP_ON`     | —                      | `time_counter`    | (logging, status)                 |
-| `ESPORT_EVENT_REWARD_AP_OFF`    | —                      | `time_counter`    | (logging, status)                 |
-| `ESPORT_EVENT_SESSION_OPENED`   | —                      | `session_tracker` | `time_counter`                    |
-| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t` | `session_tracker` | `time_counter`, `session_log`     |
-| `ESPORT_EVENT_STA_CONNECTED`    | —                      | `wifi_manager`    | `time_manager` (start SNTP)       |
-| `ESPORT_EVENT_STA_DISCONNECTED` | —                      | `wifi_manager`    | (logging, status)                 |
+| Event ID                        | Payload type           | Posted by            | Consumed by                       |
+| ------------------------------- | ---------------------- | -------------------- | --------------------------------- |
+| `ESPORT_EVENT_PULSE`            | none (NULL)            | `pulse_input`        | `time_counter`, `session_tracker` |
+| `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s) | `time_counter`       | `http_server` (status cache)      |
+| `ESPORT_EVENT_REWARD_AP_ON`     | —                      | `time_counter`       | (logging, status)                 |
+| `ESPORT_EVENT_REWARD_AP_OFF`    | —                      | `time_counter`       | (logging, status)                 |
+| `ESPORT_EVENT_SESSION_OPENED`   | —                      | `session_tracker`    | `time_counter`                    |
+| `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t` | `session_tracker`    | `time_counter`, `session_log`     |
+| `ESPORT_EVENT_STA_CONNECTED`    | —                      | `wifi_manager`       | `time_manager` (start SNTP)       |
+| `ESPORT_EVENT_STA_DISCONNECTED` | —                      | `wifi_manager`       | (logging, status)                 |
+| `ESPORT_EVENT_CONFIG_CHANGED`   | none (NULL)            | `http_server_config` | `pulse_input`, `time_counter`     |
+
+`ESPORT_EVENT_CONFIG_CHANGED` is posted once at the end of a successful `POST /config` form submission.  Modules that cache NVS-backed config values subscribe to this event and re-read only the values they own, so configuration changes take effect immediately without a reboot.
 
 ---
 

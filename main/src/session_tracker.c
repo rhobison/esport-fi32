@@ -23,6 +23,7 @@
 
 #include "config_manager.h"
 #include "event_ids.h"
+#include "pulse_input.h"
 #include "time_manager.h"
 
 //==================================================================================================
@@ -31,16 +32,6 @@
 
 /** Milliseconds per second, used when converting timer periods. */
 #define SESSION_TRK_MS_PER_S (1000U)
-
-/**
- * \brief Milliseconds after the last pulse beyond which live speed is reported as 0.
- *
- * Prevents the display from showing a stale speed when the rider has paused but
- * the idle timer has not yet fired.  3 seconds represents roughly 2 km/h on a
- * standard bicycle (for any wheel circumference >= ~170 cm), so anything slower
- * is treated as stopped for display purposes.
- */
-#define SESSION_TRK_LIVE_SPEED_STALE_MS (3000U)
 
 /**
  * \brief Internal state of the session tracker state machine.
@@ -176,29 +167,10 @@ void session_trk_live_status_get(session_trk_live_status_t * p_out)
         int64_t elapsed   = now_s - g_session_start_utc;
         p_out->duration_s = (elapsed > 0LL) ? (uint32_t)elapsed : 0U;
 
-        /* Live speed from the most recent inter-pulse interval.
-         *
-         * speed (km/h x10) = cpp_cm * 360 / inter_pulse_ms
-         *
-         * Derivation: speed_km_h = cpp_cm/100000 / (inter_ms/3600000)
-         *           = cpp_cm * 36 / inter_ms  →  x10: cpp_cm * 360 / inter_ms
-         *
-         * Only computed after the second pulse has been accepted (g_prev_pulse_ms > 0)
-         * and while the last pulse is recent enough to be considered current. */
-        int64_t inter_ms = g_last_pulse_ms - g_prev_pulse_ms;
-        int64_t now_ms   = esp_timer_get_time() / 1000LL;
-        int64_t stale_ms = now_ms - g_last_pulse_ms;
-
-        if ((g_prev_pulse_ms > 0LL) && (inter_ms > 0LL) &&
-            (stale_ms < (int64_t)SESSION_TRK_LIVE_SPEED_STALE_MS))
-        {
-            uint64_t raw = (uint64_t)g_centimeters_per_pulse * 360ULL / (uint64_t)inter_ms;
-            p_out->live_speed_kmh_x10 = (raw > (uint64_t)UINT16_MAX) ? UINT16_MAX : (uint16_t)raw;
-        }
-        else
-        {
-            p_out->live_speed_kmh_x10 = 0U;
-        }
+        /* Live speed — pulse_input is the single source of truth and handles
+         * staleness internally (returns 0 when last pulse > 3 s ago). */
+        uint32_t raw              = pulse_in_speed_kmh_x10_get();
+        p_out->live_speed_kmh_x10 = (raw > (uint32_t)UINT16_MAX) ? UINT16_MAX : (uint16_t)raw;
     }
     else
     {
@@ -264,7 +236,8 @@ static void session_trk_pulse_handler(void * p_handler_arg, esp_event_base_t bas
     g_last_pulse_ms = timestamp_ms;
     g_pulse_count++;
 
-    ESP_LOGI(gp_tag, "Pulse: %" PRIu16 " (%d ms)", g_pulse_count, g_last_pulse_ms - g_prev_pulse_ms);
+    ESP_LOGI(gp_tag, "Pulse: %" PRIu16 " (%d ms)", g_pulse_count,
+        g_last_pulse_ms - g_prev_pulse_ms);
 
     if (SESSION_TRK_STATE_IDLE == g_state)
     {

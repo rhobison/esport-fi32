@@ -247,14 +247,14 @@ esp_err_t config_mngr_timezone_set(const char * p_val);
  * more than #config_mngr_soft_ap_idle_throughput_timeout_s_get() consecutive
  * seconds, the time counter pauses decrementing.
  *
- * \return Threshold in kbps (range 0\u201365535; 0 = pause immediately).
+ * \return Threshold in kbps (range 0-65535; 0 = pause immediately).
  */
 uint16_t  config_mngr_soft_ap_dec_threshold_kbps_get(void);
 
 /**
  * \brief Set and persist the reward AP idle throughput threshold.
  *
- * \param[in] val  Threshold in kbps (range 0\u201365535).
+ * \param[in] val  Threshold in kbps (range 0-65535).
  *
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */
@@ -264,7 +264,7 @@ esp_err_t config_mngr_soft_ap_dec_threshold_kbps_set(uint16_t val);
  * \brief Return the number of consecutive below-threshold seconds before the
  * countdown pauses.
  *
- * \return Timeout in seconds (range 0\u201365535; 0 = pause on first below-threshold
+ * \return Timeout in seconds (range 0-65535; 0 = pause on first below-threshold
  *         tick).
  */
 uint16_t config_mngr_soft_ap_idle_throughput_timeout_s_get(void);
@@ -272,7 +272,7 @@ uint16_t config_mngr_soft_ap_idle_throughput_timeout_s_get(void);
 /**
  * \brief Set and persist the below-threshold idle timeout.
  *
- * \param[in] val  Timeout in seconds (range 0\u201365535).
+ * \param[in] val  Timeout in seconds (range 0-65535).
  *
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */
@@ -281,17 +281,17 @@ esp_err_t config_mngr_soft_ap_idle_throughput_timeout_s_set(uint16_t val);
 /**
  * \brief Return the minimum instantaneous speed required to earn time credits.
  *
- * Speed is expressed in km/h \u00d7 10 (e.g. 30 = 3.0 km/h).  A value of \c 0
+ * Speed is expressed in km/h x 10 (e.g. 30 = 3.0 km/h).  A value of \c 0
  * disables the gate: all pulses earn credits regardless of speed.
  *
- * \return Minimum speed threshold in km/h \u00d7 10 (range 0\u201365535).
+ * \return Minimum speed threshold in km/h x 10 (range 0-65535).
  */
 uint16_t config_mngr_min_speed_to_increment_time_kmh_x10_get(void);
 
 /**
  * \brief Set and persist the minimum speed threshold for time credit earning.
  *
- * \param[in] val  Threshold in km/h \u00d7 10 (range 0\u201365535; 0 = gate disabled).
+ * \param[in] val  Threshold in km/h x 10 (range 0-65535; 0 = gate disabled).
  *
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */

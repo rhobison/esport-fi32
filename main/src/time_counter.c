@@ -68,6 +68,17 @@ static esp_timer_handle_t gp_tick_timer = NULL;
 static esp_timer_handle_t gp_threshold_timer = NULL;
 
 /**
+ * \brief Cached runtime configuration values; loaded at #time_ctr_init() and
+ * refreshed by #time_ctr_config_changed_handler() on #ESPORT_EVENT_CONFIG_CHANGED.
+ *
+ * Protected by #g_spinlock where accessed from the tick callback.
+ */
+static uint16_t g_cfg_spp        = 1U; /**< Seconds credited per accepted pulse. */
+static uint16_t g_cfg_min_spd    = 0U; /**< Minimum speed gate in km/h x10 (0 = disabled). */
+static uint16_t g_cfg_dec_kbps   = 0U; /**< AP throughput threshold for decrement pause. */
+static uint16_t g_cfg_idle_tmo_s = 0U; /**< Ticks of low throughput before pause activates. */
+
+/**
  * \brief Tracks how many consecutive ticks throughput was below threshold.
  *
  * Protected by #g_spinlock; reset to 0 when AP is disabled or throughput
@@ -81,13 +92,6 @@ static uint16_t g_below_ticks = 0U;
  */
 static volatile bool g_paused = false;
 
-/**
- * \brief Most recently computed instantaneous speed in km/h \u00d7 10.
- *
- * Updated by the pulse event handler; protected by #g_spinlock.  Reset to 0
- * when the state machine returns to #TIME_CTR_STATE_IDLE.
- */
-static volatile uint32_t g_current_speed_x10 = 0U;
 
 //==================================================================================================
 // Internal Function Prototypes
@@ -99,6 +103,8 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
     int32_t event_id, void * p_event_data);
 static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base_t base,
     int32_t event_id, void * p_event_data);
+static void time_ctr_config_changed_handler(void * p_handler_arg, esp_event_base_t base,
+    int32_t event_id, void * p_event_data);
 static void time_ctr_threshold_cb(void * p_arg);
 static void time_ctr_tick_cb(void * p_arg);
 
@@ -106,8 +112,22 @@ static void time_ctr_tick_cb(void * p_arg);
 // Public Functions
 //==================================================================================================
 
+/** Load (or reload) all cached config values; call within or outside spinlock — all are plain
+ * reads. */
+static void time_ctr_config_cache_refresh(void)
+{
+    g_cfg_spp        = config_mngr_seconds_per_pulse_get();
+    g_cfg_min_spd    = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    g_cfg_dec_kbps   = config_mngr_soft_ap_dec_threshold_kbps_get();
+    g_cfg_idle_tmo_s = config_mngr_soft_ap_idle_throughput_timeout_s_get();
+}
+
+//--------------------------------------------------------------------------------------------------
+
 esp_err_t time_ctr_init(void)
 {
+    time_ctr_config_cache_refresh();
+
     const esp_timer_create_args_t tick_args = {
         .callback        = time_ctr_tick_cb,
         .arg             = NULL,
@@ -162,6 +182,15 @@ esp_err_t time_ctr_init(void)
         return ret;
     }
 
+    ret = esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_CONFIG_CHANGED,
+        time_ctr_config_changed_handler, NULL);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_event_handler_register (config_changed) failed: %s",
+            esp_err_to_name(ret));
+        return ret;
+    }
+
     ESP_LOGI(gp_tag, "init complete — counter 0, reward AP off");
     return ESP_OK;
 }
@@ -190,10 +219,7 @@ bool time_ctr_is_paused(void)
 
 uint32_t time_ctr_current_speed_x10_get(void)
 {
-    portENTER_CRITICAL(&g_spinlock);
-    uint32_t speed = g_current_speed_x10;
-    portEXIT_CRITICAL(&g_spinlock);
-    return speed;
+    return pulse_in_speed_kmh_x10_get();
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -225,38 +251,19 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
     (void)event_id;
     (void)p_event_data;
 
-    uint16_t spp         = config_mngr_seconds_per_pulse_get();
-    uint32_t cpp         = config_mngr_centimeters_per_pulse_get();
-    uint16_t min_spd     = config_mngr_min_speed_to_increment_time_kmh_x10_get();
-    uint32_t interval_ms = pulse_in_last_interval_ms_get();
-
-    /* Compute instantaneous speed (km/h × 10) from latest inter-pulse interval. */
-    uint32_t speed_x10;
-    if ((UINT32_MAX == interval_ms) || (0U == interval_ms))
-    {
-        speed_x10 = 0U;
-    }
-    else
-    {
-        /* speed (km/h\u00d710) = cpp (cm) * 360 / interval_ms
-         *   derivation: v (km/h) = (cpp/100 m) / (interval_ms/3600000 h)
-         *             = cpp * 36000 / interval_ms    [km/h]
-         *   \u00d710: cpp * 360000 / interval_ms        [km/h\u00d710]
-         *   simplified with cpp in cm: cpp * 360 / interval_ms */
-        speed_x10 = (cpp * 360U) / interval_ms;
-    }
+    /* Instantaneous speed (km/h × 10) — single source of truth in pulse_input. */
+    uint32_t speed_x10 = pulse_in_speed_kmh_x10_get();
 
     portENTER_CRITICAL(&g_spinlock);
-    g_current_speed_x10 = speed_x10;
     bool b_credit = (TIME_CTR_STATE_SESSION == g_state) || (TIME_CTR_STATE_AP_ACTIVE == g_state);
     /* Apply speed gate: skip credit if threshold > 0 and speed is below it. */
-    if (b_credit && (min_spd > 0U) && (speed_x10 < (uint32_t)min_spd))
+    if (b_credit && (g_cfg_min_spd > 0U) && (speed_x10 < (uint32_t)g_cfg_min_spd))
     {
         b_credit = false;
     }
     if (b_credit)
     {
-        g_counter_s += (uint32_t)spp;
+        g_counter_s += (uint32_t)g_cfg_spp;
     }
     uint32_t counter_snapshot = g_counter_s;
     portEXIT_CRITICAL(&g_spinlock);
@@ -353,9 +360,8 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     bool b_cancel = (TIME_CTR_STATE_SESSION == g_state);
     if (b_cancel)
     {
-        g_state             = TIME_CTR_STATE_IDLE;
-        g_counter_s         = 0U;
-        g_current_speed_x10 = 0U;
+        g_state     = TIME_CTR_STATE_IDLE;
+        g_counter_s = 0U;
     }
     portEXIT_CRITICAL(&g_spinlock);
 
@@ -419,6 +425,33 @@ static void time_ctr_threshold_cb(void * p_arg)
 //--------------------------------------------------------------------------------------------------
 
 /**
+ * \brief Event handler that refreshes cached config values after a portal save.
+ *
+ * \param[in] p_handler_arg  Unused context pointer.
+ * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
+ * \param[in] event_id       Event identifier (always #ESPORT_EVENT_CONFIG_CHANGED).
+ * \param[in] p_event_data   Unused (no payload).
+ */
+static void time_ctr_config_changed_handler(void * p_handler_arg, esp_event_base_t base,
+    int32_t event_id, void * p_event_data)
+{
+    (void)p_handler_arg;
+    (void)base;
+    (void)event_id;
+    (void)p_event_data;
+
+    portENTER_CRITICAL(&g_spinlock);
+    time_ctr_config_cache_refresh();
+    portEXIT_CRITICAL(&g_spinlock);
+
+    ESP_LOGI(gp_tag, "config reloaded: spp=%u min_spd=%u dec_kbps=%u idle_tmo=%u",
+        (unsigned)g_cfg_spp, (unsigned)g_cfg_min_spd, (unsigned)g_cfg_dec_kbps,
+        (unsigned)g_cfg_idle_tmo_s);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
  * \brief 1-second periodic timer callback that applies the traffic-gated decrement.
  *
  * Evaluates the sliding-window pause logic using current reward AP throughput
@@ -434,14 +467,14 @@ static void time_ctr_tick_cb(void * p_arg)
 {
     (void)p_arg;
 
-    /* Read config and throughput outside the spinlock (these calls may sleep). */
+    /* Read throughput outside the spinlock (this call may sleep). */
     uint32_t throughput = wifi_mngr_reward_ap_throughput_kbps();
-    uint16_t threshold  = config_mngr_soft_ap_dec_threshold_kbps_get();
-    uint16_t timeout    = config_mngr_soft_ap_idle_throughput_timeout_s_get();
 
     portENTER_CRITICAL(&g_spinlock);
 
-    bool b_reached_zero = false;
+    uint16_t threshold      = g_cfg_dec_kbps;
+    uint16_t timeout        = g_cfg_idle_tmo_s;
+    bool     b_reached_zero = false;
 
     if (throughput > (uint32_t)threshold)
     {
@@ -486,9 +519,8 @@ static void time_ctr_tick_cb(void * p_arg)
 
         /* Reset sliding-window state when leaving AP_ACTIVE. */
         portENTER_CRITICAL(&g_spinlock);
-        g_below_ticks       = 0U;
-        g_paused            = false;
-        g_current_speed_x10 = 0U;
+        g_below_ticks = 0U;
+        g_paused      = false;
         portEXIT_CRITICAL(&g_spinlock);
 
         esp_err_t ret = wifi_mngr_reward_ap_set(false);

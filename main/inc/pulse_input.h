@@ -86,6 +86,27 @@ esp_err_t pulse_in_last_post_err_get(void);
  */
 uint32_t pulse_in_last_interval_ms_get(void);
 
+/**
+ * \brief Compute and return the instantaneous speed in km/h multiplied by 10.
+ *
+ * Uses the most recent inter-pulse interval (#pulse_in_last_interval_ms_get())
+ * and the current #config_mngr_centimeters_per_pulse_get() to compute:
+ *
+ * \code
+ *   speed_kmh_x10 = centimeters_per_pulse * 360 / last_interval_ms
+ * \endcode
+ *
+ * Returns \c 0 when fewer than two pulses have been accepted (interval is the
+ * sentinel \c UINT32_MAX), when the stored interval is zero (division guard),
+ * or when the last accepted pulse is older than 7.2 seconds (equivalent to
+ * 1 km/h on a 200 cm wheel — rider treated as stopped).
+ * Safe to call from any task context.
+ *
+ * \return Instantaneous speed in km/h x 10 (e.g. 123 = 12.3 km/h), or 0 when
+ *         speed is indeterminate or stale.
+ */
+uint32_t pulse_in_speed_kmh_x10_get(void);
+
 #ifdef __cplusplus
 }
 #endif

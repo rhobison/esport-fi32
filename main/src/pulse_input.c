@@ -19,6 +19,7 @@
 #include "config_manager.h"
 #include "freertos/FreeRTOS.h"
 
+#include <inttypes.h>
 #include <stdint.h>
 
 //==================================================================================================
@@ -36,6 +37,17 @@
  * See #g_rise_bounce_guard_us.
  */
 #define PULSE_IN_RISE_BOUNCE_GUARD_MAX_US (10000U)
+
+/**
+ * \brief Maximum age of the last accepted pulse, in microseconds, beyond which
+ * #pulse_in_speed_kmh_x10_get() reports zero speed.
+ *
+ * Derived from: \c interval_ms = cpp_cm * 36 / speed_kmh.
+ * At 1 km/h with a 200 cm (standard adult bicycle) wheel circumference:
+ * 200 * 36 = 7200 ms → 7 200 000 µs.
+ * Anything slower than 1 km/h is treated as stopped for display purposes.
+ */
+#define PULSE_IN_SPEED_STALE_US (7200000U)
 
 //==================================================================================================
 // Variables/Data
@@ -101,9 +113,22 @@ static volatile int64_t g_last_rise_us = 0;
  */
 static volatile uint64_t g_rise_bounce_guard_us = 0U;
 
+/**
+ * \brief Wheel distance per pulse in centimetres; cached from config at
+ * #pulse_in_init() time so that #pulse_in_speed_kmh_x10_get() never needs to
+ * acquire the NVS mutex on the hot path.
+ *
+ * A reboot is required to pick up a change made via the config portal, which
+ * is acceptable because wheel size is a one-time physical calibration value.
+ */
+static uint32_t g_centimeters_per_pulse = 0U;
+
 //==================================================================================================
 // Internal Function Prototypes
 //==================================================================================================
+
+static void pulse_in_config_changed_handler(void * p_handler_arg, esp_event_base_t base,
+    int32_t event_id, void * p_event_data);
 
 /**
  * \brief GPIO any-edge ISR handler for the pulse input pin.
@@ -151,8 +176,9 @@ esp_err_t pulse_in_init(void)
     /* Set debounce window BEFORE adding the ISR handler so the first edge is
        never accepted with g_debounce_us == 0 (which would record g_last_accepted_us
        at that moment and then filter any real pulse arriving within the debounce window). */
-    uint16_t debounce_ms = config_mngr_pulse_debounce_time_ms_get();
-    g_debounce_us        = (uint64_t)debounce_ms * (uint64_t)PULSE_IN_MS_TO_US;
+    uint16_t debounce_ms    = config_mngr_pulse_debounce_time_ms_get();
+    g_debounce_us           = (uint64_t)debounce_ms * (uint64_t)PULSE_IN_MS_TO_US;
+    g_centimeters_per_pulse = config_mngr_centimeters_per_pulse_get();
 
     /* Rise-bounce guard: cap at debounce so it never rejects pulses that the
        main debounce window would have accepted. */
@@ -171,8 +197,16 @@ esp_err_t pulse_in_init(void)
         return ret;
     }
 
-    ESP_LOGI(gp_tag, "init complete — GPIO %d, debounce %u ms", CONFIG_ESPORT_PULSE_GPIO,
-        (unsigned)debounce_ms);
+    ret = esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_CONFIG_CHANGED,
+        pulse_in_config_changed_handler, NULL);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGW(gp_tag, "esp_event_handler_register (config_changed) failed: %s",
+            esp_err_to_name(ret));
+    }
+
+    ESP_LOGI(gp_tag, "init complete — GPIO %d, debounce %u ms, cpp %" PRIu32 " cm",
+        CONFIG_ESPORT_PULSE_GPIO, (unsigned)debounce_ms, g_centimeters_per_pulse);
     return ESP_OK;
 }
 
@@ -206,9 +240,48 @@ uint32_t pulse_in_last_interval_ms_get(void)
 
 //--------------------------------------------------------------------------------------------------
 
+uint32_t pulse_in_speed_kmh_x10_get(void)
+{
+    uint32_t interval_ms = g_last_interval_ms;
+    if ((UINT32_MAX == interval_ms) || (0U == interval_ms))
+    {
+        return 0U;
+    }
+    /* Return 0 when the last pulse is older than PULSE_IN_SPEED_STALE_US (rider stopped). */
+    if ((uint64_t)(esp_timer_get_time() - g_last_accepted_us) > (uint64_t)PULSE_IN_SPEED_STALE_US)
+    {
+        return 0U;
+    }
+    return (g_centimeters_per_pulse * 360U) / interval_ms;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 //==================================================================================================
 // Private Functions
 //==================================================================================================
+
+/**
+ * \brief Event handler that refreshes #g_centimeters_per_pulse after a portal save.
+ *
+ * \param[in] p_handler_arg  Unused context pointer.
+ * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
+ * \param[in] event_id       Event identifier (always #ESPORT_EVENT_CONFIG_CHANGED).
+ * \param[in] p_event_data   Unused (no payload).
+ */
+static void pulse_in_config_changed_handler(void * p_handler_arg, esp_event_base_t base,
+    int32_t event_id, void * p_event_data)
+{
+    (void)p_handler_arg;
+    (void)base;
+    (void)event_id;
+    (void)p_event_data;
+
+    g_centimeters_per_pulse = config_mngr_centimeters_per_pulse_get();
+    ESP_LOGI(gp_tag, "config reloaded: cpp=%" PRIu32 " cm", g_centimeters_per_pulse);
+}
+
+//--------------------------------------------------------------------------------------------------
 
 static void IRAM_ATTR pulse_in_gpio_isr(void * p_arg)
 {

@@ -103,9 +103,9 @@ typedef struct session_trk_live_status_tag
     uint32_t pulse_count;
 
     /**
-     * \brief Current session average speed in km/h \u00d7 10.
+     * \brief Current session average speed in km/h x 10.
      *
-     * Computed from (#pulse_count \u00d7 centimeters_per_pulse) and #duration_s.
+     * Computed from (#pulse_count x centimeters_per_pulse) and #duration_s.
      * Zero when state is not active or #duration_s is zero.
      */
     uint16_t live_speed_kmh_x10;

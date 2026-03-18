@@ -8,7 +8,7 @@
  * silently overwritten when the buffer is full.
  *
  * NVS keys: \c slog_head (uint16), \c slog_count (uint16), and
- * \c slog_0 \u2026 \c slog_49 (blobs of \c session_trk_record_t).
+ * \c slog_0 ... \c slog_49 (blobs of \c session_trk_record_t).
  *
  * On NVS corruption of the log namespace, the namespace is erased and
  * the log is reinitialised from empty.

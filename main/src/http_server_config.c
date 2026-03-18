@@ -23,6 +23,7 @@
 #include "esp_log.h"
 
 #include "config_manager.h"
+#include "event_ids.h"
 #include "time_manager.h"
 #include "wifi_manager.h"
 
@@ -554,6 +555,9 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
             return ESP_FAIL;
         }
     }
+
+    /* Notify all modules that have cached config values. */
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_CONFIG_CHANGED, NULL, 0U, 0U);
 
     /* Redirect to /config?saved=1 on success. */
     httpd_resp_set_status(p_req, "302 Found");
