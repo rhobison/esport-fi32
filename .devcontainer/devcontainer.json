@@ -1,7 +1,7 @@
 {
     "name": "Esport FI32 Development",
     "dockerComposeFile": "docker-compose.yml",
-    "service": "air-clock-dev",
+    "service": "esport-fi32-dev",
     "workspaceFolder": "/workspace/esport-fi32",
     "shutdownAction": "stopCompose",
     "features": {
@@ -17,8 +17,6 @@
                 "ms-vscode.cpptools-extension-pack",
                 "ms-vscode.cmake-tools",
                 "twxs.cmake",
-                "marus25.cortex-debug",
-                "dan-c-underwood.arm",
                 "zixuanwang.linkerscript",
                 "cschlosser.doxdocgen",
                 "ms-vscode.live-server",

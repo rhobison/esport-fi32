@@ -1,10 +1,26 @@
 services:
-  air-clock-dev:
-    image: air-clock-v2:dev
+  esport-fi32-dev:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        # Tool versions - modify these to change tool versions
+        UBUNTU_VERSION: "24.04"
+        CMAKE_VERSION: "4.2.0"
+        DOXYGEN_VERSION: "1.15.0"
+        PYTHON_VERSION: "3.12"
+        # ESP-IDF version
+        ESPRESSIF_IDF_VERSION: "v5.5.3"
+        # User configuration
+        USERNAME: "developer"
+        USER_UID: 1000
+        USER_GID: 1000
+
+    image: esport-fi32:dev
     container_name: esport-fi32-dev
 
     volumes:
-      # Mount the project source code (parent directory containing esport-fi32/)
+      # Mount the parent workspace (so /workspace/esport-fi32 is accessible)
       - ../..:/workspace
       # Preserve bash history
       - esport-fi32-bash-history:/home/developer/.bash_history
@@ -14,18 +30,16 @@ services:
 
     working_dir: /workspace/esport-fi32
 
-    # Enable privileged mode for hardware debugging tools
+    # Enable privileged mode for hardware debugging tools (ESP-JTAG, esptool)
     privileged: true
 
-    # Mount USB devices for hardware debugging (J-Link, ST-Link, etc.)
+    # Mount USB devices for flashing and debugging (ESP32-C6 USB-JTAG)
     devices:
       - /dev/bus/usb:/dev/bus/usb
 
     # Environment variables
     environment:
       - DISPLAY=${DISPLAY:-:0}
-      - ARM_TOOLCHAIN_PATH=/opt/arm-gnu-toolchain
-      - JLINK_PATH=/opt/jlink
 
     # Network configuration
     network_mode: host
