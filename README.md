@@ -9,7 +9,7 @@ esport-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 ## How it works
 
 1. **Sensor input** — A bike sensor is wired to a GPIO pin on the ESP32-C6. Every pedal revolution generates a pulse that is counted by the firmware.
-2. **Credit accumulation** — Each pulse adds a configurable number of seconds (`seconds_per_pulse`) to a time counter.
+2. **Credit accumulation** — Each pulse adds a configurable number of seconds (`seconds_per_pulse`) to a time counter, provided the instantaneous speed meets the configurable minimum (`min_speed_to_increment_time_kmh_x10`). Set the minimum to zero to credit every pulse regardless of speed.
 3. **Reward Wi-Fi** — Once continuous pedalling exceeds a warm-up threshold (`soft_ap_start_threshold_s`), the firmware enables a **Reward Soft AP** that acts as a NAT router, giving connected devices access to the internet through the home network.
 4. **Countdown** — While the Reward AP is active, the time counter counts down in real time. Continued pedalling replenishes the credits. The countdown pauses automatically when there is no active internet traffic (configurable threshold), so idle screen time does not consume credits.
 5. **Access cut-off** — When the counter reaches zero the Reward AP is disabled and internet access is cut off until the child earns more credits.
@@ -22,9 +22,12 @@ esport-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 - **Exercise session tracking** — sessions are detected, timed, and stored in NVS as a ring buffer with start time, duration, distance, and average speed.
 - **NTP time synchronisation** — date/time is synced at boot; a configurable POSIX timezone string converts UTC timestamps to local time.
 - **Always-available configuration portal** — a web UI is reachable via the home network IP or via a dedicated fallback config AP (`esport-fi32_config`) when home network access is unavailable.
-- **Live status dashboard** — shows the current counter value, AP state, connected clients, NTP status, and session history.
+- **Live status dashboard** — shows the current counter value, AP state, connected clients, NTP status, session history, bar charts, and export actions.
 - **REST JSON API** — for status, session history, CSV/JSON export, and daily activity aggregates (suitable for charts).
-- **Fully configurable** — all parameters (SSID, password, seconds-per-pulse, thresholds, timezone, …) are stored in NVS and survive reboots.
+- **Speed-gated crediting** — a configurable minimum speed (`min_speed_to_increment_time_kmh_x10`) prevents credits accumulating when pedalling too slowly. The gate is disabled when set to zero.
+- **Persistent reward counter** — the time counter is saved to NVS every 60 seconds and immediately on AP shutdown; it is restored at boot so credits survive power cycles.
+- **Traffic-gated countdown** — the countdown pauses automatically when no meaningful internet traffic is detected, preventing credits from draining during idle screen time.
+- **Fully configurable** — all parameters (SSID, password, seconds-per-pulse, thresholds, timezone, …) are stored in NVS and can be changed at runtime via the web UI without reflashing.
 
 ---
 
@@ -39,11 +42,14 @@ The built-in HTTP server provides two pages and a JSON API, accessible from any 
 ![Status Dashboard](docs/imgs/dashboard-2.png)
 
 Shows in real time:
-- Time counter (credits remaining)
+- Time counter (credits remaining, in h:mm:ss), reward AP throughput, and countdown status (decrementing or paused due to low traffic)
+- Current speed and speed-gate status (crediting or gated)
 - Reward AP status (on / off) and connected clients
-- Current exercise session info (speed, duration)
-- NTP sync status
-- Session history table
+- Current exercise session info (state, qualification progress, live speed)
+- NTP sync status and system uptime
+- Session history table (last 20 sessions)
+- Session bar charts: daily average speed and daily total duration
+- Export Reports panel (download CSV or JSON)
 
 ### Configuration Page (`/config`)
 
@@ -53,10 +59,12 @@ Lets you set all parameters without reflashing:
 - Home Wi-Fi credentials
 - Reward AP SSID & password
 - Seconds earned per pulse, warm-up threshold
+- Minimum speed required to earn credits
 - Wheel circumference (for speed calculation)
 - Session detection timings, debounce
 - Traffic threshold for countdown pause
 - Timezone (POSIX TZ string)
+- Reward counter (direct credit entry in hh:mm:ss format; setting a non-zero value enables the reward AP immediately)
 
 ---
 
@@ -77,8 +85,16 @@ Connect the exercise bike's reed switch or hall-effect sensor between **GPIO 10*
 
 ### Prerequisites
 
-- [ESP-IDF v5.x](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/)
+- [ESP-IDF v5.5.3](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32c6/get-started/) (or compatible v5.x)
 - ESP32-C6 development board
+
+### Dev Container (recommended)
+
+A ready-to-use Docker-based development environment is included. It pre-installs ESP-IDF v5.5.3, CMake 4.2.0, Doxygen 1.15.0, and all required toolchains.
+
+1. Install [Docker](https://docs.docker.com/get-docker/) and the [VS Code Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers).
+2. Open the repository in VS Code and accept the **Reopen in Container** prompt.
+3. The container builds automatically. After it starts, the full ESP-IDF toolchain is available in the integrated terminal.
 
 ### Build & Flash
 
@@ -104,21 +120,23 @@ idf.py -p PORT flash monitor
 
 All parameters are stored in NVS and can be changed at runtime via the web UI.
 
-| Parameter                               | Description                                             |
-| --------------------------------------- | ------------------------------------------------------- |
-| `wifi_ssid`                             | Home network SSID                                       |
-| `wifi_password`                         | Home network password                                   |
-| `soft_ap_ssid`                          | Reward AP SSID                                          |
-| `soft_ap_password`                      | Reward AP password                                      |
-| `seconds_per_pulse`                     | Seconds of internet time earned per bike pulse          |
-| `soft_ap_start_threshold_s`             | Warm-up pedalling time (s) before AP is enabled         |
-| `centimeters_per_pulse`                 | Wheel travel per pulse (cm), used for speed display     |
-| `idle_session_interval_s`               | Gap (s) with no pulses that closes a session            |
-| `start_session_interval_s`              | Continuous pedalling (s) required to open a session     |
-| `pulse_debounce_time_ms`                | Minimum time (ms) between two accepted pulses           |
-| `timezone`                              | POSIX TZ string (e.g. `CET-1CEST,M3.5.0,M10.5.0/3`)     |
-| `soft_ap_dec_time_above_threshold_kbps` | Traffic threshold (kbps) below which countdown pauses   |
-| `soft_ap_idle_throughput_timeout_s`     | Seconds of low traffic before countdown actually pauses |
+| Parameter                               | Default | Description                                                                                   |
+| --------------------------------------- | ------- | --------------------------------------------------------------------------------------------- |
+| `wifi_ssid`                             | `""`    | Home network SSID                                                                             |
+| `wifi_password`                         | `""`    | Home network password                                                                         |
+| `soft_ap_ssid`                          | `"esport-fi32"` | Reward AP SSID                                                                      |
+| `soft_ap_password`                      | `"esport-fi32"` | Reward AP password                                                                  |
+| `seconds_per_pulse`                     | `3`     | Seconds of internet time earned per bike pulse                                                |
+| `soft_ap_start_threshold_s`             | `300`   | Warm-up pedalling time (s) before AP is enabled                                               |
+| `centimeters_per_pulse`                 | `25`    | Wheel travel per pulse (cm), used for speed display                                           |
+| `idle_session_interval_s`               | `30`    | Gap (s) with no pulses that closes a session                                                  |
+| `start_session_interval_s`              | `10`    | Continuous pedalling (s) required to open a session                                           |
+| `pulse_debounce_time_ms`                | `10`    | Minimum time (ms) between two accepted pulses                                                 |
+| `timezone`                              | `"UTC0"` | POSIX TZ string (e.g. `CET-1CEST,M3.5.0,M10.5.0/3`)                                        |
+| `soft_ap_dec_time_above_threshold_kbps` | `1`     | Traffic threshold (kbps) below which countdown pauses                                         |
+| `soft_ap_idle_throughput_timeout_s`     | `30`    | Seconds of low traffic before countdown actually pauses                                        |
+| `min_speed_to_increment_time_kmh_x10`   | `30`    | Minimum speed (km/h × 10, e.g. `30` = 3.0 km/h) required for a pulse to earn credits; `0` disables the gate |
+| `reward_counter_s`                      | `0`     | Reward counter in seconds, persisted to NVS; setting a non-zero value enables the reward AP immediately |
 
 ---
 
@@ -139,19 +157,24 @@ All parameters are stored in NVS and can be changed at runtime via the web UI.
 
 ```
 main/
-  inc/           # Header files for all modules
+  inc/                        # Header files for all modules
   src/
-    main.c             # Startup & module initialisation
-    config_manager.c   # NVS-backed configuration
-    wifi_manager.c     # AP+STA+NAT Wi-Fi management
-    time_manager.c     # SNTP / timezone
-    pulse_input.c      # GPIO interrupt & debounce
-    time_counter.c     # Credit counter & reward AP state machine
-    session_tracker.c  # Exercise session detection
-    session_log.c      # NVS ring-buffer session log
-    http_server.c      # Web UI & REST API
+    main.c                    # Startup & module initialisation
+    config_manager.c          # NVS-backed configuration
+    wifi_manager.c            # AP+STA+NAT Wi-Fi management
+    time_manager.c            # SNTP / timezone
+    pulse_input.c             # GPIO interrupt, debounce & speed calculation
+    time_counter.c            # Credit counter & reward AP state machine
+    session_tracker.c         # Exercise session detection
+    session_log.c             # NVS ring-buffer session log
+    http_server.c             # HTTP server core (init, URI registration)
+    http_server_utils.c       # Shared HTML/JSON helpers
+    http_server_config.c      # GET & POST /config handlers
+    http_server_api.c         # GET /api/status and /api/sessions handlers
+    http_server_export.c      # GET /api/sessions/export handler
+    http_server_dashboard.c   # GET / status dashboard handler
 docs/
-  1-specification.md   # Full firmware specification
-  2-development_plan.md
+  1-specification.md          # Full firmware specification
+  2-development_plan.md       # Phased development plan
 ```
 
