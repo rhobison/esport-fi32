@@ -128,7 +128,7 @@ All parameters are stored in NVS and can be changed at runtime via the web UI.
 | `soft_ap_password`                      | `"esport-fi32"` | Reward AP password                                                                  |
 | `seconds_per_pulse`                     | `3`     | Seconds of internet time earned per bike pulse                                                |
 | `soft_ap_start_threshold_s`             | `300`   | Warm-up pedalling time (s) before AP is enabled                                               |
-| `centimeters_per_pulse`                 | `25`    | Wheel travel per pulse (cm), used for speed display                                           |
+| `centimeters_per_pulse`                 | `300`    | Wheel travel per pulse (cm), used for speed display                                           |
 | `idle_session_interval_s`               | `30`    | Gap (s) with no pulses that closes a session                                                  |
 | `start_session_interval_s`              | `10`    | Continuous pedalling (s) required to open a session                                           |
 | `pulse_debounce_time_ms`                | `10`    | Minimum time (ms) between two accepted pulses                                                 |

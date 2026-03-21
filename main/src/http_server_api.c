@@ -142,9 +142,11 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
     char sta_ip[20];
     char sta_ssid[33];
     char rew_ap_ssid[33];
+    char rew_ap_ip[20];
     wifi_mngr_sta_ip_get(sta_ip, sizeof(sta_ip));
     config_mngr_wifi_ssid_get(sta_ssid, sizeof(sta_ssid));
     config_mngr_soft_ap_ssid_get(rew_ap_ssid, sizeof(rew_ap_ssid));
+    wifi_mngr_reward_ap_ip_get(rew_ap_ip, sizeof(rew_ap_ip));
 
     session_trk_live_status_t sess;
     session_trk_live_status_get(&sess);
@@ -161,6 +163,7 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         "  \"config_ap_active\": %s,\n"
         "  \"reward_ap_active\": %s,\n"
         "  \"reward_ap_ssid\": \"%s\",\n"
+        "  \"reward_ap_ip\": \"%s\",\n"
         "  \"reward_ap_clients\": %" PRIu8 ",\n"
         "  \"counter_s\": %" PRIu32 ",\n"
         "  \"threshold_s\": %" PRIu32 ",\n"
@@ -176,7 +179,7 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         "}\n",
         (int64_t)now_utc, time_local_str, b_synced ? "true" : "false", uptime_s,
         b_sta ? "true" : "false", sta_ssid, sta_ip, b_cfg_ap ? "true" : "false",
-        b_rew_ap ? "true" : "false", rew_ap_ssid, ap_clients, counter_s, threshold,
+        b_rew_ap ? "true" : "false", rew_ap_ssid, rew_ap_ip, ap_clients, counter_s, threshold,
         sess.p_state_name, sess.start_utc, sess.duration_s, sess.pulse_count,
         sess.live_speed_kmh_x10, throughput, b_paused ? "true" : "false", speed_x10,
         b_speed_gated ? "true" : "false");

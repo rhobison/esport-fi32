@@ -416,6 +416,29 @@ void wifi_mngr_sta_ip_get(char * p_buf, size_t len)
 
 //--------------------------------------------------------------------------------------------------
 
+void wifi_mngr_reward_ap_ip_get(char * p_buf, size_t len)
+{
+    if ((NULL == p_buf) || (0U == len))
+    {
+        return;
+    }
+
+    p_buf[0] = '\0';
+
+    if (!gb_reward_ap_active)
+    {
+        return;
+    }
+
+    esp_netif_ip_info_t ip_info;
+    if (ESP_OK == esp_netif_get_ip_info(gp_netif_ap, &ip_info))
+    {
+        esp_ip4addr_ntoa(&ip_info.ip, p_buf, (int)len);
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
 /**
  * \brief Query whether the config (fallback) Soft AP is currently active.
  *

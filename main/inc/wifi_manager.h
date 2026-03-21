@@ -120,6 +120,19 @@ bool wifi_mngr_config_ap_is_active(void);
  */
 uint32_t wifi_mngr_reward_ap_throughput_kbps(void);
 
+/**
+ * \brief Copy the reward AP gateway IP address (dotted-decimal) into a buffer.
+ *
+ * Returns the IP address of the reward AP netif (typically \c "192.168.5.1"
+ * when the reward AP is active).  Writes an empty string when the reward AP
+ * is inactive.  This is the address clients connected to the reward AP should
+ * use to reach the dashboard.
+ *
+ * \param[out] p_buf  Destination buffer.
+ * \param[in]  len    Size of \p p_buf in bytes (including NUL terminator).
+ */
+void wifi_mngr_reward_ap_ip_get(char * p_buf, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

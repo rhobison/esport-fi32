@@ -318,6 +318,19 @@ uint32_t config_mngr_reward_counter_s_get(void);
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */
 esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
+
+/**
+ * \brief Erase all configuration keys and restore factory defaults.
+ *
+ * Erases the entire \c esport_cfg NVS namespace, then writes all factory
+ * default values and commits.  This is the in-firmware equivalent of a
+ * factory reset for configuration parameters only (session log is not
+ * affected).
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t config_mngr_reset_to_defaults(void);
+
 #ifdef __cplusplus
 }
 #endif

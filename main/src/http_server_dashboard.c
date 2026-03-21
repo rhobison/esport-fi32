@@ -141,9 +141,11 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     char sta_ip[20];
     char sta_ssid[33];
     char rew_ap_ssid[33];
+    char rew_ap_ip[20];
     wifi_mngr_sta_ip_get(sta_ip, sizeof(sta_ip));
     config_mngr_wifi_ssid_get(sta_ssid, sizeof(sta_ssid));
     config_mngr_soft_ap_ssid_get(rew_ap_ssid, sizeof(rew_ap_ssid));
+    wifi_mngr_reward_ap_ip_get(rew_ap_ip, sizeof(rew_ap_ip));
 
     session_trk_live_status_t sess;
     session_trk_live_status_get(&sess);
@@ -223,14 +225,15 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
         "<p>STA:&nbsp;<span id=\"wifi-sta\" class=\"%s\">%s</span>"
         "&nbsp; SSID:&nbsp;<b><span id=\"wifi-sta-ssid\">%s</span></b>"
-        "&nbsp; IP:&nbsp;<b><span id=\"wifi-sta-ip\">%s</span></b></p>"
+        "&nbsp; IP:&nbsp;<b><a id=\"wifi-sta-ip\" href=\"http://%s/\">%s</a></b></p>"
         "<p>Config AP:&nbsp;<span id=\"wifi-cfg-ap\" class=\"%s\">%s</span></p>"
         "<p>Reward AP:&nbsp;<span id=\"wifi-rew-ap\" class=\"%s\">%s</span>"
         "&nbsp; SSID:&nbsp;<b><span id=\"wifi-rew-ap-ssid\">%s</span></b>"
+        "&nbsp; IP:&nbsp;<b><a id=\"wifi-rew-ap-ip\" href=\"http://%s/\">%s</a></b>"
         "&nbsp; Clients:&nbsp;<b><span id=\"wifi-rew-ap-clients\">%" PRIu8 "</span></b></p></div>",
-        b_sta ? "ok" : "err", b_sta ? "Connected" : "Disconnected", sta_ssid, sta_ip,
+        b_sta ? "ok" : "err", b_sta ? "Connected" : "Disconnected", sta_ssid, sta_ip, sta_ip,
         b_cfg_ap ? "ok" : "err", b_cfg_ap ? "Active" : "Inactive", b_rew_ap ? "ok" : "err",
-        b_rew_ap ? "Active" : "Inactive", rew_ap_ssid, ap_clients);
+        b_rew_ap ? "Active" : "Inactive", rew_ap_ssid, rew_ap_ip, rew_ap_ip, ap_clients);
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
 
     /* Exercise Counter section */
@@ -412,7 +415,8 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "if(e){e.textContent=d.sta_connected?'Connected':'Disconnected';e.className=d.sta_"
         "connected?'ok':'err';}"
         "e=document.getElementById('wifi-sta-ssid');if(e)e.textContent=d.sta_ssid;"
-        "e=document.getElementById('wifi-sta-ip');if(e)e.textContent=d.sta_ip;"
+        "e=document.getElementById('wifi-sta-ip');if(e){e.textContent=d.sta_ip;e.href=d.sta_ip?'"
+        "http://'+d.sta_ip+'/':'';}"
         "e=document.getElementById('wifi-cfg-ap');"
         "if(e){e.textContent=d.config_ap_active?'Active':'Inactive';e.className=d.config_ap_active?"
         "'ok':'err';}"
@@ -420,6 +424,8 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "if(e){e.textContent=d.reward_ap_active?'Active':'Inactive';e.className=d.reward_ap_active?"
         "'ok':'err';}"
         "e=document.getElementById('wifi-rew-ap-ssid');if(e)e.textContent=d.reward_ap_ssid;"
+        "e=document.getElementById('wifi-rew-ap-ip');if(e){e.textContent=d.reward_ap_ip||'';e.href="
+        "d.reward_ap_ip?'http://'+d.reward_ap_ip+'/':'';}"
         "e=document.getElementById('wifi-rew-ap-clients');if(e)e.textContent=d.reward_ap_clients;"
         "e=document.getElementById('ctr-seconds');if(e)e.textContent=d.counter_s+'s';"
         "e=document.getElementById('ctr-hms');if(e)e.textContent=fmtHms(d.counter_s);"
