@@ -28,6 +28,9 @@ ARG ESPRESSIF_IDF_VERSION
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV LANGUAGE=en_US:en
 
 # Set working directory
 WORKDIR /workspace
@@ -49,6 +52,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     lsb-release \
     less \
+    # Locale support (required by Python/kconfig tools)
+    locales \
     # Build tools
     build-essential \
     make \
@@ -86,6 +91,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create symlinks for clang tools
+RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+
 RUN ln -sf /usr/bin/clangd-18 /usr/bin/clangd && \
     ln -sf /usr/bin/clang-format-18 /usr/bin/clang-format && \
     ln -sf /usr/bin/python3 /usr/bin/python

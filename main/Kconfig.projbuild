@@ -13,7 +13,7 @@ menu "esport-fi32 Configuration"
     config ESPORT_PULSE_PULLUP_EN
         int "Enable internal pull-up on pulse input GPIO (0=disable, 1=enable)"
         range 0 1
-        default 0
+        default 1
         help
             Set to 1 to activate the ESP32 internal pull-up resistor on the
             pulse input GPIO pin.  Set to 0 when an external pull-up is
@@ -99,11 +99,11 @@ menu "esport-fi32 Configuration"
             on the very first below-threshold tick.
 
     config ESPORT_MIN_SPEED_KMH_X10
-        int "Minimum speed to earn time credits (km/h \u00d7 10)"
+        int "Minimum speed to earn time credits (km/h x10)"
         range 0 65535
         default 30
         help
-            Minimum instantaneous speed in km/h \u00d7 10 required for a pulse to
+            Minimum instantaneous speed in km/h x10 required for a pulse to
             earn time credits.  A value of 30 represents 3.0 km/h.  Set to 0
             to disable the gate and credit all pulses regardless of speed.
 
