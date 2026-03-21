@@ -43,7 +43,7 @@ static httpd_handle_t gp_server_handle = NULL;
  *
  * Creates an \c esp_http_server instance on port 80 and registers
  * handlers for \c GET /, \c GET /config, \c POST /config,
- * \c GET /api/status, \c GET /api/sessions,
+ * \c POST /config/reset, \c GET /api/status, \c GET /api/sessions,
  * \c GET /api/sessions/export, and \c GET /api/sessions/daily.
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
@@ -53,7 +53,7 @@ esp_err_t http_srv_init(void)
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = 80U;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 8U;
+    cfg.max_uri_handlers = 9U;
 
     esp_err_t ret = httpd_start(&gp_server_handle, &cfg);
     if (ESP_OK != ret)
@@ -76,6 +76,11 @@ esp_err_t http_srv_init(void)
         .uri     = "/config",
         .method  = HTTP_POST,
         .handler = http_srv_config_post_handler,
+    };
+    static const httpd_uri_t sc_uri_config_reset = {
+        .uri     = "/config/reset",
+        .method  = HTTP_POST,
+        .handler = http_srv_config_reset_handler,
     };
     static const httpd_uri_t sc_uri_api_status = {
         .uri     = "/api/status",
@@ -101,6 +106,7 @@ esp_err_t http_srv_init(void)
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_root_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_config_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_config_post);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_config_reset);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_status);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_sessions);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_sessions_export);

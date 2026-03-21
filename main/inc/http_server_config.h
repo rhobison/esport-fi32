@@ -55,6 +55,19 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req);
  */
 esp_err_t http_srv_config_post_handler(httpd_req_t * p_req);
 
+/**
+ * \brief Handler for \c POST /config/reset.
+ *
+ * Resets every configuration parameter to its factory default, applies the
+ * default timezone, and posts \c ESPORT_EVENT_CONFIG_CHANGED.  On success,
+ * issues an HTTP 302 redirect to \c /config?reset=1.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_config_reset_handler(httpd_req_t * p_req);
+
 #ifdef __cplusplus
 }
 #endif

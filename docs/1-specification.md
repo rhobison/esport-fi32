@@ -90,7 +90,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 | `soft_ap_password`                      | `ap_pwd`       | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                                                                                                                                                                                             |
 | `seconds_per_pulse`                     | `spp`          | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse                                                                                                                                                                                 |
 | `soft_ap_start_threshold_s`             | `ap_thresh`    | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP                                                                                                                                                                        |
-| `centimeters_per_pulse`                 | `cpp`          | uint32 | `25`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed                                                                                                                                                                              |
+| `centimeters_per_pulse`                 | `cpp`          | uint32 | `300`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed                                                                                                                                                                              |
 | `idle_session_interval_s`               | `idle_s`       | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session                                                                                                                                                                             |
 | `start_session_interval_s`              | `start_s`      | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session                                                                                                                                                                      |
 | `pulse_debounce_time_ms`                | `debounce_ms`  | uint16 | `10`            | 1   | 5000        | Minimum time (ms) between two accepted pulses                                                                                                                                                                            |
@@ -134,6 +134,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 │  │  GET /            status dashboard (HTML)                    │ │
 │  │  GET /config      configuration form (HTML)                  │ │
 │  │  POST /config     save & apply configuration                 │ │
+│  │  POST /config/reset  reset configuration to factory defaults │ │
 │  │  GET /api/status  live state (JSON)                          │ │
 │  │  GET /api/sessions session history (JSON)                    │ │
 │  │  GET /api/sessions/export download CSV/JSON reports          │ │
@@ -289,8 +290,9 @@ esp_err_t wifi_mngr_reward_ap_set(bool enable);
 bool     wifi_mngr_sta_is_connected(void);
 bool     wifi_mngr_reward_ap_is_active(void);
 uint8_t  wifi_mngr_reward_ap_client_count(void);
-void     wifi_mngr_sta_ip_get(char *buf, size_t len);   /* dotted-decimal or "" */
-uint32_t wifi_mngr_reward_ap_throughput_kbps(void);     /* combined RX+TX kbps over last 1-s interval; 0 when AP inactive */
+void     wifi_mngr_sta_ip_get(char *buf, size_t len);          /* dotted-decimal or "" */
+void     wifi_mngr_reward_ap_ip_get(char *buf, size_t len);    /* dotted-decimal or "" when inactive */
+uint32_t wifi_mngr_reward_ap_throughput_kbps(void);            /* combined RX+TX kbps over last 1-s interval; 0 when AP inactive */
 ```
 
 ---
@@ -560,8 +562,7 @@ Serves a self-contained HTML page (generated as chunked C string literals). All 
 | Section          | Fields                                                                                                                                                                                                                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | System           | Current local time, NTP sync status, uptime                                                                                                                                                                                                                                   |
-| Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status                                                                                                                                                                                                         |
-| Reward AP        | SSID, active/inactive, connected clients count                                                                                                                                                                                                                                |
+| Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status, reward AP SSID, reward AP IP (dashboard access URL from the reward AP network), connected clients count                                                                                                |
 | Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled, reward AP throughput (kbps), countdown status (Decrementing / ⏸ Paused (low traffic)), current speed (km/h, one decimal place), pulse-crediting status (Crediting / ⊘ Gated (speed too low)) |
 | Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average)                                                                                                                                                                       |
 | Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count                                                                                                                                                                              |
@@ -601,8 +602,30 @@ Serves a form pre-populated with current config values.
 The **Reward Counter** field uses `hh:mm:ss` format with zero-padded two-digit hours (e.g. `02:01:00`). The GET handler formats the stored seconds value as `%02h:%02m:%02s`; the POST handler parses it back to seconds (`h*3600 + m*60 + s`). An unparseable value returns HTTP 400. Setting a non-zero value enables the reward AP immediately; setting it to `00:00:00` disables the reward AP immediately. The input field has `maxlength="8"` and an `oninput` JS mask that strips all non-digit characters and auto-inserts colons at positions 2 and 5 as the user types, so the user only types digits and the `hh:mm:ss` format is enforced automatically without needing a `pattern` attribute.
 
 On submit: `POST /config` with `application/x-www-form-urlencoded` body.
-On success: redirect to `/config` with a success banner.
-On error: re-render form with error message.
+On success: redirect to `/config?saved=1` with a success banner.
+On error: redirect to `/config` with HTTP 400 error message.
+
+**Reset to Defaults button:**
+
+Below the save form a separate `<form method="POST" action="/config/reset">` renders a
+"Reset to Factory Defaults" button styled in red.  Clicking the button triggers a
+browser `confirm()` dialogue ("Reset ALL settings to factory defaults?\nThis cannot be
+undone.") before submitting.  The POST body is empty; all logic is server-side.
+
+### 6.2.1 Reset Configuration — `POST /config/reset`
+
+Resets every configuration parameter to its factory default.
+
+**Behaviour:**
+1. Erase the entire `esport_cfg` NVS namespace with `nvs_erase_all()`.
+2. Write all factory-default values and commit.
+3. Call `time_mngr_timezone_apply()` to apply the default timezone immediately.
+4. Post `ESPORT_EVENT_CONFIG_CHANGED` so all modules reload their cached values.
+5. Redirect to `GET /config?reset=1`.
+
+On redirect, `GET /config` renders a teal confirmation banner: "✓ Configuration reset to factory defaults."
+
+On NVS failure: HTTP 500 Internal Server Error.
 
 ### 6.3 JSON Status API — `GET /api/status`
 
@@ -620,6 +643,7 @@ Returns JSON:
   "config_ap_active": false,
   "reward_ap_active": true,
   "reward_ap_ssid": "esport-fi32",
+  "reward_ap_ip": "192.168.5.1",
   "reward_ap_clients": 2,
   "counter_s": 147,
   "threshold_s": 300,
@@ -822,6 +846,14 @@ POST /config
   → if reward_counter_s changed:
       time_ctr_counter_set(new_val)  ← applies immediately; enables AP if val > 0, disables AP if val == 0
   → redirect to GET /config with success message
+
+POST /config/reset
+  → config_mngr_reset_to_defaults()
+      nvs_erase_all() on esport_cfg namespace
+      write all factory defaults and commit
+  → time_mngr_timezone_apply()  (apply default TZ immediately)
+  → post ESPORT_EVENT_CONFIG_CHANGED
+  → redirect to GET /config?reset=1
 ```
 
 ---
@@ -893,7 +925,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 | `ESPORT_EVENT_STA_DISCONNECTED` | —                      | `wifi_manager`       | (logging, status)                 |
 | `ESPORT_EVENT_CONFIG_CHANGED`   | none (NULL)            | `http_server_config` | `pulse_input`, `time_counter`     |
 
-`ESPORT_EVENT_CONFIG_CHANGED` is posted once at the end of a successful `POST /config` form submission.  Modules that cache NVS-backed config values subscribe to this event and re-read only the values they own, so configuration changes take effect immediately without a reboot.
+`ESPORT_EVENT_CONFIG_CHANGED` is posted once at the end of a successful `POST /config` or `POST /config/reset` request.  Modules that cache NVS-backed config values subscribe to this event and re-read only the values they own, so configuration changes take effect immediately without a reboot.
 
 ---
 

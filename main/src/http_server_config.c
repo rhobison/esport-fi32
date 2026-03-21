@@ -56,8 +56,9 @@ static const char * gp_tag __attribute__((unused)) = "http_srv_config";
  */
 esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
 {
-    /* Check for ?saved=1 query parameter. */
+    /* Check for ?saved=1 or ?reset=1 query parameters. */
     bool b_saved = false;
+    bool b_reset = false;
     char query_buf[32];
     if (ESP_OK == httpd_req_get_url_query_str(p_req, query_buf, sizeof(query_buf)))
     {
@@ -65,6 +66,11 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         if (ESP_OK == httpd_query_key_value(query_buf, "saved", saved_val, sizeof(saved_val)))
         {
             b_saved = (0 == strcmp(saved_val, "1"));
+        }
+        char reset_val[4];
+        if (ESP_OK == httpd_query_key_value(query_buf, "reset", reset_val, sizeof(reset_val)))
+        {
+            b_reset = (0 == strcmp(reset_val, "1"));
         }
     }
 
@@ -116,6 +122,11 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "p{margin:.4em 0}"
         ".saved{background:#dfd;padding:.5em 1em;border:1px solid #6a6;"
         "border-radius:4px;margin-bottom:1em}"
+        ".reset-banner{background:#dff;padding:.5em 1em;border:1px solid #69a;"
+        "border-radius:4px;margin-bottom:1em}"
+        ".btn-reset{background:#e55;color:#fff;border:none;padding:6px 14px;"
+        "cursor:pointer;border-radius:3px;font-size:1em}"
+        ".btn-reset:hover{background:#c33}"
         "</style></head><body>"
         "<h2>esport-fi32 &mdash; Configuration</h2>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_header);
@@ -126,6 +137,12 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
             "<p class=\"saved\">&#10003; Configuration saved successfully.</p>");
     }
 
+    if (b_reset)
+    {
+        (void)httpd_resp_sendstr_chunk(p_req,
+            "<p class=\"reset-banner\">&#10003; Configuration reset to factory defaults.</p>");
+    }
+
     (void)httpd_resp_sendstr_chunk(p_req, "<form method=\"POST\" action=\"/config\">");
 
     /* ---- String fields (prefix / encoded-value / suffix chunks) ---- */
@@ -134,7 +151,10 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     http_srv_html_attr_encode(wifi_ssid, enc, sizeof(enc));
     (void)httpd_resp_sendstr_chunk(p_req, "<p><label>Home Wi-Fi SSID</label>"
                                           "<input type=\"text\" name=\"wifi_ssid\" value=\"");
-    (void)httpd_resp_sendstr_chunk(p_req, enc);
+    if ('\0' != enc[0])
+    {
+        (void)httpd_resp_sendstr_chunk(p_req, enc);
+    }
     (void)httpd_resp_sendstr_chunk(p_req, "\" maxlength=\"32\"></p>");
 
     /* wifi_password */
@@ -142,14 +162,20 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Home Wi-Fi Password</label>"
         "<input type=\"password\" name=\"wifi_password\" value=\"");
-    (void)httpd_resp_sendstr_chunk(p_req, enc);
+    if ('\0' != enc[0])
+    {
+        (void)httpd_resp_sendstr_chunk(p_req, enc);
+    }
     (void)httpd_resp_sendstr_chunk(p_req, "\" maxlength=\"64\"></p>");
 
     /* soft_ap_ssid */
     http_srv_html_attr_encode(ap_ssid, enc, sizeof(enc));
     (void)httpd_resp_sendstr_chunk(p_req, "<p><label>Reward AP SSID</label>"
                                           "<input type=\"text\" name=\"soft_ap_ssid\" value=\"");
-    (void)httpd_resp_sendstr_chunk(p_req, enc);
+    if ('\0' != enc[0])
+    {
+        (void)httpd_resp_sendstr_chunk(p_req, enc);
+    }
     (void)httpd_resp_sendstr_chunk(p_req, "\" maxlength=\"32\"></p>");
 
     /* soft_ap_password */
@@ -157,7 +183,10 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Reward AP Password</label>"
         "<input type=\"password\" name=\"soft_ap_password\" value=\"");
-    (void)httpd_resp_sendstr_chunk(p_req, enc);
+    if ('\0' != enc[0])
+    {
+        (void)httpd_resp_sendstr_chunk(p_req, enc);
+    }
     (void)httpd_resp_sendstr_chunk(p_req, "\" maxlength=\"64\"></p>");
 
     /* ---- Numeric fields ---- */
@@ -214,7 +243,10 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     http_srv_html_attr_encode(tz, enc, sizeof(enc));
     (void)httpd_resp_sendstr_chunk(p_req, "<p><label>Timezone (POSIX TZ)</label>"
                                           "<input type=\"text\" name=\"timezone\" value=\"");
-    (void)httpd_resp_sendstr_chunk(p_req, enc);
+    if ('\0' != enc[0])
+    {
+        (void)httpd_resp_sendstr_chunk(p_req, enc);
+    }
     (void)httpd_resp_sendstr_chunk(p_req, "\" maxlength=\"63\"></p>");
 
     /* soft_ap_dec_time_above_threshold_kbps */
@@ -248,7 +280,8 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         uint32_t rc_s = reward_ctr % 60U;
         /* Allocate a small buffer on the stack — fits any uint32 hours value. */
         char     rc_str[20];
-        snprintf(rc_str, sizeof(rc_str), "%02" PRIu32 ":%02" PRIu32 ":%02" PRIu32, rc_h, rc_m, rc_s);
+        snprintf(rc_str, sizeof(rc_str), "%02" PRIu32 ":%02" PRIu32 ":%02" PRIu32, rc_h, rc_m,
+            rc_s);
         (void)httpd_resp_sendstr_chunk(p_req,
             "<p><label>Reward Counter (hh:mm:ss)</label>"
             "<input type=\"text\" name=\"reward_counter_s\" value=\"");
@@ -262,9 +295,17 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     }
 
     /* ---- Footer ---- */
-    static const char sc_footer[] = "<p style=\"margin-top:1em\">"
-                                    "<input type=\"submit\" value=\"Save Configuration\"></p>"
-                                    "</form></body></html>";
+    static const char sc_footer[] =
+        "<p style=\"margin-top:1em\">"
+        "<input type=\"submit\" value=\"Save Configuration\"></p>"
+        "</form>"
+        "<form method=\"POST\" action=\"/config/reset\""
+        " onsubmit=\"return confirm('Reset ALL settings to factory defaults?\\nThis cannot be "
+        "undone.')\""
+        " style=\"margin-top:1.5em;padding-top:1em;border-top:1px solid #ccc\">"
+        "<p><button type=\"submit\" class=\"btn-reset\">Reset to Factory Defaults</button></p>"
+        "</form>"
+        "</body></html>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_footer);
 
     /* Terminate chunked response. */
@@ -641,6 +682,43 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
     /* Redirect to /config?saved=1 on success. */
     httpd_resp_set_status(p_req, "302 Found");
     httpd_resp_set_hdr(p_req, "Location", "/config?saved=1");
+    httpd_resp_send(p_req, NULL, 0);
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Handler for \c POST /config/reset.
+ *
+ * Resets every configuration parameter to its factory default by erasing the
+ * \c esport_cfg NVS namespace and writing all defaults.  Also applies the
+ * default timezone immediately and posts \c ESPORT_EVENT_CONFIG_CHANGED so
+ * that all subsystems pick up the new values.  On success, issues an HTTP 302
+ * redirect to \c /config?reset=1.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_config_reset_handler(httpd_req_t * p_req)
+{
+    if (ESP_OK != config_mngr_reset_to_defaults())
+    {
+        httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR,
+            "Failed to reset configuration to defaults");
+        return ESP_FAIL;
+    }
+
+    /* Apply the default timezone immediately so the live system is in sync. */
+    time_mngr_timezone_apply();
+
+    /* Notify all modules that have cached config values. */
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_CONFIG_CHANGED, NULL, 0U, 0U);
+
+    /* Redirect to /config?reset=1 to show the confirmation banner. */
+    httpd_resp_set_status(p_req, "302 Found");
+    httpd_resp_set_hdr(p_req, "Location", "/config?reset=1");
     httpd_resp_send(p_req, NULL, 0);
     return ESP_OK;
 }

@@ -49,11 +49,11 @@
 #define CONFIG_MNGR_DEF_AP_PWD            (CONFIG_ESPORT_REWARD_AP_PASSWORD)
 #define CONFIG_MNGR_DEF_SECONDS_PER_PULSE ((uint16_t)3U)
 #define CONFIG_MNGR_DEF_AP_THRESH         ((uint32_t)300U)
-#define CONFIG_MNGR_DEF_CM_PER_PULSE      ((uint32_t)25U)
+#define CONFIG_MNGR_DEF_CM_PER_PULSE      ((uint32_t)300U)
 #define CONFIG_MNGR_DEF_IDLE_SESSION_S    ((uint16_t)30U)
 #define CONFIG_MNGR_DEF_START_SESSION_S   ((uint16_t)10U)
 #define CONFIG_MNGR_DEF_DEBOUNCE_MS       ((uint16_t)10U)
-#define CONFIG_MNGR_DEF_TZ                ("UTC0")
+#define CONFIG_MNGR_DEF_TZ                ("CET-1CEST,M3.5.0,M10.5.0/3")
 #define CONFIG_MNGR_DEF_AP_THR_KBPS       ((uint16_t)CONFIG_ESPORT_AP_THRESHOLD_KBPS)
 #define CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S ((uint16_t)CONFIG_ESPORT_AP_IDLE_TIMEOUT_S)
 #define CONFIG_MNGR_DEF_MIN_SPEED_X10     ((uint16_t)CONFIG_ESPORT_MIN_SPEED_KMH_X10)
@@ -383,6 +383,65 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val)
 {
     /* Full uint32_t range 0–UINT32_MAX is valid per spec §3. */
     return config_mngr_u32_set(CONFIG_MNGR_KEY_REWARD_COUNTER_S, val, 0U, UINT32_MAX);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t config_mngr_reset_to_defaults(void)
+{
+    nvs_handle_t handle;
+    esp_err_t    ret = nvs_open(CONFIG_MNGR_NAMESPACE, NVS_READWRITE, &handle);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "reset_to_defaults: nvs_open failed: 0x%x", ret);
+        return ret;
+    }
+
+    /* Erase all keys in the namespace before writing fresh defaults. */
+    ret = nvs_erase_all(handle);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "reset_to_defaults: nvs_erase_all failed: 0x%x", ret);
+        nvs_close(handle);
+        return ret;
+    }
+
+    /* Write every factory default unconditionally. */
+    ret |= nvs_set_str(handle, CONFIG_MNGR_KEY_WIFI_SSID, CONFIG_MNGR_DEF_WIFI_SSID);
+    ret |= nvs_set_str(handle, CONFIG_MNGR_KEY_WIFI_PWD, CONFIG_MNGR_DEF_WIFI_PWD);
+    ret |= nvs_set_str(handle, CONFIG_MNGR_KEY_AP_SSID, CONFIG_MNGR_DEF_AP_SSID);
+    ret |= nvs_set_str(handle, CONFIG_MNGR_KEY_AP_PWD, CONFIG_MNGR_DEF_AP_PWD);
+    ret |=
+        nvs_set_u16(handle, CONFIG_MNGR_KEY_SECONDS_PER_PULSE, CONFIG_MNGR_DEF_SECONDS_PER_PULSE);
+    ret |= nvs_set_u32(handle, CONFIG_MNGR_KEY_AP_THRESH, CONFIG_MNGR_DEF_AP_THRESH);
+    ret |= nvs_set_u32(handle, CONFIG_MNGR_KEY_CM_PER_PULSE, CONFIG_MNGR_DEF_CM_PER_PULSE);
+    ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_IDLE_SESSION_S, CONFIG_MNGR_DEF_IDLE_SESSION_S);
+    ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_START_SESSION_S, CONFIG_MNGR_DEF_START_SESSION_S);
+    ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_DEBOUNCE_MS, CONFIG_MNGR_DEF_DEBOUNCE_MS);
+    ret |= nvs_set_str(handle, CONFIG_MNGR_KEY_TZ, CONFIG_MNGR_DEF_TZ);
+    ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_AP_THR_KBPS, CONFIG_MNGR_DEF_AP_THR_KBPS);
+    ret |=
+        nvs_set_u16(handle, CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S, CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S);
+    ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_MIN_SPEED_X10, CONFIG_MNGR_DEF_MIN_SPEED_X10);
+    ret |= nvs_set_u32(handle, CONFIG_MNGR_KEY_REWARD_COUNTER_S, CONFIG_MNGR_DEF_REWARD_COUNTER_S);
+
+    if (ESP_OK == ret)
+    {
+        ret = nvs_commit(handle);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGE(gp_tag, "reset_to_defaults: nvs_commit failed: 0x%x", ret);
+        }
+    }
+
+    nvs_close(handle);
+
+    if (ESP_OK == ret)
+    {
+        ESP_LOGI(gp_tag, "all settings reset to factory defaults");
+    }
+
+    return ret;
 }
 
 //--------------------------------------------------------------------------------------------------
