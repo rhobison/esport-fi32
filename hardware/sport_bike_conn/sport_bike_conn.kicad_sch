@@ -837,6 +837,12 @@
 		)
 	)
 	(junction
+		(at 110.49 81.28)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "27cb5ac9-acd5-42d3-a3f4-e10047125613")
+	)
+	(junction
 		(at 128.27 50.8)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -846,13 +852,7 @@
 		(at 110.49 76.2)
 		(diameter 0)
 		(color 0 0 0 0)
-		(uuid "8a63b555-ac74-43e6-bde2-3c9fa5922bb3")
-	)
-	(junction
-		(at 110.49 81.28)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "8f9d14cb-d309-4ac4-823b-29232ea3c57d")
+		(uuid "e4db6c9d-685d-4dff-840f-c585049e6210")
 	)
 	(wire
 		(pts
@@ -866,13 +866,13 @@
 	)
 	(wire
 		(pts
-			(xy 110.49 81.28) (xy 101.6 81.28)
+			(xy 96.52 76.2) (xy 110.49 76.2)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "1a9c7036-cfb5-4c05-9c11-5afdcafdc952")
+		(uuid "1fe56c45-3245-44a1-9f2e-70cc6f852ae8")
 	)
 	(wire
 		(pts
@@ -886,23 +886,13 @@
 	)
 	(wire
 		(pts
-			(xy 101.6 81.28) (xy 101.6 78.74)
+			(xy 110.49 50.8) (xy 110.49 76.2)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "26a854d3-70ad-498a-abac-b41dd7e4f2df")
-	)
-	(wire
-		(pts
-			(xy 120.65 81.28) (xy 110.49 81.28)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "35eacdd0-2983-4e00-ad9c-9ccb4d0af541")
+		(uuid "32cc9d62-52c5-419a-b0a5-e95f57fe2ea7")
 	)
 	(wire
 		(pts
@@ -946,33 +936,23 @@
 	)
 	(wire
 		(pts
-			(xy 110.49 50.8) (xy 110.49 76.2)
+			(xy 110.49 76.2) (xy 120.65 76.2)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "8eaaefc3-1e66-4d9c-a737-7b649713c232")
+		(uuid "7e817d48-5a9a-4f69-ac08-2f8a3f80fa32")
 	)
 	(wire
 		(pts
-			(xy 96.52 78.74) (xy 101.6 78.74)
+			(xy 96.52 81.28) (xy 110.49 81.28)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "a110b635-bcc4-420b-afef-eb1b3a6ee956")
-	)
-	(wire
-		(pts
-			(xy 96.52 76.2) (xy 110.49 76.2)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "addcdd4b-41e1-428f-9b13-6fcea86e1076")
+		(uuid "9dd05f8e-97ad-4651-8c3b-a4ee3b72a4e6")
 	)
 	(wire
 		(pts
@@ -982,7 +962,27 @@
 			(width 0)
 			(type default)
 		)
-		(uuid "b570a1d9-9da3-4770-a057-d123f677007a")
+		(uuid "c6e97f2c-c276-413c-a3f4-10be3840fc25")
+	)
+	(wire
+		(pts
+			(xy 96.52 76.2) (xy 96.52 78.74)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "eb16291a-85a3-4fcd-bb6a-86635349f523")
+	)
+	(wire
+		(pts
+			(xy 110.49 81.28) (xy 120.65 81.28)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ebbabfc4-036c-4802-9d2d-5b97b8fa6699")
 	)
 	(wire
 		(pts
@@ -993,16 +993,6 @@
 			(type default)
 		)
 		(uuid "f7d359e4-be1d-480a-8b5e-82c710e7d5c9")
-	)
-	(wire
-		(pts
-			(xy 110.49 76.2) (xy 120.65 76.2)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "fd88690a-9b1c-4748-99b9-8bef15bca872")
 	)
 	(global_label "ESP32-gpio"
 		(shape output)
@@ -1205,6 +1195,7 @@
 	(symbol
 		(lib_id "Connector_Audio:AudioJack2")
 		(at 91.44 78.74 0)
+		(mirror x)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -1212,7 +1203,7 @@
 		(dnp no)
 		(uuid "43e749ec-2bc4-4cb8-8e59-09ec7ca77c5c")
 		(property "Reference" "J2"
-			(at 91.44 82.804 0)
+			(at 91.44 74.676 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1220,7 +1211,7 @@
 			)
 		)
 		(property "Value" "from_reed_switch"
-			(at 90.805 72.39 0)
+			(at 90.805 85.09 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1471,8 +1462,7 @@
 	)
 	(symbol
 		(lib_id "Connector_Audio:AudioPlug2")
-		(at 135.89 78.74 0)
-		(mirror y)
+		(at 135.89 78.74 180)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -1480,7 +1470,7 @@
 		(dnp no)
 		(uuid "ed41cdf5-fdb7-4a55-927f-9b367e074343")
 		(property "Reference" "J1"
-			(at 128.27 83.82 0)
+			(at 128.27 73.66 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1489,7 +1479,7 @@
 			)
 		)
 		(property "Value" "to_bike_computer"
-			(at 128.778 72.898 0)
+			(at 128.778 84.582 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1498,7 +1488,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 127 80.01 0)
+			(at 127 77.47 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1507,7 +1497,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 127 80.01 0)
+			(at 127 77.47 0)
 			(effects
 				(font
 					(size 1.27 1.27)
