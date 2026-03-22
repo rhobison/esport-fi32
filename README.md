@@ -1,8 +1,8 @@
-# esport-fi32
+# ESPort-fi32
 
 **Turn pedalling into internet time — a parental-control firmware for the ESP32-C6.**
 
-esport-fi32 is an ESP-IDF firmware that incentivises children to exercise on a sports/exercise bike by gating Wi-Fi internet access behind time credits earned through physical activity. The more the child pedals, the more internet time they earn. When the credits run out, the Wi-Fi access point shuts down automatically.
+ESPort-fi32 is an ESP-IDF firmware that incentivises children to exercise on a sports/exercise bike by gating Wi-Fi internet access behind time credits earned through physical activity. The more the child pedals, the more internet time they earn. When the credits run out, the Wi-Fi access point shuts down automatically.
 
 ---
 
