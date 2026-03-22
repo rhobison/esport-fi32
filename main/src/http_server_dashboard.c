@@ -392,9 +392,6 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
 
     /* Navigation and JS auto-refresh for pause indicator */
     static const char sc_nav[] =
-        "<div class=\"card\">"
-        "<a href=\"/config\">&#9881; Go to Configuration</a>"
-        "</div>"
         "<script>"
         "(function(){"
         "function pad2(n){return('0'+n).slice(-2);}"
