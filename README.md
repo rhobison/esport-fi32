@@ -79,6 +79,8 @@ Lets you set all parameters without reflashing:
 
 Connect the exercise bike's reed switch or hall-effect sensor between **GPIO 10** and **GND**.
 
+![Circuit](docs/imgs/hw_circuit.png)
+
 ---
 
 ## Getting Started
@@ -177,4 +179,10 @@ docs/
   1-specification.md          # Full firmware specification
   2-development_plan.md       # Phased development plan
 ```
+
+## Finished assembly
+
+![Assembly 1](docs/imgs/assembly-1.jpg)
+
+![Assembly 2](docs/imgs/assembly-2.jpg)
 
