@@ -613,18 +613,9 @@ static void time_ctr_tick_cb(void * p_arg)
 
     if (throughput > (uint32_t)threshold)
     {
-        /* Traffic above threshold — reset streak, clear pause, decrement. */
+        /* Traffic above threshold — reset streak and clear pause. */
         g_below_ticks = 0U;
         g_paused      = false;
-        if (0U < g_counter_s)
-        {
-            g_counter_s--;
-        }
-        b_reached_zero = (0U == g_counter_s);
-        if (b_reached_zero)
-        {
-            g_state = TIME_CTR_STATE_IDLE;
-        }
     }
     else
     {
@@ -638,7 +629,20 @@ static void time_ctr_tick_cb(void * p_arg)
         {
             g_paused = true;
         }
-        /* Do NOT decrement when paused. */
+    }
+
+    /* Decrement whenever not paused (covers: above-threshold AND grace-period ticks). */
+    if (!g_paused)
+    {
+        if (0U < g_counter_s)
+        {
+            g_counter_s--;
+        }
+        b_reached_zero = (0U == g_counter_s);
+        if (b_reached_zero)
+        {
+            g_state = TIME_CTR_STATE_IDLE;
+        }
     }
 
     uint32_t counter_snapshot = g_counter_s;

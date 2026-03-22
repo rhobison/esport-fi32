@@ -382,17 +382,21 @@ threshold  = config_mngr_soft_ap_dec_threshold_kbps_get()
 timeout    = config_mngr_soft_ap_idle_throughput_timeout_s_get()
 
 if throughput > threshold:
-    g_below_ticks = 0
-    g_paused      = false
-    decrement counter by 1
+    g_below_ticks = 0        // reset grace-period streak
+    g_paused      = false    // resume decrement if it was paused
 else:
     g_below_ticks++
-    if g_below_ticks >= timeout (or timeout == 0):
+    if timeout == 0 or g_below_ticks >= timeout:
         g_paused = true
-        do NOT decrement
+
+if not g_paused:             // decrement while above threshold OR within grace period
+    decrement counter by 1
 ```
 
   - `timeout = 0` means pause immediately on the first below-threshold tick.
+  - While throughput is below threshold but `g_below_ticks < timeout` (the grace period), the
+    counter continues to decrement.
+  - If throughput rises above the threshold during the grace period, `g_below_ticks` resets to 0.
   - `g_below_ticks` is reset to `0` when the state machine exits `TIME_CTR_STATE_AP_ACTIVE`.
 
 **State machine:**
