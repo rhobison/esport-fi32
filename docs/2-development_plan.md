@@ -951,6 +951,7 @@ Every symbol (functions, types, `#define` macros, `enum` values) **must** start 
 | `http_server_api`       | `http_srv_`            | `HTTP_SRV_`         |
 | `http_server_export`    | `http_srv_`            | `HTTP_SRV_`         |
 | `http_server_dashboard` | `http_srv_`            | `HTTP_SRV_`         |
+| `device_registry`       | `device_reg_`          | `DEVICE_REG_`       |
 
 > `gp_tag` is a universal file-scope variable name and does **not** carry a module prefix (it follows the BARR-C:2018 pointer variable naming rule instead).
 
@@ -1014,6 +1015,12 @@ This section tracks incremental improvements beyond the base specification.  Eac
 | 3.2   | 3       | Config Manager — reward counter param          | `config_manager.c/h`                                                   |
 | 3.3   | 3       | Time Counter — NVS persistence & counter set   | `time_counter.c/h`                                                     |
 | 3.4   | 3       | Web UI — reward counter config field           | `http_server_config.c`                                                 |
+| 4.1   | 4       | Device Registry Module                         | `device_registry.c/h`, `event_ids.h`, `CMakeLists.txt`                 |
+| 4.2   | 4       | WiFi Manager: Always-On AP & MAC Filter        | `wifi_manager.c`                                                       |
+| 4.3   | 4       | Time Counter: Per-Device Earning & Tick        | `time_counter.c/h`                                                     |
+| 4.4   | 4       | HTTP Server: Config Device Management          | `http_server_config.c`                                                 |
+| 4.5   | 4       | HTTP Server: API & Dashboard Per-Device Status | `http_server_api.c`, `http_server_dashboard.c`                         |
+| 4.6   | 4       | Spec Update                                    | `docs/1-specification.md`                                              |
 
 ---
 
@@ -1724,3 +1731,611 @@ Key behaviours:
 - [ ] After submit, the page reloads and shows the updated value in `hh:mm:ss`.
 - [ ] The live counter on the dashboard (`counter_s` in `/api/status`) reflects the new value within 2 s.
 - [ ] NVS persists the value (verified by simulated reboot reading `config_mngr_reward_counter_s_get()`).
+
+---
+
+## Feature 4 — Per-Device Internet Access Control
+
+### Overview
+
+Currently the reward Soft AP is torn down when the global time counter reaches zero, cutting internet access for every connected device simultaneously. This feature replaces that blunt mechanism with per-device internet gating: the Soft AP remains visible from boot at all times, and each registered device has its own credit counter. Only registered devices with remaining credits and an enabled flag can route traffic to the internet; unregistered or expired devices stay associated to the AP and can reach the gateway (status dashboard) but cannot reach the internet.
+
+A device registry of up to four entries stores: MAC address, a human-readable nickname (up to 15 characters), a per-device internet time counter (`counter_s`), and an enabled/disabled toggle. A "current rider" selection wires the bike sensor to one specific device: credits earned during a confirmed exercise session are added to that device's counter. All other aspects of the time counter state machine (session qualification, threshold, traffic gate, speed gate) are unchanged.
+
+Per-device counter decrement runs independently of the credit-earning state: every registered device that is currently connected, has `b_enabled == true`, and has `counter_s > 0` loses one second per tick, regardless of whether anyone is pedalling.
+
+Key behaviours:
+
+- Reward Soft AP is **always on** from boot. `wifi_mngr_reward_ap_set(false)` becomes a no-op.
+- Internet access is enforced via an **IP-layer filter** in the existing `wifi_mngr_ap_input_hook`: IPv4 packets destined for addresses outside `192.168.5.0/24` are silently dropped if the source MAC is not internet-allowed. ARP and local traffic are always passed through.
+- A **device registry** (`device_registry.c/h`) manages all per-device state with NVS persistence.
+- The **current rider** is selected on the `/config` page; bike credits go to that device's counter.
+- The `/config` page provides full device management: add, remove, rename, set counter (`hh:mm:ss`), toggle enabled, select current rider.
+- The global `g_counter_s` and its NVS persistence (Feature 3) are removed from `time_counter.c`; per-device NVS persistence is handled entirely by `device_registry.c`.
+- The 1-second tick timer in `time_counter.c` is started at init and **runs permanently**. The tick callback calls `device_reg_tick()` **unconditionally** — the traffic gate is applied inside `device_reg_tick()` independently per device.
+- The global traffic gate (`g_paused`, `g_below_ticks`, `time_ctr_is_paused()`) from Feature 1 is **removed** from `time_counter.c`. The same sliding-window logic is re-applied per device inside `device_reg_tick()`, using the same global configuration parameters (`soft_ap_dec_time_above_threshold_kbps`, `soft_ap_idle_throughput_timeout_s`).
+- Per-device byte counters (RX and TX) are maintained in `device_registry.c` via `device_reg_mac_rx_bytes_add()` / `device_reg_mac_tx_bytes_add()`, called from the existing `wifi_mngr_ap_input_hook` and `wifi_mngr_ap_linkoutput_hook`. Each device's throughput is computed and its pause state updated once per second inside `device_reg_tick()`.
+- The top-level `"countdown_paused"` field is **removed** from `GET /api/status`. Per-device pause and throughput are exposed as `"paused"` and `"throughput_kbps"` inside each element of the `"devices"` array.
+
+---
+
+### Phase 4.1 — Device Registry Module
+
+#### Goal
+
+Create `device_registry.c` / `device_registry.h` — the central store for registered devices, their nicknames, per-device internet counters, enabled flags, and the current rider selection. All data is NVS-backed. Add the new `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` event to `event_ids.h`. Register the module in `CMakeLists.txt`.
+
+#### Inputs
+
+- `docs/1-specification.md` (current — §5 module spec conventions, §8 NVS conventions, §11 coding conventions)
+- `main/inc/event_ids.h` (existing)
+- `main/CMakeLists.txt` (existing)
+
+#### Data Model
+
+```c
+#define DEVICE_REG_MAX_ENTRIES    (4U)
+#define DEVICE_REG_NICKNAME_MAX_LEN (15U)
+#define DEVICE_REG_NO_RIDER       (0xFFU)
+#define DEVICE_REG_SAVE_INTERVAL_S (60U)
+
+typedef struct device_reg_entry_tag {
+    uint8_t  mac[6];
+    char     nickname[DEVICE_REG_NICKNAME_MAX_LEN + 1U]; /* null-terminated */
+    uint32_t counter_s;
+    bool     b_enabled;
+} device_reg_entry_t;
+```
+
+**NVS Namespace:** `esport_dev`
+
+| NVS Key    | Type   | Description                                        |
+| ---------- | ------ | -------------------------------------------------- |
+| `dev_count` | uint8 | Number of registered entries (0–4); `0` on first boot |
+| `dev_0` … `dev_3` | blob | One `device_reg_entry_t` per slot             |
+| `dev_rider` | uint8 | Current rider index, or `DEVICE_REG_NO_RIDER` (0xFF) |
+
+**Per-device traffic state (RAM only — not persisted to NVS):**
+
+The following per-device arrays live in `device_registry.c` as file-scope variables, zeroed on `device_reg_init()`. They are never written to NVS because throughput is a live metric that resets each second.
+
+| File-scope array        | Type                   | Description                                                  |
+| ----------------------- | ---------------------- | ------------------------------------------------------------ |
+| `g_rx_bytes[4]`         | `volatile uint32_t`    | Cumulative RX bytes per device since last tick               |
+| `g_tx_bytes[4]`         | `volatile uint32_t`    | Cumulative TX bytes per device since last tick               |
+| `g_throughput_kbps[4]`  | `uint32_t`             | Last computed RX+TX kbps per device (updated in tick)        |
+| `g_below_ticks[4]`      | `uint16_t`             | Consecutive below-threshold ticks per device                 |
+| `g_dev_paused[4]`       | `bool`                 | Current traffic-gate pause state per device                  |
+
+All five arrays are indexed by device slot (0–3), matching the `g_entries[]` index.
+
+#### Public API
+
+```c
+esp_err_t device_reg_init(void);
+uint8_t   device_reg_count_get(void);
+esp_err_t device_reg_entry_add(const uint8_t *p_mac, const char *p_nickname);
+esp_err_t device_reg_entry_remove(uint8_t idx);
+esp_err_t device_reg_entry_get(uint8_t idx, device_reg_entry_t *p_out);
+esp_err_t device_reg_entry_nickname_set(uint8_t idx, const char *p_nickname);
+esp_err_t device_reg_entry_enabled_set(uint8_t idx, bool b_enabled);
+esp_err_t device_reg_entry_counter_set(uint8_t idx, uint32_t counter_s);
+uint32_t  device_reg_entry_counter_get(uint8_t idx);       /* 0 when idx out of range */
+int8_t    device_reg_mac_find(const uint8_t *p_mac);       /* -1 if not found */
+bool      device_reg_mac_internet_allowed(const uint8_t *p_mac); /* registered + b_enabled + counter_s > 0 */
+uint8_t   device_reg_current_rider_get(void);              /* DEVICE_REG_NO_RIDER when none selected */
+esp_err_t device_reg_current_rider_set(uint8_t idx);              /* DEVICE_REG_NO_RIDER clears selection */
+esp_err_t device_reg_tick(void);                                  /* call once per second from time_counter tick */
+void      device_reg_mac_rx_bytes_add(const uint8_t *p_mac, uint32_t bytes); /* called from lwIP input hook */
+void      device_reg_mac_tx_bytes_add(const uint8_t *p_mac, uint32_t bytes); /* called from lwIP linkoutput hook */
+uint32_t  device_reg_entry_throughput_kbps_get(uint8_t idx);      /* last 1-s kbps for device; 0 when unknown idx */
+bool      device_reg_entry_is_paused(uint8_t idx);                /* true when traffic gate is holding decrement */
+```
+
+#### Tasks
+
+1. **`main/inc/event_ids.h`** — add `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` to `esport_event_id_t` with the next sequential explicit integer value. Post this event (no payload) whenever any entry is added, removed, or modified.
+
+2. **Create `main/inc/device_registry.h`**:
+   - Define `DEVICE_REG_MAX_ENTRIES`, `DEVICE_REG_NICKNAME_MAX_LEN`, `DEVICE_REG_NO_RIDER`, `DEVICE_REG_SAVE_INTERVAL_S` as `#define` constants (each replacement value in parentheses).
+   - Define `device_reg_entry_t` with the tag name `device_reg_entry_tag`.
+   - Declare all public API functions with Doxygen (`\\` tags, `\\param[in/out]`, blank line before `\\return`).
+   - Use `hhtemplate` structure; guard with `DEVICE_REGISTRY_H`.
+
+3. **Create `main/src/device_registry.c`**:
+   - Declare `static const char *gp_tag = "device_reg"`.
+   - Declare `static device_reg_entry_t g_entries[DEVICE_REG_MAX_ENTRIES]`.
+   - Declare `static uint8_t g_count = 0U` and `static uint8_t g_rider = DEVICE_REG_NO_RIDER`.
+   - Declare `static portMUX_TYPE g_dev_mux = portMUX_INITIALIZER_UNLOCKED` for spinlock.
+   - Declare `static uint16_t g_tick_count = 0U` (periodic save counter).
+   - Declare per-device traffic state arrays (all `[DEVICE_REG_MAX_ENTRIES]`, zeroed in `device_reg_init()`):
+     - `static volatile uint32_t g_rx_bytes[DEVICE_REG_MAX_ENTRIES]` — cumulative RX bytes since last tick.
+     - `static volatile uint32_t g_tx_bytes[DEVICE_REG_MAX_ENTRIES]` — cumulative TX bytes since last tick.
+     - `static uint32_t g_throughput_kbps[DEVICE_REG_MAX_ENTRIES]` — last computed kbps per device.
+     - `static uint16_t g_below_ticks[DEVICE_REG_MAX_ENTRIES]` — consecutive below-threshold ticks per device.
+     - `static bool g_dev_paused[DEVICE_REG_MAX_ENTRIES]` — pause state per device.
+   - Internal helpers (static, prototyped in Internal Function Prototypes section):
+     - `device_reg_entry_save(uint8_t idx)` — opens `esport_dev` NVS_READWRITE, writes `dev_N` blob, commits, closes.
+     - `device_reg_meta_save(void)` — saves `dev_count` and `dev_rider`.
+     - `device_reg_counters_save_all(void)` — calls `device_reg_entry_save()` for every index `< g_count`.
+
+4. **Implement `device_reg_init()`**:
+   - Open namespace `esport_dev` NVS_READWRITE.
+   - Read `dev_count`; if `ESP_ERR_NVS_NOT_FOUND` write `0`.
+   - Validate `g_count <= DEVICE_REG_MAX_ENTRIES`; if invalid, reset to 0 and erase metadata.
+   - For each index `< g_count`: read `dev_N` blob into `g_entries[N]`; on error log warning and set that entry to zeroed state.
+   - Read `dev_rider`; validate `< g_count || == DEVICE_REG_NO_RIDER`; reset to `DEVICE_REG_NO_RIDER` on invalid value.
+   - Close handle.
+
+5. **Implement `device_reg_entry_add()`**:
+   - Under spinlock: return `ESP_ERR_NO_MEM` if `g_count == DEVICE_REG_MAX_ENTRIES`.
+   - Iterate existing entries; return `ESP_ERR_INVALID_STATE` if MAC already present.
+   - Validate `p_nickname`: non-NULL, non-empty, `strlen <= DEVICE_REG_NICKNAME_MAX_LEN`; return `ESP_ERR_INVALID_ARG` on failure.
+   - Copy MAC and nickname into `g_entries[g_count]`; set `counter_s = 0`, `b_enabled = true`; increment `g_count`.
+   - Outside spinlock: call `device_reg_entry_save(new_idx)` and `device_reg_meta_save()`.
+   - Post `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`.
+
+6. **Implement `device_reg_entry_remove()`**:
+   - Return `ESP_ERR_INVALID_ARG` if `idx >= g_count`.
+   - Under spinlock: shift entries `[idx+1 … g_count-1]` left by one (compact array). Decrement `g_count`. Adjust `g_rider`: if `g_rider == idx`, set to `DEVICE_REG_NO_RIDER`; if `g_rider > idx`, decrement by 1.
+   - Outside spinlock: rewrite all blobs `dev_0` … `dev_{g_count-1}` (the shifted set) plus `dev_count` and `dev_rider` to NVS. Delete the now-stale last blob key (`"dev_N"` where N = old `g_count - 1`) using `nvs_erase_key()`.
+   - Post `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`.
+
+7. **Implement `device_reg_tick()`**:
+
+   This function implements the per-device sliding-window traffic gate and decrements each eligible counter. It must be called exactly once per second.
+
+   a. **Read global gate parameters** (outside spinlock):
+      - `threshold = config_mngr_soft_ap_dec_threshold_kbps_get()`
+      - `timeout   = config_mngr_soft_ap_idle_throughput_timeout_s_get()`
+
+   b. **Get connected stations**: call `esp_wifi_ap_get_sta_list(&sta_list)`.
+
+   c. **Per-device gate and decrement** — for each index `i < g_count`:
+
+      Under `g_dev_mux` spinlock:
+      - Compute throughput: `delta = g_rx_bytes[i] + g_tx_bytes[i]`; set `g_throughput_kbps[i] = (uint32_t)(delta * 8U / 1000U)`; reset `g_rx_bytes[i] = 0; g_tx_bytes[i] = 0`.
+      - Apply the sliding-window gate (identical logic to Feature 1 Overview pseudo-code, using `g_throughput_kbps[i]`, `threshold`, `timeout`, `g_below_ticks[i]`, `g_dev_paused[i]`).
+      - If `!g_dev_paused[i]` AND `g_entries[i].b_enabled` AND `g_entries[i].counter_s > 0`:
+        - Check if `g_entries[i].mac` matches any `sta_list.sta[j].mac`; if connected, decrement `g_entries[i].counter_s`, set `b_changed = true`, and if it just reached 0 set `b_zero[i] = true`.
+
+      Exit spinlock.
+
+   d. **Post-tick saves** (outside spinlock):
+      - For any `b_zero[i]`: call `device_reg_entry_save(i)` immediately.
+      - Post `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` if any `b_changed` was set.
+
+   e. **Periodic full save**: increment `g_tick_count`; if `g_tick_count >= DEVICE_REG_SAVE_INTERVAL_S`, call `device_reg_counters_save_all()` and reset `g_tick_count = 0`.
+
+8. **Implement all remaining getters/setters** following the pattern of existing config manager functions: spinlock for in-RAM state; NVS write in setters; validate `idx < g_count`; return `ESP_ERR_INVALID_ARG` on out-of-range index.
+
+9. **`device_reg_mac_internet_allowed()`**: under spinlock, linear scan of `g_entries`; return `true` iff found AND `b_enabled == true` AND `counter_s > 0`. Must complete in O(4) — no NVS access.
+
+10. **Implement `device_reg_mac_rx_bytes_add(const uint8_t *p_mac, uint32_t bytes)`**:
+    - Under spinlock: linear scan `g_entries[0..g_count-1]`; if MAC matches entry `i`, add `bytes` to `g_rx_bytes[i]`. If not found, no-op. Must be safe to call from the lwIP driver task: O(4) scan, no NVS access, no heap allocation.
+
+11. **Implement `device_reg_mac_tx_bytes_add(const uint8_t *p_mac, uint32_t bytes)`**:
+    - Identical to `device_reg_mac_rx_bytes_add()` but increments `g_tx_bytes[i]`.
+
+12. **Implement `device_reg_entry_throughput_kbps_get(uint8_t idx)`**:
+    - Under spinlock: return `g_throughput_kbps[idx]` if `idx < g_count`; otherwise return `0`.
+
+13. **Implement `device_reg_entry_is_paused(uint8_t idx)`**:
+    - Under spinlock: return `g_dev_paused[idx]` if `idx < g_count`; otherwise return `false`.
+
+14. **`main/CMakeLists.txt`** — add `"src/device_registry.c"` to the `SRCS` list.
+
+15. **`main/src/main.c`** — call `device_reg_init()` after `config_mngr_init()` and before `wifi_mngr_init()` in the boot sequence, guarded by `ESP_ERROR_CHECK`.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `device_reg_entry_add()` with four different MACs returns `ESP_OK` each time; fifth call returns `ESP_ERR_NO_MEM`.
+- [ ] Adding a duplicate MAC returns `ESP_ERR_INVALID_STATE`.
+- [ ] Empty or oversized nickname returns `ESP_ERR_INVALID_ARG`.
+- [ ] `device_reg_mac_internet_allowed()` returns `false` for an unknown MAC.
+- [ ] `device_reg_mac_internet_allowed()` returns `false` for a known MAC with `counter_s == 0`.
+- [ ] `device_reg_mac_internet_allowed()` returns `false` for a known MAC with `b_enabled == false`.
+- [ ] `device_reg_mac_internet_allowed()` returns `true` for a known MAC with `b_enabled == true` and `counter_s > 0`.
+- [ ] After `device_reg_init()` reinit (simulated reboot), all entries, counters, `g_rider`, and `g_count` are restored from NVS.
+- [ ] `device_reg_entry_remove(0)` with two entries: entry at index 1 is now at index 0; `g_count == 1`.
+- [ ] If removed index equals `g_rider`, `g_rider` is reset to `DEVICE_REG_NO_RIDER`.
+- [ ] If removed index is less than `g_rider`, `g_rider` decrements by 1.
+- [ ] `device_reg_tick()` decrements only entries that are enabled, have `counter_s > 0`, whose MAC appears in the AP station list, and whose per-device traffic gate is not paused.
+- [ ] When `counter_s` reaches 0 during a tick, NVS holds `0` for that entry immediately after the tick.
+- [ ] `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` is posted on every add, remove, and counter-reaches-zero event.
+- [ ] With `threshold = 10 kbps` and `timeout = 5`: a device's counter does not decrement after 5 consecutive below-threshold ticks; resumes when its traffic exceeds the threshold.
+- [ ] With `timeout = 0`: a device's counter pauses on the very next below-threshold tick.
+- [ ] A second device's counter is unaffected while the first device is paused (independent per-device gate).
+- [ ] `device_reg_mac_rx_bytes_add()` increments only the slot matching the supplied MAC; all other slots are unchanged.
+- [ ] `device_reg_entry_throughput_kbps_get(i)` returns the kbps computed in the last tick for slot `i`.
+- [ ] `device_reg_entry_is_paused(i)` reflects the current gate state for slot `i`.
+
+---
+
+### Phase 4.2 — WiFi Manager: Always-On Reward AP & MAC Filtering
+
+#### Goal
+
+Make the reward Soft AP start at boot and remain active permanently. Add per-device MAC filtering inside the existing `wifi_mngr_ap_input_hook` to enforce per-device internet access control at the IP layer.
+
+#### Inputs
+
+- `docs/1-specification.md` §5.2
+- `main/src/wifi_manager.c`, `main/inc/wifi_manager.h` (existing)
+- `device_registry` (Phase 4.1 output)
+
+#### Tasks
+
+1. **Always-on reward AP** — in `wifi_mngr_init()`, after all event handlers are registered and the STA connection attempt has been issued, call `wifi_mngr_reward_ap_set(true)`. This starts the reward AP from boot.
+
+2. **Make `wifi_mngr_reward_ap_set(false)` a no-op** — in the `b_enable == false` branch, log `ESP_LOGD(gp_tag, "reward AP always-on: disable request ignored")` and return `ESP_OK`. Do not change any state, do not tear down the AP, do not disable NAPT. The `true` branch is completely unchanged (reconfigures SSID/password/subnet/NAPT on every call). This preserves compilation of all existing callers without any changes.
+
+3. **Per-device byte counting** — add calls to the device registry byte-add functions in both hook functions, immediately **before** the existing global byte-count spinlock block:
+   - In `wifi_mngr_ap_input_hook`: call `device_reg_mac_rx_bytes_add((const uint8_t *)p->payload + 6, (uint32_t)p->tot_len)`. The source MAC (bytes `[6..11]` of the Ethernet header) identifies the sending device.
+   - In `wifi_mngr_ap_linkoutput_hook`: call `device_reg_mac_tx_bytes_add((const uint8_t *)p->payload + 0, (uint32_t)p->tot_len)`. The destination MAC (bytes `[0..5]`) identifies the receiving device.
+
+   Both calls are placed before the global spinlock block (no ordering dependency). Both are O(4), spinlock-guarded inside `device_registry.c`, and safe to make from the WiFi driver task.
+
+4. **MAC filter in `wifi_mngr_ap_input_hook`** — immediately after the per-device and global byte-count blocks and before the final `return gp_orig_ap_input(p, inp)` call, add the following logic:
+   - Guard: `if (p->len >= 34U)` — ensures at least 14 bytes of Ethernet header plus 20 bytes of IPv4 header (up to destination address) are present in the first pbuf segment. On the ESP32 WiFi driver, AP client frames always arrive with the full Ethernet + IP header in the first segment; add a code comment documenting this assumption.
+   - Extract `ethertype = (uint16_t)(((const uint8_t *)p->payload)[12] << 8) | ((const uint8_t *)p->payload)[13]`.
+   - If `ethertype == 0x0800U` (IPv4):
+     - Extract `dst_ip` from bytes `[30..33]` of `p->payload` as a big-endian `uint32_t`.
+     - If `(dst_ip & 0xFFFFFF00U) != 0xC0A80500U` (destination is outside the `192.168.5.0/24` subnet, i.e. internet-bound):
+       - Call `device_reg_mac_internet_allowed((const uint8_t *)p->payload + 6)`.
+       - If not allowed: call `pbuf_free(p)` and `return ERR_OK` (silently drop the frame; do not call the original input function).
+   - All other frames — ARP (EtherType `0x0806`), local IPv4 destinations, non-IPv4 — fall through unchanged to `gp_orig_ap_input(p, inp)`.
+   - Add `#include "device_registry.h"` at the top of `wifi_manager.c`.
+
+5. **No changes to `main/inc/wifi_manager.h`** — the public API is unchanged. The filter is an internal implementation detail.
+
+#### Notes
+
+> `device_reg_mac_internet_allowed()` is called in the lwIP input path (WiFi driver task context on ESP32-C6). It acquires a `portMUX_TYPE` spinlock and performs a linear scan of four entries. On a single-core ESP32-C6, `portENTER_CRITICAL` disables interrupts briefly; the O(4) scan with no NVS access completes in well under 1 µs. This is acceptable for the lwIP fast path.
+
+> 802.1Q VLAN-tagged frames (EtherType `0x8100`) are not handled; they are passed through without filtering. VLAN tagging is not used on home networks or by the ESP32 AP.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] Reward AP SSID (`esport-fi32` by default) is visible to Wi-Fi scanning devices immediately after boot, before any pedalling.
+- [ ] `wifi_mngr_reward_ap_set(false)` returns `ESP_OK` and the reward AP remains active.
+- [ ] An unregistered device can associate to the AP and receives a DHCP lease (`192.168.5.x`).
+- [ ] The unregistered device can ping `192.168.5.1` (the gateway) but cannot ping an external address (e.g. `8.8.8.8`).
+- [ ] A registered device with `b_enabled == true` and `counter_s > 0` can ping an external address.
+- [ ] A registered device with `counter_s == 0` cannot ping an external address.
+- [ ] A registered device with `b_enabled == false` cannot ping an external address.
+- [ ] ARP and DHCP traffic is never blocked; unregistered devices always keep their IP lease.
+- [ ] Toggling `b_enabled` from `false` to `true` (via `device_reg_entry_enabled_set`) takes effect on the next frame (no AP restart required).
+- [ ] After a registered device sends traffic, `device_reg_entry_throughput_kbps_get()` returns a non-zero value on the following tick.
+- [ ] Per-device byte counters reset to `0` each tick; `device_reg_entry_throughput_kbps_get()` returns `0` in the tick after the device goes idle.
+
+---
+
+### Phase 4.3 — Time Counter: Per-Device Credit Earning & Tick Integration
+
+#### Goal
+
+Replace the global counter with per-device credit logic. Pulse credits go to the current rider's device_reg counter. The 1-second tick timer runs permanently from `time_ctr_init()` and delegates device counter decrement entirely to `device_reg_tick()`. Remove all `wifi_mngr_reward_ap_set()` calls. Remove the global `g_counter_s` and its NVS persistence (Feature 3). Update `time_ctr_get()` and `time_ctr_counter_set()` to operate on the current rider's counter.
+
+#### Inputs
+
+- `main/inc/time_counter.h`, `main/src/time_counter.c` (existing, Features 1–3 output)
+- `device_registry` (Phase 4.1 output)
+- `wifi_manager` (Phase 4.2 output — `wifi_mngr_reward_ap_set(false)` is now a no-op)
+
+#### Tasks
+
+1. **Remove `g_counter_s`** (the global credit counter). Replace with a local session accumulator:
+   ```c
+   static volatile uint32_t g_session_credits = 0U;
+   ```
+   This accumulates pulse credits during `TIME_CTR_STATE_SESSION` (before the threshold is crossed). It is reset to `0` when the session closes before the threshold fires. It is flushed to the current rider's `device_reg` counter when the threshold fires (transition to `TIME_CTR_STATE_EARNING`).
+
+2. **Rename `TIME_CTR_STATE_AP_ACTIVE` to `TIME_CTR_STATE_EARNING`** in the enum definition. Update all uses within `time_counter.c`. This is a purely internal rename (the enum is `static`).
+
+3. **Always-running tick timer** — in `time_ctr_init()`, start the 1-second periodic tick timer immediately (do not wait for a state transition). Remove the `esp_timer_start` call from the threshold-fired handler. Remove the `esp_timer_stop` call from the counter-reached-zero handler and from any state transition back to `TIME_CTR_STATE_IDLE`. The timer now runs for the lifetime of the firmware.
+
+4. **Remove the periodic NVS save timer** (`g_save_timer` from Feature 3) and its callback `time_ctr_save_cb`. The per-device NVS persistence is now owned by `device_registry.c`.
+
+5. **Boot restore** — in `time_ctr_init()`, remove the restore of `config_mngr_reward_counter_s_get()`. Per-device counters are already restored by `device_reg_init()` (called before `time_ctr_init()` in `main.c`). **Migration:** if `config_mngr_reward_counter_s_get()` returns a value `> 0` and `device_reg_current_rider_get() != DEVICE_REG_NO_RIDER` and the current rider's `device_reg_entry_counter_get()` returns `0`, set the current rider's counter to the migrated value via `device_reg_entry_counter_set()`, then call `config_mngr_reward_counter_s_set(0U)` to clear the old key. Log the migration at `ESP_LOGI` level. This one-time migration prevents loss of earned time when upgrading from Feature 3.
+
+6. **Pulse handler (`time_ctr_pulse_event_handler`)** — update credit logic:
+   - Speed gate check (Feature 2): unchanged — `b_credit` flag is still computed before entering the spinlock.
+   - In `TIME_CTR_STATE_SESSION` (under spinlock): if `b_credit`, increment `g_session_credits` by `config_mngr_seconds_per_pulse_get()`.
+   - In `TIME_CTR_STATE_EARNING` (under spinlock): if `b_credit` and `device_reg_current_rider_get() != DEVICE_REG_NO_RIDER`, call `device_reg_entry_counter_set(rider_idx, device_reg_entry_counter_get(rider_idx) + spp)` outside the spinlock (after reading `rider_idx` under spinlock).
+   - Post `ESPORT_EVENT_COUNTER_CHANGED` with payload `time_ctr_get()` after every pulse (unchanged call site, updated return value — see task 9).
+
+7. **Threshold timer callback** — on firing (transition `SESSION → EARNING`):
+   - Remove `wifi_mngr_reward_ap_set(true)`.
+   - If `g_session_credits > 0` and `device_reg_current_rider_get() != DEVICE_REG_NO_RIDER`: call `device_reg_entry_counter_set(rider_idx, device_reg_entry_counter_get(rider_idx) + g_session_credits)`.
+   - Reset `g_session_credits = 0`.
+   - Post `ESPORT_EVENT_REWARD_AP_ON` (keep for dashboard compatibility; semantics change to "earning started").
+   - Do **not** start the tick timer here (it is already running permanently).
+
+8. **Tick callback (`time_ctr_tick_cb`)** — simplify to unconditional delegation:
+   - **Remove** the entire Feature 1 traffic gate block: delete the call to `wifi_mngr_reward_ap_throughput_kbps()` and all reads/writes of `g_paused` and `g_below_ticks`. The gate is now applied per device inside `device_reg_tick()`.
+   - Remove the `g_paused` and `g_below_ticks` file-scope variables entirely from `time_counter.c`.
+   - Remove `time_ctr_is_paused()` from `main/inc/time_counter.h` and its implementation from `main/src/time_counter.c`. Per-device pause state is exposed by `device_reg_entry_is_paused()` instead.
+   - Remove the `"countdown_paused"` field from the `/api/status` JSON in `main/src/http_server_api.c` (the call to `time_ctr_is_paused()` that was added in Feature 1.5). The per-device `"paused"` fields in the `"devices"` array (Phase 4.5) serve this role.
+   - Also remove the HTML `<span id="pause-indicator">` element and its associated JavaScript update from `main/src/http_server_dashboard.c` (added in Feature 1.5), as the global pause indicator has no backing data after `g_paused` is removed.
+   - Replace the `if !g_paused: g_counter_s--` block with an unconditional call to `device_reg_tick()`.
+   - Remove the `counter == 0` → AP-disable → IDLE transition block entirely. The state machine no longer transitions based on a counter reaching zero.
+   - Post `ESPORT_EVENT_COUNTER_CHANGED` with payload `time_ctr_get()` (unchanged call site).
+   - Note: `wifi_mngr_reward_ap_throughput_kbps()` is **not** removed from `wifi_manager.c`; it is still called from `http_server_api.c` for the `"reward_ap_throughput_kbps"` total-AP diagnostic field.
+
+9. **Session-closed handler** — transitions in all states:
+   - `TIME_CTR_STATE_SESSION` + `ESPORT_EVENT_SESSION_CLOSED`: reset `g_session_credits = 0`; cancel threshold timer → `TIME_CTR_STATE_IDLE`.
+   - `TIME_CTR_STATE_EARNING` + `ESPORT_EVENT_SESSION_CLOSED`: transition to `TIME_CTR_STATE_IDLE`; post `ESPORT_EVENT_REWARD_AP_OFF`. (`g_paused` and `g_below_ticks` have been removed in task 8; no reset needed.)
+   - Remove the old `TIME_CTR_STATE_AP_ACTIVE + SESSION_CLOSED → ignore` branch.
+
+10. **`time_ctr_get()`** — return `device_reg_entry_counter_get(device_reg_current_rider_get())`. Returns `0` if no rider is selected (`DEVICE_REG_NO_RIDER`).
+
+11. **`time_ctr_counter_set(uint32_t val)`** (Feature 3 API) — update semantics: call `device_reg_entry_counter_set(rider_idx, val)` for the current rider. If no rider is selected, return `ESP_ERR_INVALID_STATE` and log `ESP_LOGW`. Remove all AP on/off logic that this function previously contained (it was calling `wifi_mngr_reward_ap_set()` — now redundant).
+
+12. **Update Doxygen** for `time_ctr_get()` and `time_ctr_counter_set()` in `main/inc/time_counter.h` to reflect the new semantics.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] The 1-second tick fires continuously from `time_ctr_init()` regardless of session state.
+- [ ] Pulses during `SESSION` state accumulate in `g_session_credits` and do **not** yet appear in the rider's `device_reg` counter.
+- [ ] When the threshold timer fires, `g_session_credits` is flushed to the current rider's `device_reg` counter and the accumulator is reset to zero.
+- [ ] Pulses in `EARNING` state add directly to the current rider's `device_reg` counter.
+- [ ] `device_reg_tick()` is called unconditionally once per second from `time_ctr_tick_cb()`.
+- [ ] Per-device counters only decrement when the per-device traffic gate is not paused (gating is handled inside `device_reg_tick()`).
+- [ ] `time_ctr_is_paused()` no longer exists in `main/inc/time_counter.h`.
+- [ ] `time_ctr_get()` returns the current rider's `device_reg` counter; returns `0` when no rider is selected.
+- [ ] Session closed in `SESSION` state: `g_session_credits` is reset to `0`, no credits are applied to any device.
+- [ ] Session closed in `EARNING` state: state returns to `IDLE`; device counters continue to decrement normally in subsequent ticks.
+- [ ] No call to `wifi_mngr_reward_ap_set()` remains anywhere in `time_counter.c`.
+- [ ] `time_ctr_counter_set()` returns `ESP_ERR_INVALID_STATE` when no rider is selected.
+- [ ] Migration: a non-zero `config_mngr_reward_counter_s_get()` value is transferred to the current rider's counter on first boot; `config_mngr_reward_counter_s_get()` reads `0` thereafter.
+- [ ] No race conditions under rapid pulse injection interleaved with tick (counter never negative).
+
+---
+
+### Phase 4.4 — HTTP Server: Config Page Device Management
+
+#### Goal
+
+Add a complete device registry management section to the `/config` page: list all registered devices with editable fields, an "Add Device" form, current rider selection, and a global reward counter field replacement. Remove the global "Reward Counter" field (Feature 3) from the config form, as per-device counter fields supersede it.
+
+#### Inputs
+
+- `main/src/http_server_config.c` (existing, Feature 3.4 output)
+- `device_registry` (Phase 4.1 output)
+- `time_counter` (Phase 4.3 output)
+
+#### Tasks
+
+1. **GET `/config` handler** — add a "Registered Devices" section after the existing config fields:
+
+   a. Render a table with one row per registered device (`device_reg_count_get()` rows). Each row contains:
+   - Nickname: `<input type="text" name="dev_N_nickname" maxlength="15" value="...">` (pre-populated).
+   - MAC address: read-only text, formatted `XX:XX:XX:XX:XX:XX`, wrapped in `<span>`.
+   - Counter: `<input type="text" name="dev_N_counter" placeholder="0:00:00" value="h:mm:ss">` — format the counter using `snprintf(buf, sizeof(buf), "%u:%02u:%02u", s/3600, (s%3600)/60, s%60)`.
+   - Enabled: `<input type="checkbox" name="dev_N_enabled" value="1"` checked if `b_enabled`.
+   - Current rider: `<input type="radio" name="current_rider" value="N"` checked if `device_reg_current_rider_get() == N`.
+   - Remove button: `<button type="submit" name="dev_N_remove" value="1">Remove</button>` (inline form submit).
+
+   b. Below the table, an "Add Device" sub-form with:
+   - MAC: `<input type="text" name="new_dev_mac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17">`.
+   - Nickname: `<input type="text" name="new_dev_nickname" maxlength="15">`.
+   - Submit: `<button type="submit" name="action" value="add_device">Add Device</button>`.
+
+   c. A "No rider" radio option: `<input type="radio" name="current_rider" value="255">` (value `255` = `DEVICE_REG_NO_RIDER`), checked if no rider selected.
+
+   d. **Remove** the "Reward Counter (hh:mm:ss)" field added by Feature 3.4 from the single-device global section. Per-device counters replace it.
+
+2. **POST `/config` handler** — add parsing for device registry fields:
+
+   a. Parse `current_rider`: `strtoul`; if empty or `== DEVICE_REG_NO_RIDER`, call `device_reg_current_rider_set(DEVICE_REG_NO_RIDER)`; else validate `< device_reg_count_get()` and call `device_reg_current_rider_set(idx)`.
+
+   b. Check each index `N = 0` to `device_reg_count_get() - 1`:
+   - Parse `dev_N_remove`: if value `"1"`, call `device_reg_entry_remove(N)`, skip remaining fields for this index (indices shift — break the per-device loop after removal and rely on the form redirect to re-render correct state).
+   - Parse `dev_N_nickname`: if non-empty and different from current, call `device_reg_entry_nickname_set(N, nickname)`.
+   - Parse `dev_N_enabled`: present in POST body = `true`; absent = `false`; call `device_reg_entry_enabled_set(N, b_enabled)`.
+   - Parse `dev_N_counter` (`h:mm:ss` or `hh:mm:ss`): split on `:`, expect exactly two `:` separators; `strtoul` each token; compute `total_s = h*3600 + m*60 + s`; call `device_reg_entry_counter_set(N, total_s)` and `time_ctr_counter_set(total_s)` only if `N == device_reg_current_rider_get()`. On parse failure, accumulate an error.
+
+   c. Add Device: parse `new_dev_mac` and `new_dev_nickname` if `action == "add_device"`. Call static helper `parse_mac_address(p_str, p_mac_out)` (see below). Call `device_reg_entry_add(mac, nickname)`. Handle `ESP_ERR_NO_MEM` ("Registry full — max 4 devices") and `ESP_ERR_INVALID_STATE` ("Device already registered") as validation errors.
+
+   d. Remove the parsing of the global `reward_counter_s` field (Feature 3 POST logic) since it is replaced by per-device fields.
+
+3. **Static helper `parse_mac_address(const char *p_str, uint8_t *p_mac_out)`**:
+   - Accepts both `"AA:BB:CC:DD:EE:FF"` (17 chars with colons) and `"AABBCCDDEEFF"` (12 hex chars without colons).
+   - For colon format: split on `:`, parse each of 6 tokens with `strtoul(token, &end, 16)`; verify `end` advanced and value `<= 0xFF`.
+   - For no-colon format: verify exactly 12 hex characters; parse pairs.
+   - Return `ESP_ERR_INVALID_ARG` on any malformed input.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `GET /config`: device table renders with correct nickname, counter (`h:mm:ss`), enabled state, and rider radio per device.
+- [ ] `GET /config`: "No rider" radio option is rendered and pre-selected when no rider is set.
+- [ ] `GET /config`: the global "Reward Counter" field from Feature 3 is no longer present.
+- [ ] `POST /config`: adding a new device (valid MAC `AA:BB:CC:DD:EE:FF` + nickname) adds it and the table shows it on next `GET`.
+- [ ] `POST /config`: adding a duplicate MAC returns HTTP 400.
+- [ ] `POST /config`: adding a 5th device returns HTTP 400 with "Registry full" message.
+- [ ] `POST /config`: invalid MAC format (e.g. `"ZZ:00:00:00:00:00"`) returns HTTP 400.
+- [ ] `POST /config`: MAC without colons (`"AABBCCDDEEFF"`) is accepted.
+- [ ] `POST /config`: setting `dev_0_counter` to `"0:30:00"` sets that device's counter to `1800`.
+- [ ] `POST /config`: invalid counter format (`"abc"`, `"1:2"`) returns HTTP 400.
+- [ ] `POST /config`: removing a device removes it and remaining devices shift indices correctly.
+- [ ] `POST /config`: toggling enabled checkbox saves `b_enabled` correctly.
+- [ ] `POST /config`: selecting a rider radio button calls `device_reg_current_rider_set()`.
+- [ ] `POST /config`: selecting "No rider" calls `device_reg_current_rider_set(DEVICE_REG_NO_RIDER)`.
+- [ ] All changes persist across simulated reboot.
+
+---
+
+### Phase 4.5 — HTTP Server: API & Dashboard Per-Device Status
+
+#### Goal
+
+Extend `GET /api/status` with a per-device `"devices"` array and add a "Devices" panel to the status dashboard that updates live every 2 seconds via the existing JS polling loop.
+
+#### Inputs
+
+- `main/src/http_server_api.c`, `main/src/http_server_dashboard.c` (existing)
+- `device_registry` (Phase 4.1 output)
+
+#### Tasks
+
+1. **`main/src/http_server_api.c`** — in the `/api/status` JSON response:
+
+   a. Append `"current_rider_idx": <value>` — `device_reg_current_rider_get()` (255 when none).
+
+   **Remove** the top-level `"countdown_paused"` field added by Feature 1.5 (no longer backed by any data; superseded by per-device `"paused"` inside `"devices"`). The `"reward_ap_throughput_kbps"` total field is retained as a diagnostic aggregate.
+
+   b. Append a `"devices": [...]` JSON array. For each registered device (`i = 0` to `device_reg_count_get() - 1`):
+   - Call `device_reg_entry_get(i, &entry)`.
+   - Check if the device is currently connected: call `esp_wifi_ap_get_sta_list(&sta_list)` once (before the array loop) and compare MACs.
+   - Format each element as:
+     ```json
+     {
+       "idx": 0,
+       "nickname": "Alice",
+       "mac": "AA:BB:CC:DD:EE:FF",
+       "counter_s": 1800,
+       "counter_hms": "0:30:00",
+       "enabled": true,
+       "internet_active": true,
+       "is_current_rider": true,
+       "connected": true,
+       "throughput_kbps": 42,
+       "paused": false
+     }
+     ```
+   - `"internet_active"`: `entry.b_enabled && entry.counter_s > 0`.
+   - `"is_current_rider"`: `device_reg_current_rider_get() == i`.
+   - `"counter_hms"`: format using `snprintf`.
+   - `"mac"`: format as `"%02X:%02X:%02X:%02X:%02X:%02X"`.
+   - `"throughput_kbps"`: `device_reg_entry_throughput_kbps_get(i)`. Always present; `0` when device is not connected or idle.
+   - `"paused"`: `device_reg_entry_is_paused(i)`. Always present; `false` when the traffic gate is not active for this device.
+   - Heap-allocate the JSON buffer for the `/api/status` response with enough room for the expanded `"devices"` array (increase the existing buffer allocation to `8192` bytes if the current `4096` is insufficient).
+
+2. **`main/src/http_server_dashboard.c`** — add a "Devices" section to the HTML, between the "Exercise Counter" section and the "Current Session" section:
+
+   a. Static initial HTML (rendered at page load from C):
+   ```html
+   <h3>Devices</h3>
+   <table id="devices-table">
+     <thead>
+       <tr><th>Nickname</th><th>Counter</th><th>Internet</th><th>Connected</th><th>Traffic</th><th>Rider</th></tr>
+     </thead>
+     <tbody id="devices-tbody"></tbody>
+   </table>
+   ```
+   The `<tbody>` is populated entirely by JavaScript; the initial C render inserts a placeholder row `<tr><td colspan="6">Loading…</td></tr>`.
+
+   b. In the dashboard JavaScript `refresh()` function (polling `/api/status`), add device table update logic:
+   ```js
+   var tbody = document.getElementById('devices-tbody');
+   if (tbody && data.devices) {
+       tbody.innerHTML = '';
+       data.devices.forEach(function(d) {
+           var pauseStr = d.paused ? ' &#9646;&#9646;' : '';
+           var row = '<tr>' +
+               '<td>' + d.nickname + (d.is_current_rider ? ' &#9733;' : '') + '</td>' +
+               '<td>' + d.counter_hms + '</td>' +
+               '<td>' + (d.internet_active ? '&#9989;' : '&#10060;') + '</td>' +
+               '<td>' + (d.connected ? '&#9989;' : '&ndash;') + '</td>' +
+               '<td>' + d.throughput_kbps + ' kbps' + pauseStr + '</td>' +
+               '<td>' + (d.is_current_rider ? '&#9733;' : '') + '</td>' +
+               '</tr>';
+           tbody.innerHTML += row;
+       });
+       if (data.devices.length === 0) {
+           tbody.innerHTML = '<tr><td colspan="6">No devices registered.</td></tr>';
+       }
+   }
+   ```
+   - A star ★ (`&#9733;`) marks the current rider in both the Nickname and Rider columns.
+   - ✅ (`&#9989;`) and ❌ (`&#10060;`) indicate internet and connection status.
+   - The Traffic column shows the last-tick throughput in kbps. A ⏸ pause symbol (`&#9646;&#9646;`) is appended when `paused == true` for that device.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `GET /api/status` JSON contains `"current_rider_idx"` key in all states.
+- [ ] `GET /api/status` JSON contains `"devices"` array; array is empty `[]` when no devices are registered.
+- [ ] Each element in `"devices"` has all required keys: `idx`, `nickname`, `mac`, `counter_s`, `counter_hms`, `enabled`, `internet_active`, `is_current_rider`, `connected`.
+- [ ] `"connected"` is `true` only for MACs currently associated to the AP.
+- [ ] `"internet_active"` is `true` only when `enabled == true` and `counter_s > 0`.
+- [ ] `"is_current_rider"` is `true` for at most one device; `false` for all when `current_rider_idx == 255`.
+- [ ] `"counter_hms"` matches `counter_s` (e.g. `counter_s = 3661` → `"counter_hms": "1:01:01"`).
+- [ ] Dashboard "Devices" section is rendered in the HTML structure.
+- [ ] Device table rows update every 2 seconds via the JS polling loop without a full page reload.
+- [ ] Current rider is marked with ★ in the device table.
+- [ ] Internet and connected status indicators update correctly as state changes.
+- [ ] "No devices registered." row is shown when the registry is empty.
+- [ ] Each device row shows the current traffic in kbps, updated every 2 s via the JS polling loop.
+- [ ] The pause symbol (⏸) appears next to the kbps value when `paused == true` for that device.
+- [ ] `GET /api/status` JSON no longer contains a top-level `"countdown_paused"` field.
+- [ ] Each element in `"devices"` contains `"throughput_kbps"` and `"paused"` keys.
+
+---
+
+### Phase 4.6 — Spec Update: `docs/1-specification.md`
+
+#### Goal
+
+Update the specification to reflect all architectural changes introduced by Feature 4: always-on reward AP, per-device internet access control, the device registry module, changes to the time counter state machine, and all affected API, dashboard, and NVS sections.
+
+#### Tasks
+
+1. **§1 Overview** — replace "When the counter reaches 0 the reward Soft AP is disabled" with: "The reward Soft AP is always active from boot. Internet access is controlled per device: only registered devices with remaining credits and an enabled flag can route traffic; unregistered or expired devices can reach the configuration dashboard but not the internet."
+
+2. **§4 System Architecture** — add `Device Registry` block to the architecture diagram between `NVS Config Manager` and `WiFi Manager`. Update the description under the WiFi Manager block to read "Reward SoftAP (always on, MAC-filtered)".
+
+3. **§4 Component/File Layout** — add `device_registry.h` and `device_registry.c` to the `inc/` and `src/` listings.
+
+4. **New §5.X — Device Registry** — insert a new module specification section (use the next sequential number after the current §5.8) covering:
+   - Responsibilities: device list CRUD, NVS persistence, per-device counter storage, internet-allowed query, current rider selection, one-second tick with per-device sliding-window traffic gate, per-device throughput measurement.
+   - Data model: `device_reg_entry_t` struct (NVS-persisted fields only), `DEVICE_REG_MAX_ENTRIES`, `DEVICE_REG_NICKNAME_MAX_LEN`, `DEVICE_REG_NO_RIDER`, `DEVICE_REG_SAVE_INTERVAL_S`. Per-device traffic state arrays (`g_rx_bytes`, `g_tx_bytes`, `g_throughput_kbps`, `g_below_ticks`, `g_dev_paused`) are RAM-only and not persisted.
+   - NVS Namespace `esport_dev` with full key table.
+   - Full public API listing (all functions declared in `device_registry.h`), including `device_reg_mac_rx_bytes_add()`, `device_reg_mac_tx_bytes_add()`, `device_reg_entry_throughput_kbps_get()`, `device_reg_entry_is_paused()`.
+   - Per-device sliding-window gate: same threshold and timeout parameters as the former global gate; applied independently per device slot inside `device_reg_tick()`.
+   - Thread safety note: spinlock `g_dev_mux` used for all in-RAM access; `device_reg_mac_internet_allowed()`, `device_reg_mac_rx_bytes_add()`, and `device_reg_mac_tx_bytes_add()` are safe to call from the lwIP input/output path.
+
+5. **§5.2 WiFi Manager** — update the Reward SoftAP sub-section:
+   - Remove "Enabled/disabled only via `wifi_mngr_reward_ap_set(bool enable)`" as the primary lifecycle description.
+   - Replace with: "Always active from boot. `wifi_mngr_reward_ap_set(true)` is called during `wifi_mngr_init()`. `wifi_mngr_reward_ap_set(false)` is a no-op in Feature 4 and later."
+   - Add a new sub-section "Per-Device MAC Filter" describing the IPv4 drop logic in `wifi_mngr_ap_input_hook`.
+
+6. **§5.5 Time Counter & Reward AP State Machine** — update:
+   - Rename state `AP_ACTIVE` to `EARNING` in the state diagram and description.
+   - Update pulse handler description: credits in `EARNING` state go to the current rider's `device_reg` counter via `device_reg_entry_counter_set()`; credits in `SESSION` state accumulate in `g_session_credits` and are flushed to the rider's counter on threshold.
+   - Update tick description: `device_reg_tick()` is called **unconditionally** once per second; the per-device traffic gate is applied inside `device_reg_tick()`.
+   - Remove `time_ctr_is_paused()` from the public API listing (the function is removed in Feature 4; per-device pause is exposed via `device_reg_entry_is_paused()`).
+   - Remove all mentions of `g_paused` and `g_below_ticks` from this module.
+   - Remove all mentions of `wifi_mngr_reward_ap_set()` from this module's responsibilities.
+   - Update `time_ctr_get()` docstring: returns the current rider's device_reg counter.
+   - Update `time_ctr_counter_set()` docstring: sets the current rider's counter; returns `ESP_ERR_INVALID_STATE` when no rider selected.
+
+7. **§6.1 Status Dashboard** — add a "Devices" section description listing the table columns: Nickname (with ★ for current rider), Counter (`h:mm:ss`), Internet (✅/❌), Connected (✅/–), Rider (★).
+
+8. **§6.2 Configuration Page** — add a "Registered Devices" section describing the device table fields (nickname, MAC, counter, enabled checkbox, rider radio) and the "Add Device" sub-form. Remove the "Reward Counter" global field entry (superseded by per-device counters).
+
+9. **§6.3 JSON Status API (`GET /api/status`)** — add `"current_rider_idx"` (`uint8`, `255` when none) and `"devices"` array (with full per-element schema including `"throughput_kbps"` and `"paused"`) to the documented JSON schema. Remove `"countdown_paused"` from the top-level schema (superseded by per-device `"paused"`).
+
+10. **§8 NVS Layout** — add namespace `esport_dev` with key table (`dev_count`, `dev_0`–`dev_3`, `dev_rider`).
+
+11. **Module Prefix Table** — add row: `device_registry` | `device_reg_` | `DEVICE_REG_`.
+
+#### Acceptance Criteria
+
+- [ ] §1 no longer describes the AP as being disabled when the counter reaches zero.
+- [ ] §4 architecture diagram includes the Device Registry block.
+- [ ] §4 file layout lists `device_registry.h` and `device_registry.c`.
+- [ ] New §5.X fully documents the Device Registry module (data model, NVS, API, thread safety).
+- [ ] §5.2 Reward SoftAP description reflects always-on behaviour and the MAC filter.
+- [ ] §5.5 state diagram shows `EARNING` (not `AP_ACTIVE`) and no AP on/off calls.
+- [ ] §5.5 no longer lists `time_ctr_is_paused()` in the public API.
+- [ ] §6.1 documents the Devices table in the dashboard.
+- [ ] §6.2 documents the device management section of the config page and no longer lists the global Reward Counter field.
+- [ ] §6.3 JSON schema includes `"current_rider_idx"` and `"devices"` array with full element schema (including `"throughput_kbps"` and `"paused"`); `"countdown_paused"` is absent from the top-level schema.
+- [ ] §8 includes the `esport_dev` NVS namespace.
+- [ ] Module Prefix Table includes `device_registry`.

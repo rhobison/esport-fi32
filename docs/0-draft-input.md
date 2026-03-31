@@ -31,4 +31,16 @@ The Configuration Web page should be available all the time, via the `esport-fi3
 1. The time left to deactivate the soft Ap (reward Ap) should decrement only if there are clients connected and there is some traffic. A configuration variable `soft_ap_dec_time_above_threshold_kbps` should determine the traffic bellow which the time is not decremented. -- planned
 2. The time counter for how long the Soft Ap should be on must be incremented only if `min_speed_to_increment_time_kmh_x10`. The minimum value is 0, no maximum limit. Default value=30 (3 km/h). -- planned
 3. The reward counter should persist between power-cycles. It should be saved regularly to NVM and must be restored on startup, so that kids don't loose the already gained internet time if the system reboots. The frequency of storing the counter can be around 1min. However, we must have a way to change its value in the configuration page, this way we can also give internet access without peddaling. Changes in the configuration page must be reflected immediately. -- planned
-4. Low power mode. When the time counter reaches 0, a timer with value `sleep_timeout_s` (configuration parameter) should start. When this timer reaches 0, the system should enter low power mode (most low power possible). If new pulses are received in the input, the system should wake-up and function normally. If new pulses are received during the `sleep_timeout_s` period, the sleep timer should be reset.
+4. Currently, the Soft AP is turned on and off to control the internet access, meaning that when the Soft AP is off, nobody else can use it. Implement the internet access control per device MAC.
+Up to 4 users can be registered via `/config` page. Users are identified by the MAC address and a nickname
+with ~15 characters. Each user should have its own counter_s for internet. One of the users can be assigned
+as the rider of the bike and only his counter is incremented with the bike pulses. The Soft AP should be on
+all the time since boot and all devices can access the dashboard (for example), but they will have internet
+access only if the counter is greater than 0. -- planned
+5. A buzzer will be added to the hardware. The buzzer is an active buzzer, meaning it can be enabled/disabled via a GPIO to produce the sound (on/off). The GPIO pin must be configurable via the menuconfig and the default value is GPIO 11. The beeper can be on or off for a given number of beep units. One beep unit is defined as 50ms.
+The buzzer will be used in the following situations:
+    - When a session is started (start qualifying), a short beep of 10 units should be issued.
+    - When a session is qualified, a long beep of 20 units should be issued.
+    - During the session, if the speed is below the minimum threshold, a short beep of 2 units should be issued every second while the speed is below the threshold. The beep should stop completely if the speed reaches 0.
+    - When a session is closed, 3 short beeps of 4 units should be issued in sequence, with 1 unit off between them: (4 units ON, 1 unit OFF, 4 units ON, 1 unit OFF, 4 units ON).
+    - All beep timings should be defined as a constant (#define, for example) according to the number of beep units.
