@@ -23,8 +23,10 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 
 #include "config_manager.h"
+#include "device_registry.h"
 #include "session_log.h"
 #include "session_tracker.h"
 #include "time_counter.h"
@@ -133,11 +135,11 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
     uint8_t  ap_clients    = wifi_mngr_reward_ap_client_count();
     uint32_t counter_s     = time_ctr_get();
     uint32_t threshold     = config_mngr_soft_ap_start_threshold_s_get();
-    bool     b_paused      = time_ctr_is_paused();
     uint32_t throughput    = wifi_mngr_reward_ap_throughput_kbps();
     uint32_t speed_x10     = time_ctr_current_speed_x10_get();
     uint16_t min_spd_cfg   = config_mngr_min_speed_to_increment_time_kmh_x10_get();
     bool     b_speed_gated = (min_spd_cfg > 0U) && (speed_x10 < (uint32_t)min_spd_cfg);
+    uint8_t  rider_idx     = device_reg_current_rider_get();
 
     char sta_ip[20];
     char sta_ssid[33];
@@ -150,6 +152,11 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
 
     session_trk_live_status_t sess;
     session_trk_live_status_get(&sess);
+
+    /* Get connected station list once for device connection checks. */
+    wifi_sta_list_t sta_list;
+    memset(&sta_list, 0, sizeof(sta_list));
+    (void)esp_wifi_ap_get_sta_list(&sta_list);
 
     int n = snprintf(p_buf, HTTP_SRV_JSON_BUF_LEN,
         "{\n"
@@ -173,21 +180,94 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         "  \"session_pulse_count\": %" PRIu32 ",\n"
         "  \"live_speed_kmh_x10\": %" PRIu16 ",\n"
         "  \"reward_ap_throughput_kbps\": %" PRIu32 ",\n"
-        "  \"countdown_paused\": %s,\n"
         "  \"current_speed_kmh_x10\": %" PRIu32 ",\n"
-        "  \"speed_gate_active\": %s\n"
-        "}\n",
+        "  \"speed_gate_active\": %s,\n"
+        "  \"current_rider_idx\": %" PRIu8 ",\n"
+        "  \"devices\": [",
         (int64_t)now_utc, time_local_str, b_synced ? "true" : "false", uptime_s,
         b_sta ? "true" : "false", sta_ssid, sta_ip, b_cfg_ap ? "true" : "false",
         b_rew_ap ? "true" : "false", rew_ap_ssid, rew_ap_ip, ap_clients, counter_s, threshold,
         sess.p_state_name, sess.start_utc, sess.duration_s, sess.pulse_count,
-        sess.live_speed_kmh_x10, throughput, b_paused ? "true" : "false", speed_x10,
-        b_speed_gated ? "true" : "false");
+        sess.live_speed_kmh_x10, throughput, speed_x10, b_speed_gated ? "true" : "false",
+        rider_idx);
 
     if (n >= (int)HTTP_SRV_JSON_BUF_LEN)
     {
-        ESP_LOGW(gp_tag, "api/status JSON truncated");
+        ESP_LOGW(gp_tag, "api/status JSON truncated (header)");
     }
+
+    int     pos       = n;
+    uint8_t dev_count = device_reg_count_get();
+
+    for (uint8_t i = 0U; i < dev_count; i++)
+    {
+        device_reg_entry_t entry;
+        if (ESP_OK != device_reg_entry_get(i, &entry))
+        {
+            continue;
+        }
+
+        /* Check if connected. */
+        bool b_connected = false;
+        for (int j = 0; j < (int)sta_list.num; j++)
+        {
+            if (0 == memcmp(entry.mac, sta_list.sta[j].mac, DEVICE_REG_MAC_LEN))
+            {
+                b_connected = true;
+                break;
+            }
+        }
+
+        char mac_str[18];
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", entry.mac[0],
+            entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5]);
+
+        char hms[20];
+        snprintf(hms, sizeof(hms), "%" PRIu32 ":%02" PRIu32 ":%02" PRIu32, entry.counter_s / 3600U,
+            (entry.counter_s % 3600U) / 60U, entry.counter_s % 60U);
+
+        bool     b_internet_active = entry.b_enabled && (entry.counter_s > 0U);
+        bool     b_is_rider        = (rider_idx == i);
+        uint32_t kbps              = device_reg_entry_throughput_kbps_get(i);
+        bool     b_paused          = device_reg_entry_is_paused(i);
+
+        char entry_buf[512];
+        int  en = snprintf(entry_buf, sizeof(entry_buf),
+             "%s{\"idx\":%" PRIu8 ","
+              "\"nickname\":\"%s\","
+              "\"mac\":\"%s\","
+              "\"counter_s\":%" PRIu32 ","
+              "\"counter_hms\":\"%s\","
+              "\"enabled\":%s,"
+              "\"internet_active\":%s,"
+              "\"is_current_rider\":%s,"
+              "\"connected\":%s,"
+              "\"throughput_kbps\":%" PRIu32 ","
+              "\"paused\":%s}",
+            (0U == i) ? "" : ",", i, entry.nickname, mac_str, entry.counter_s, hms,
+            entry.b_enabled ? "true" : "false", b_internet_active ? "true" : "false",
+            b_is_rider ? "true" : "false", b_connected ? "true" : "false", kbps,
+            b_paused ? "true" : "false");
+
+        if ((en > 0) && ((pos + en + 4) < (int)HTTP_SRV_JSON_BUF_LEN))
+        {
+            memcpy(p_buf + pos, entry_buf, (size_t)en);
+            pos += en;
+        }
+        else
+        {
+            ESP_LOGW(gp_tag, "api/status devices array truncated at index %u", (unsigned)i);
+            break;
+        }
+    }
+
+    /* Close the devices array and the JSON object. */
+    int trail = snprintf(p_buf + pos, (size_t)((int)HTTP_SRV_JSON_BUF_LEN - pos), "]\n}\n");
+    if (trail > 0)
+    {
+        pos += trail;
+    }
+    (void)pos;
 
     httpd_resp_set_type(p_req, "application/json");
     httpd_resp_send(p_req, p_buf, HTTPD_RESP_USE_STRLEN);

@@ -26,6 +26,7 @@
 #include "esp_timer.h"
 
 #include "config_manager.h"
+#include "device_registry.h"
 #include "session_log.h"
 #include "session_tracker.h"
 #include "time_counter.h"
@@ -127,7 +128,6 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
 
     uint32_t counter_s     = time_ctr_get();
     uint32_t threshold     = config_mngr_soft_ap_start_threshold_s_get();
-    bool     b_paused      = time_ctr_is_paused();
     uint32_t throughput    = wifi_mngr_reward_ap_throughput_kbps();
     uint32_t speed_x10     = time_ctr_current_speed_x10_get();
     uint32_t spd_ctr_int   = speed_x10 / 10U;
@@ -250,16 +250,22 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<span id=\"speed-gate-indicator\" style=\"display:%s;\">&#8856; Gated (speed too "
         "low)</span>"
         "<span id=\"speed-credit-indicator\" style=\"display:%s;\">Crediting</span>"
-        "</p>"
-        "<p>Countdown:&nbsp;"
-        "<span id=\"pause-indicator\" style=\"display:%s;\">&#9208; Paused (low traffic)</span>"
-        "<span id=\"decrement-indicator\" style=\"display:%s;\">Decrementing</span>"
         "</p></div>",
         counter_s, ctr_h, ctr_m, ctr_s_r, threshold, b_rew_ap ? "ok" : "err",
         b_rew_ap ? "Active" : "Inactive", throughput, spd_ctr_int, spd_ctr_dec,
-        b_speed_gated ? "inline" : "none", b_speed_gated ? "none" : "inline",
-        b_paused ? "inline" : "none", b_paused ? "none" : "inline");
+        b_speed_gated ? "inline" : "none", b_speed_gated ? "none" : "inline");
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
+
+    /* Devices section */
+    (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>Devices</h3>"
+                                          "<table id=\"devices-table\">"
+                                          "<thead><tr>"
+                                          "<th>Nickname</th><th>Counter</th><th>Internet</th>"
+                                          "<th>Connected</th><th>Traffic</th><th>Rider</th>"
+                                          "</tr></thead>"
+                                          "<tbody id=\"devices-tbody\">"
+                                          "<tr><td colspan=\"6\">Loading&hellip;</td></tr>"
+                                          "</tbody></table></div>");
 
     /* Current Session section */
     (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>Current Session</h3>");
@@ -390,7 +396,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
                                     "Download JSON</a></div>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_export);
 
-    /* Navigation and JS auto-refresh for pause indicator */
+    /* Navigation and JS auto-refresh */
     static const char sc_nav[] =
         "<script>"
         "(function(){"
@@ -438,10 +444,24 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "var sci=document.getElementById('speed-credit-indicator');"
         "if(sg&&sci){sg.style.display=d.speed_gate_active?'inline':'none';sci.style.display=d."
         "speed_gate_active?'none':'inline';}"
-        "var pi=document.getElementById('pause-indicator');"
-        "var di=document.getElementById('decrement-indicator');"
-        "if(pi&&di){pi.style.display=d.countdown_paused?'inline':'none';di.style.display=d."
-        "countdown_paused?'none':'inline';}"
+        "var tbody=document.getElementById('devices-tbody');"
+        "if(tbody&&d.devices){"
+        "tbody.innerHTML='';"
+        "d.devices.forEach(function(dv){"
+        "var pauseStr=dv.paused?' &#9646;&#9646;':'';"
+        "var row='<tr>'"
+        "+'<td>'+dv.nickname+(dv.is_current_rider?' &#9733;':'')+'</td>'"
+        "+'<td>'+dv.counter_hms+'</td>'"
+        "+'<td>'+(dv.internet_active?'&#9989;':'&#10060;')+'</td>'"
+        "+'<td>'+(dv.connected?'&#9989;':'&ndash;')+'</td>'"
+        "+'<td>'+dv.throughput_kbps+' kbps'+pauseStr+'</td>'"
+        "+'<td>'+(dv.is_current_rider?'&#9733;':'')+'</td>'"
+        "+'</tr>';"
+        "tbody.innerHTML+=row;"
+        "});"
+        "if(d.devices.length===0){"
+        "tbody.innerHTML='<tr><td colspan=\"6\">No devices registered.</td></tr>';}"
+        "}"
         "e=document.getElementById('sess-state');if(e)e.textContent=d.session_state;"
         "e=document.getElementById('sess-speed');"
         "if(e)e.innerHTML=(d.live_speed_kmh_x10/10).toFixed(1)+'&nbsp;km/h';"

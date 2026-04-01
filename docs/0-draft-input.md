@@ -37,7 +37,7 @@ with ~15 characters. Each user should have its own counter_s for internet. One o
 as the rider of the bike and only his counter is incremented with the bike pulses. The Soft AP should be on
 all the time since boot and all devices can access the dashboard (for example), but they will have internet
 access only if the counter is greater than 0. -- planned
-5. A buzzer will be added to the hardware. The buzzer is an active buzzer, meaning it can be enabled/disabled via a GPIO to produce the sound (on/off). The GPIO pin must be configurable via the menuconfig and the default value is GPIO 11. The beeper can be on or off for a given number of beep units. One beep unit is defined as 50ms.
+5. A buzzer will be added to the hardware. The buzzer is an active buzzer, meaning it can be enabled/disabled via a GPIO to produce the sound (on/off). The GPIO pin must be configurable via the menuconfig and the default value is GPIO 11. The buzzer can be on or off for a given number of beep units. One beep unit is defined as 50ms.
 The buzzer will be used in the following situations:
     - When a session is started (start qualifying), a short beep of 10 units should be issued.
     - When a session is qualified, a long beep of 20 units should be issued.

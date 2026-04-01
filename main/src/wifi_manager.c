@@ -24,8 +24,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/netif.h"
+#include "lwip/pbuf.h"
 
 #include "config_manager.h"
+#include "device_registry.h"
 #include "event_ids.h"
 
 //==================================================================================================
@@ -55,6 +57,32 @@
 
 /** DHCP server option flag to offer a DNS server address to clients (DHCP option 6). */
 #define DHCPS_OFFER_DNS (0x02U)
+
+/** EtherType value identifying an IPv4 frame (bytes [12..13] of the Ethernet header). */
+#define WIFI_MNGR_ETHERTYPE_IPV4 (0x0800U)
+
+/** Minimum frame length that contains a complete Ethernet + IPv4 header
+ *  (14-byte Ethernet header + 20-byte IPv4 header). */
+#define WIFI_MNGR_MIN_ETHERNET_IPV4_LEN (34U)
+
+/** Byte offset of the source MAC address within an Ethernet frame. */
+#define WIFI_MNGR_ETH_SRC_MAC_OFFSET (6U)
+
+/** Byte offset of the destination MAC address within an Ethernet frame. */
+#define WIFI_MNGR_ETH_DST_MAC_OFFSET (0U)
+
+/** Byte offset of the EtherType field within an Ethernet frame. */
+#define WIFI_MNGR_ETH_TYPE_OFFSET (12U)
+
+/** Byte offset of the IPv4 destination IP field within an Ethernet frame
+ *  (14-byte Ethernet header + 16-byte offset inside the IPv4 header). */
+#define WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET (30U)
+
+/** Reward AP subnet base address packed as a big-endian uint32 (192.168.5.0). */
+#define WIFI_MNGR_REWARD_AP_SUBNET_U32 (0xC0A80500U)
+
+/** IPv4 /24 subnet mask as a uint32 bitmask (255.255.255.0). */
+#define WIFI_MNGR_IPV4_SUBNET_MASK_24 (0xFFFFFF00U)
 
 //==================================================================================================
 // Variables/Data
@@ -125,7 +153,6 @@ static esp_err_t wifi_mngr_sta_connect(void);
 static err_t     wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp);
 static err_t     wifi_mngr_ap_linkoutput_hook(struct netif * netif, struct pbuf * p);
 static void      wifi_mngr_ap_hooks_install(void);
-static void      wifi_mngr_ap_hooks_uninstall(void);
 
 //==================================================================================================
 // Public Functions
@@ -213,12 +240,19 @@ esp_err_t wifi_mngr_init(void)
 
     if ('\0' == ssid[0])
     {
-        ESP_LOGI(gp_tag, "No STA SSID configured — enabling config AP immediately");
+        ESP_LOGI(gp_tag, "No STA SSID configured \u2014 enabling config AP immediately");
         ret = wifi_mngr_config_ap_enable();
     }
     else
     {
         ret = wifi_mngr_sta_connect();
+    }
+
+    /* Always start the reward AP from boot (Feature 4: always-on). */
+    esp_err_t ap_ret = wifi_mngr_reward_ap_set(true);
+    if (ESP_OK != ap_ret)
+    {
+        ESP_LOGW(gp_tag, "wifi_mngr_init: reward AP start failed: %s", esp_err_to_name(ap_ret));
     }
 
     ESP_LOGI(gp_tag, "initialised");
@@ -231,9 +265,16 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
 {
     esp_err_t ret = ESP_OK;
 
+    if (!b_enable)
+    {
+        /* Feature 4: reward AP is always-on; disable requests are ignored. */
+        ESP_LOGD(gp_tag, "reward AP always-on: disable request ignored");
+        return ESP_OK;
+    }
+
     if (b_enable == gb_reward_ap_active)
     {
-        /* Already in the requested state — guard against double-enable/disable. */
+        /* Already in the requested state — guard against double-enable. */
         return ESP_OK;
     }
 
@@ -312,46 +353,6 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
         }
 
         ESP_LOGI(gp_tag, "Reward AP enabled: SSID='%s'", ap_ssid);
-    }
-    else
-    {
-        /* Disarm any pending NAPT request and disable NAPT.  The AP netif is
-         * still up here so esp_netif_napt_disable() will succeed. */
-        gb_napt_pending = false;
-        esp_netif_napt_disable(gp_netif_ap);
-
-        /* Uninstall the byte-count netif hooks before tearing down the AP. */
-        wifi_mngr_ap_hooks_uninstall();
-
-        /* Restore default AP config (config AP may take over). */
-        esp_netif_dhcps_stop(gp_netif_ap);
-
-        /* 192.168.4.1 — lwip default for AP interface. */
-        esp_netif_ip_info_t ip_info;
-        memset(&ip_info, 0, sizeof(ip_info));
-        ip4addr_aton("192.168.4.1", (ip4_addr_t *)&ip_info.ip);
-        ip4addr_aton("192.168.4.1", (ip4_addr_t *)&ip_info.gw);
-        ip4addr_aton("255.255.255.0", (ip4_addr_t *)&ip_info.netmask);
-        esp_netif_set_ip_info(gp_netif_ap, &ip_info);
-
-        esp_netif_dhcps_start(gp_netif_ap);
-
-        gb_reward_ap_active = false;
-        /* Reset throughput measurement counters so the next enable starts clean. */
-        portENTER_CRITICAL(&g_ap_bytes_mux);
-        g_ap_rx_bytes = 0U;
-        g_ap_tx_bytes = 0U;
-        portEXIT_CRITICAL(&g_ap_bytes_mux);
-        g_prev_rx_bytes = 0U;
-        g_prev_tx_bytes = 0U;
-
-        if (!gb_config_ap_active)
-        {
-            /* No AP needed at all — revert to STA-only mode. */
-            (void)esp_wifi_set_mode(WIFI_MODE_STA);
-        }
-
-        ESP_LOGI(gp_tag, "Reward AP disabled");
     }
 
     return ret;
@@ -664,22 +665,65 @@ static void wifi_mngr_ap_dns_forward(void)
 //--------------------------------------------------------------------------------------------------
 
 /**
- * \brief Netif input hook that counts inbound bytes from AP clients.
+ * \brief Netif input hook that counts inbound bytes from AP clients and enforces
+ * per-device internet access control at the IP layer.
  *
- * Intercepts #gp_netif_ap 's \c input function pointer.  Adds the pbuf length
- * to #g_ap_rx_bytes under #g_ap_bytes_mux, then delegates to the original
- * input function saved in #gp_orig_ap_input.
+ * Intercepts #gp_netif_ap 's \c input function pointer.  Accumulates per-device
+ * byte counts via #device_reg_mac_rx_bytes_add, updates the global #g_ap_rx_bytes
+ * counter, then applies an IPv4 drop rule for internet-destined frames from
+ * unregistered or expired devices.
+ *
+ * Assumption: on the ESP32 WiFi driver, AP client frames always arrive with the
+ * full Ethernet + IP header in the first pbuf segment, so \c p->len includes at
+ * least the 14-byte Ethernet header and 20-byte IPv4 header.  The 34-byte guard
+ * below encodes this assumption explicitly.
  *
  * \param[in] p    Received Ethernet frame as a pbuf chain.
  * \param[in] inp  Netif the frame arrived on (the AP lwIP netif).
  *
- * \return Error code from the original input handler.
+ * \return Error code from the original input handler, or \c ERR_OK if the frame
+ *         was silently dropped.
  */
 static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
 {
+    /* Per-device RX byte count — source MAC starts at byte WIFI_MNGR_ETH_SRC_MAC_OFFSET. */
+    device_reg_mac_rx_bytes_add((const uint8_t *)p->payload + WIFI_MNGR_ETH_SRC_MAC_OFFSET,
+        (uint32_t)p->tot_len);
+
+    /* Global RX byte count. */
     portENTER_CRITICAL(&g_ap_bytes_mux);
     g_ap_rx_bytes += (uint32_t)p->tot_len;
     portEXIT_CRITICAL(&g_ap_bytes_mux);
+
+    /* Per-device internet access filter. */
+    if (p->len >= WIFI_MNGR_MIN_ETHERNET_IPV4_LEN)
+    {
+        /* Extract EtherType from WIFI_MNGR_ETH_TYPE_OFFSET. */
+        const uint8_t * p_eth     = (const uint8_t *)p->payload;
+        uint16_t        ethertype = (uint16_t)(((uint16_t)p_eth[WIFI_MNGR_ETH_TYPE_OFFSET] << 8U) |
+                                        p_eth[WIFI_MNGR_ETH_TYPE_OFFSET + 1U]);
+
+        if (WIFI_MNGR_ETHERTYPE_IPV4 == ethertype)
+        {
+            /* IPv4: extract destination IP from WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET (big-endian). */
+            uint32_t dst_ip = ((uint32_t)p_eth[WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET] << 24U) |
+                              ((uint32_t)p_eth[WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET + 1U] << 16U) |
+                              ((uint32_t)p_eth[WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET + 2U] << 8U) |
+                              (uint32_t)p_eth[WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET + 3U];
+
+            /* Drop internet-destined packets from devices without access. */
+            if (WIFI_MNGR_REWARD_AP_SUBNET_U32 != (dst_ip & WIFI_MNGR_IPV4_SUBNET_MASK_24))
+            {
+                /* Destination outside 192.168.5.0/24 — check device allowance. */
+                if (!device_reg_mac_internet_allowed(p_eth + WIFI_MNGR_ETH_SRC_MAC_OFFSET))
+                {
+                    pbuf_free(p);
+                    return ERR_OK;
+                }
+            }
+        }
+    }
+
     return gp_orig_ap_input(p, inp);
 }
 
@@ -688,9 +732,9 @@ static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
 /**
  * \brief Netif linkoutput hook that counts outbound bytes to AP clients.
  *
- * Intercepts #gp_netif_ap 's \c linkoutput function pointer.  Adds the pbuf
- * length to #g_ap_tx_bytes under #g_ap_bytes_mux, then delegates to the
- * original linkoutput function saved in #gp_orig_ap_linkoutput.
+ * Intercepts #gp_netif_ap 's \c linkoutput function pointer.  Accumulates per-device
+ * byte counts via #device_reg_mac_tx_bytes_add, updates the global #g_ap_tx_bytes
+ * counter, then delegates to the original linkoutput function.
  *
  * \param[in] netif  Netif sending the frame (the AP lwIP netif).
  * \param[in] p      Ethernet frame to transmit as a pbuf chain.
@@ -699,6 +743,11 @@ static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
  */
 static err_t wifi_mngr_ap_linkoutput_hook(struct netif * netif, struct pbuf * p)
 {
+    /* Per-device TX byte count — destination MAC starts at byte WIFI_MNGR_ETH_DST_MAC_OFFSET. */
+    device_reg_mac_tx_bytes_add((const uint8_t *)p->payload + WIFI_MNGR_ETH_DST_MAC_OFFSET,
+        (uint32_t)p->tot_len);
+
+    /* Global TX byte count. */
     portENTER_CRITICAL(&g_ap_bytes_mux);
     g_ap_tx_bytes += (uint32_t)p->tot_len;
     portEXIT_CRITICAL(&g_ap_bytes_mux);
@@ -747,34 +796,6 @@ static void wifi_mngr_ap_hooks_install(void)
 
     ESP_LOGI(gp_tag, "AP byte-count hooks installed (input=%p linkoutput=%p)",
         (void *)gp_orig_ap_input, (void *)gp_orig_ap_linkoutput);
-}
-
-//--------------------------------------------------------------------------------------------------
-
-/**
- * \brief Uninstall byte-count hooks from the AP lwIP netif.
- *
- * Restores \c netif->input and \c netif->linkoutput to the functions saved by
- * the last call to #wifi_mngr_ap_hooks_install.  Safe to call if hooks were
- * never installed (no-op in that case).
- */
-static void wifi_mngr_ap_hooks_uninstall(void)
-{
-    if (NULL == gp_orig_ap_input)
-    {
-        return; /* Hooks were never installed. */
-    }
-
-    struct netif * p_netif = (struct netif *)esp_netif_get_netif_impl(gp_netif_ap);
-    if ((NULL != p_netif) && (p_netif->input == wifi_mngr_ap_input_hook))
-    {
-        p_netif->input      = gp_orig_ap_input;
-        p_netif->linkoutput = gp_orig_ap_linkoutput;
-    }
-
-    gp_orig_ap_input      = NULL;
-    gp_orig_ap_linkoutput = NULL;
-    ESP_LOGI(gp_tag, "AP byte-count hooks uninstalled");
 }
 
 //--------------------------------------------------------------------------------------------------

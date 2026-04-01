@@ -109,6 +109,14 @@ typedef enum
      * No payload.
      */
     ESPORT_EVENT_STA_DISCONNECTED = 7,
+
+    /**
+     * \brief The device registry was modified (entry added, removed, or counter changed).
+     *
+     * No payload.  Posted by #device_registry whenever any entry is added,
+     * removed, or a per-device counter changes (including reaching zero).
+     */
+    ESPORT_EVENT_DEVICE_REGISTRY_CHANGED = 9,
 } esport_event_id_t;
 
 //==================================================================================================

@@ -23,6 +23,7 @@
 #include "esp_log.h"
 
 #include "config_manager.h"
+#include "device_registry.h"
 #include "event_ids.h"
 #include "time_counter.h"
 #include "time_manager.h"
@@ -38,6 +39,8 @@ static const char * gp_tag __attribute__((unused)) = "http_srv_config";
 //==================================================================================================
 // Internal Function Prototypes
 //==================================================================================================
+
+static esp_err_t parse_mac_address(const char * p_str, uint8_t * p_mac_out);
 
 //==================================================================================================
 // Public Functions
@@ -79,16 +82,15 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     static char wifi_pwd[65];
     static char ap_ssid[33];
     static char ap_pwd[65];
-    uint16_t    spp         = config_mngr_seconds_per_pulse_get();
-    uint32_t    ap_thresh   = config_mngr_soft_ap_start_threshold_s_get();
-    uint32_t    cpp         = config_mngr_centimeters_per_pulse_get();
-    uint16_t    idle_s      = config_mngr_idle_session_interval_s_get();
-    uint16_t    start_s     = config_mngr_start_session_interval_s_get();
-    uint16_t    debounce_ms = config_mngr_pulse_debounce_time_ms_get();
-    uint16_t    ap_thr_kbps = config_mngr_soft_ap_dec_threshold_kbps_get();
-    uint16_t    ap_idle_tmo = config_mngr_soft_ap_idle_throughput_timeout_s_get();
-    uint16_t    min_spd_x10 = config_mngr_min_speed_to_increment_time_kmh_x10_get();
-    uint32_t    reward_ctr  = time_ctr_get();
+    uint16_t    seconds_per_pulse            = config_mngr_seconds_per_pulse_get();
+    uint32_t    ap_start_threshold_s         = config_mngr_soft_ap_start_threshold_s_get();
+    uint32_t    centimeters_per_pulse        = config_mngr_centimeters_per_pulse_get();
+    uint16_t    idle_session_interval_s      = config_mngr_idle_session_interval_s_get();
+    uint16_t    start_session_interval_s     = config_mngr_start_session_interval_s_get();
+    uint16_t    debounce_ms                  = config_mngr_pulse_debounce_time_ms_get();
+    uint16_t    ap_dec_threshold_kbps        = config_mngr_soft_ap_dec_threshold_kbps_get();
+    uint16_t    ap_idle_throughput_timeout_s = config_mngr_soft_ap_idle_throughput_timeout_s_get();
+    uint16_t    min_speed_kmh_x10 = config_mngr_min_speed_to_increment_time_kmh_x10_get();
     static char tz[64];
 
     config_mngr_wifi_ssid_get(wifi_ssid, sizeof(wifi_ssid));
@@ -192,7 +194,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     /* ---- Numeric fields ---- */
 
     /* seconds_per_pulse */
-    snprintf(num, sizeof(num), "%" PRIu16, spp);
+    snprintf(num, sizeof(num), "%" PRIu16, seconds_per_pulse);
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Seconds per Pulse</label>"
         "<input type=\"number\" name=\"seconds_per_pulse\" value=\"");
@@ -200,7 +202,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"1\" max=\"60\"></p>");
 
     /* soft_ap_start_threshold_s */
-    snprintf(num, sizeof(num), "%" PRIu32, ap_thresh);
+    snprintf(num, sizeof(num), "%" PRIu32, ap_start_threshold_s);
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>AP Start Threshold (s)</label>"
         "<input type=\"number\" name=\"soft_ap_start_threshold_s\" value=\"");
@@ -208,7 +210,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\"></p>");
 
     /* centimeters_per_pulse */
-    snprintf(num, sizeof(num), "%" PRIu32, cpp);
+    snprintf(num, sizeof(num), "%" PRIu32, centimeters_per_pulse);
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Centimeters per Pulse</label>"
         "<input type=\"number\" name=\"centimeters_per_pulse\" value=\"");
@@ -216,7 +218,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"1\"></p>");
 
     /* idle_session_interval_s */
-    snprintf(num, sizeof(num), "%" PRIu16, idle_s);
+    snprintf(num, sizeof(num), "%" PRIu16, idle_session_interval_s);
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Idle Session Timeout (s)</label>"
         "<input type=\"number\" name=\"idle_session_interval_s\" value=\"");
@@ -224,7 +226,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"5\" max=\"600\"></p>");
 
     /* start_session_interval_s */
-    snprintf(num, sizeof(num), "%" PRIu16, start_s);
+    snprintf(num, sizeof(num), "%" PRIu16, start_session_interval_s);
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Session Start Window (s)</label>"
         "<input type=\"number\" name=\"start_session_interval_s\" value=\"");
@@ -250,7 +252,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, "\" maxlength=\"63\"></p>");
 
     /* soft_ap_dec_time_above_threshold_kbps */
-    snprintf(num, sizeof(num), "%" PRIu16, ap_thr_kbps);
+    snprintf(num, sizeof(num), "%" PRIu16, ap_dec_threshold_kbps);
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Reward AP idle throughput threshold (kbps)</label>"
         "<input type=\"number\" name=\"soft_ap_dec_time_above_threshold_kbps\" value=\"");
@@ -258,7 +260,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
 
     /* soft_ap_idle_throughput_timeout_s */
-    snprintf(num, sizeof(num), "%" PRIu16, ap_idle_tmo);
+    snprintf(num, sizeof(num), "%" PRIu16, ap_idle_throughput_timeout_s);
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Idle throughput timeout (s)</label>"
         "<input type=\"number\" name=\"soft_ap_idle_throughput_timeout_s\" value=\"");
@@ -266,33 +268,111 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
 
     /* min_speed_to_increment_time_kmh_x10 */
-    snprintf(num, sizeof(num), "%" PRIu16, min_spd_x10);
+    snprintf(num, sizeof(num), "%" PRIu16, min_speed_kmh_x10);
     (void)httpd_resp_sendstr_chunk(p_req,
         "<p><label>Minimum speed to earn credits (km/h &times; 10)</label>"
         "<input type=\"number\" name=\"min_speed_to_increment_time_kmh_x10\" value=\"");
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
 
-    /* reward_counter_s — displayed in hh:mm:ss format */
+    /* ---- Registered Devices section ---- */
+    uint8_t dev_count = device_reg_count_get();
+    uint8_t rider_idx = device_reg_current_rider_get();
+
+    (void)httpd_resp_sendstr_chunk(p_req, "<h3 style=\"margin-top:1.4em\">Registered Devices</h3>"
+                                          "<table style=\"width:100%;border-collapse:collapse\">"
+                                          "<tr><th>Nickname</th><th>MAC</th><th>Counter</th>"
+                                          "<th>Enabled</th><th>Rider</th><th>Remove</th></tr>");
+
+    for (uint8_t dev_i = 0U; dev_i < dev_count; dev_i++)
     {
-        uint32_t rc_h = reward_ctr / 3600U;
-        uint32_t rc_m = (reward_ctr % 3600U) / 60U;
-        uint32_t rc_s = reward_ctr % 60U;
-        /* Allocate a small buffer on the stack — fits any uint32 hours value. */
-        char     rc_str[20];
-        snprintf(rc_str, sizeof(rc_str), "%02" PRIu32 ":%02" PRIu32 ":%02" PRIu32, rc_h, rc_m,
+        device_reg_entry_t entry;
+        if (ESP_OK != device_reg_entry_get(dev_i, &entry))
+        {
+            continue;
+        }
+
+        /* Format MAC. */
+        char mac_str[18];
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", entry.mac[0],
+            entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5]);
+
+        /* Format counter as h:mm:ss. */
+        char     ctr_str[20];
+        uint32_t rc_h = entry.counter_s / 3600U;
+        uint32_t rc_m = (entry.counter_s % 3600U) / 60U;
+        uint32_t rc_s = entry.counter_s % 60U;
+        snprintf(ctr_str, sizeof(ctr_str), "%" PRIu32 ":%02" PRIu32 ":%02" PRIu32, rc_h, rc_m,
             rc_s);
-        (void)httpd_resp_sendstr_chunk(p_req,
-            "<p><label>Reward Counter (hh:mm:ss)</label>"
-            "<input type=\"text\" name=\"reward_counter_s\" value=\"");
-        (void)httpd_resp_sendstr_chunk(p_req, rc_str);
-        (void)httpd_resp_sendstr_chunk(p_req,
-            "\" placeholder=\"hh:mm:ss\" maxlength=\"8\""
-            " oninput=\"var d=this.value.replace(/\\D/g,'').slice(0,6);"
-            "if(d.length>4)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4);"
-            "else if(d.length>2)this.value=d.slice(0,2)+':'+d.slice(2);"
-            "else this.value=d;\"></p>");
+
+        /* Row open + nickname input. */
+        char row_open[256];
+        snprintf(row_open, sizeof(row_open),
+            "<tr><td><input type=\"text\" name=\"dev_%u_nickname\" maxlength=\"15\" value=\"",
+            (unsigned)dev_i);
+        (void)httpd_resp_sendstr_chunk(p_req, row_open);
+        http_srv_html_attr_encode(entry.nickname, enc, sizeof(enc));
+        (void)httpd_resp_sendstr_chunk(p_req, enc);
+        (void)httpd_resp_sendstr_chunk(p_req, "\"></td>");
+
+        /* MAC (read-only). */
+        char mac_cell[64];
+        snprintf(mac_cell, sizeof(mac_cell), "<td><span>%s</span></td>", mac_str);
+        (void)httpd_resp_sendstr_chunk(p_req, mac_cell);
+
+        /* Counter input. */
+        char ctr_cell[128];
+        snprintf(ctr_cell, sizeof(ctr_cell),
+            "<td><input type=\"text\" name=\"dev_%u_counter\""
+            " placeholder=\"0:00:00\" value=\"%s\" maxlength=\"10\"></td>",
+            (unsigned)dev_i, ctr_str);
+        (void)httpd_resp_sendstr_chunk(p_req, ctr_cell);
+
+        /* Enabled checkbox. */
+        char en_cell[128];
+        snprintf(en_cell, sizeof(en_cell),
+            "<td><input type=\"checkbox\" name=\"dev_%u_enabled\" value=\"1\"%s></td>",
+            (unsigned)dev_i, entry.b_enabled ? " checked" : "");
+        (void)httpd_resp_sendstr_chunk(p_req, en_cell);
+
+        /* Rider radio. */
+        char rider_cell[128];
+        snprintf(rider_cell, sizeof(rider_cell),
+            "<td><input type=\"radio\" name=\"current_rider\" value=\"%u\"%s></td>",
+            (unsigned)dev_i, (rider_idx == dev_i) ? " checked" : "");
+        (void)httpd_resp_sendstr_chunk(p_req, rider_cell);
+
+        /* Remove button. */
+        char rm_cell[128];
+        snprintf(rm_cell, sizeof(rm_cell),
+            "<td><button type=\"submit\" name=\"dev_%u_remove\" value=\"1\">"
+            "Remove</button></td></tr>",
+            (unsigned)dev_i);
+        (void)httpd_resp_sendstr_chunk(p_req, rm_cell);
     }
+
+    (void)httpd_resp_sendstr_chunk(p_req, "</table>");
+
+    /* No Rider radio option. */
+    {
+        char no_rider[128];
+        snprintf(no_rider, sizeof(no_rider),
+            "<p><label>Current Rider: No rider&nbsp;"
+            "<input type=\"radio\" name=\"current_rider\" value=\"255\"%s></label></p>",
+            (DEVICE_REG_NO_RIDER == rider_idx) ? " checked" : "");
+        (void)httpd_resp_sendstr_chunk(p_req, no_rider);
+    }
+
+    /* Add Device sub-form. */
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<h4 style=\"margin-top:1em\">Add Device</h4>"
+        "<p><label>MAC Address</label>"
+        "<input type=\"text\" name=\"new_dev_mac\""
+        " placeholder=\"AA:BB:CC:DD:EE:FF\" maxlength=\"17\"></p>"
+        "<p><label>Nickname</label>"
+        "<input type=\"text\" name=\"new_dev_nickname\" maxlength=\"15\"></p>"
+        "<p><button type=\"submit\" name=\"action\" value=\"add_device\">"
+        "Add Device</button></p>");
 
     /* ---- Footer ---- */
     static const char sc_footer[] =
@@ -619,61 +699,193 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
         }
     }
 
-    /* reward_counter_s — parsed from hh:mm:ss text field */
-    char rc_str[20];
-    if (ESP_OK == http_srv_form_field_get(body, "reward_counter_s", rc_str, sizeof(rc_str)))
+    /* ---- Device Registry fields ---- */
+
+    /* current_rider */
     {
-        /* Expect at least one ':' separating h from mm:ss. */
-        char * colon1 = strchr(rc_str, ':');
-        char * colon2 = colon1 ? strchr(colon1 + 1, ':') : NULL;
-
-        if ((NULL == colon1) || (NULL == colon2) || (strchr(colon2 + 1, ':') != NULL))
+        char rider_str[8];
+        if (ESP_OK == http_srv_form_field_get(body, "current_rider", rider_str, sizeof(rider_str)))
         {
-            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                "reward_counter_s must be in hh:mm:ss format");
-            return ESP_FAIL;
+            char *        endptr;
+            unsigned long rider_val = strtoul(rider_str, &endptr, 10);
+            if ('\0' == *endptr)
+            {
+                uint8_t rider_idx = (rider_val >= (unsigned long)DEVICE_REG_NO_RIDER) ?
+                                        DEVICE_REG_NO_RIDER :
+                                        (uint8_t)rider_val;
+                if ((DEVICE_REG_NO_RIDER != rider_idx) && (rider_idx >= device_reg_count_get()))
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Invalid rider index");
+                    return ESP_FAIL;
+                }
+                (void)device_reg_current_rider_set(rider_idx);
+            }
         }
+    }
 
-        *colon1          = '\0';
-        *colon2          = '\0';
-        const char * p_h = rc_str;
-        const char * p_m = colon1 + 1;
-        const char * p_s = colon2 + 1;
+    /* Per-device fields (nickname, enabled, counter, remove). */
+    {
+        uint8_t dev_count = device_reg_count_get();
+        for (uint8_t dev_i = 0U; dev_i < dev_count; dev_i++)
+        {
+            /* dev_N_remove */
+            char rm_key[20];
+            snprintf(rm_key, sizeof(rm_key), "dev_%u_remove", (unsigned)dev_i);
+            char rm_val[4];
+            if (ESP_OK == http_srv_form_field_get(body, rm_key, rm_val, sizeof(rm_val)))
+            {
+                if (0 == strcmp(rm_val, "1"))
+                {
+                    (void)device_reg_entry_remove(dev_i);
+                    /* Indices shift after removal — stop processing and let the redirect
+                     * re-render the updated form. */
+                    break;
+                }
+            }
 
-        char *        endptr;
-        unsigned long h = strtoul(p_h, &endptr, 10);
-        if ('\0' != *endptr)
-        {
-            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                "reward_counter_s: hours must be a valid integer");
-            return ESP_FAIL;
-        }
-        unsigned long m = strtoul(p_m, &endptr, 10);
-        if (('\0' != *endptr) || (m > 59UL))
-        {
-            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                "reward_counter_s: minutes must be 0-59");
-            return ESP_FAIL;
-        }
-        unsigned long s = strtoul(p_s, &endptr, 10);
-        if (('\0' != *endptr) || (s > 59UL))
-        {
-            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                "reward_counter_s: seconds must be 0-59");
-            return ESP_FAIL;
-        }
+            /* dev_N_nickname */
+            char nick_key[24];
+            snprintf(nick_key, sizeof(nick_key), "dev_%u_nickname", (unsigned)dev_i);
+            char nick_val[DEVICE_REG_NICKNAME_MAX_LEN + 2U];
+            if (ESP_OK == http_srv_form_field_get(body, nick_key, nick_val, sizeof(nick_val)))
+            {
+                if ('\0' != nick_val[0])
+                {
+                    device_reg_entry_t existing;
+                    if ((ESP_OK == device_reg_entry_get(dev_i, &existing)) &&
+                        (0 != strcmp(existing.nickname, nick_val)))
+                    {
+                        if (strlen(nick_val) > DEVICE_REG_NICKNAME_MAX_LEN)
+                        {
+                            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                                "Nickname exceeds maximum length");
+                            return ESP_FAIL;
+                        }
+                        (void)device_reg_entry_nickname_set(dev_i, nick_val);
+                    }
+                }
+            }
 
-        /* Overflow check: UINT32_MAX / 3600 ≈ 1193046. */
-        if (h > 1193046UL)
-        {
-            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                "reward_counter_s: value exceeds maximum representable seconds");
-            return ESP_FAIL;
-        }
+            /* dev_N_enabled — checkbox: present = true, absent = false */
+            {
+                char en_key[24];
+                snprintf(en_key, sizeof(en_key), "dev_%u_enabled", (unsigned)dev_i);
+                char en_val[4];
+                bool b_enabled =
+                    (ESP_OK == http_srv_form_field_get(body, en_key, en_val, sizeof(en_val)));
+                (void)device_reg_entry_enabled_set(dev_i, b_enabled);
+            }
 
-        uint32_t total_s = (uint32_t)(h * 3600UL + m * 60UL + s);
-        /* Apply immediately — also saves to NVS; do NOT call config_mngr_reward_counter_s_set. */
-        (void)time_ctr_counter_set(total_s);
+            /* dev_N_counter (h:mm:ss format) */
+            char ctr_key[24];
+            snprintf(ctr_key, sizeof(ctr_key), "dev_%u_counter", (unsigned)dev_i);
+            char ctr_val[20];
+            if (ESP_OK == http_srv_form_field_get(body, ctr_key, ctr_val, sizeof(ctr_val)))
+            {
+                char * colon1 = strchr(ctr_val, ':');
+                char * colon2 = colon1 ? strchr(colon1 + 1, ':') : NULL;
+                if ((NULL == colon1) || (NULL == colon2) || (NULL != strchr(colon2 + 1, ':')))
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                        "Counter must be in h:mm:ss format");
+                    return ESP_FAIL;
+                }
+                *colon1           = '\0';
+                *colon2           = '\0';
+                const char *  p_h = ctr_val;
+                const char *  p_m = colon1 + 1;
+                const char *  p_s = colon2 + 1;
+                char *        endptr;
+                unsigned long h = strtoul(p_h, &endptr, 10);
+                if ('\0' != *endptr)
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                        "Counter hours must be a valid integer");
+                    return ESP_FAIL;
+                }
+                unsigned long m = strtoul(p_m, &endptr, 10);
+                if (('\0' != *endptr) || (m > 59UL))
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                        "Counter minutes must be 0-59");
+                    return ESP_FAIL;
+                }
+                unsigned long s = strtoul(p_s, &endptr, 10);
+                if (('\0' != *endptr) || (s > 59UL))
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                        "Counter seconds must be 0-59");
+                    return ESP_FAIL;
+                }
+                if (h > 1193046UL)
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                        "Counter value exceeds maximum representable seconds");
+                    return ESP_FAIL;
+                }
+                uint32_t total_s = (uint32_t)(h * 3600UL + m * 60UL + s);
+                (void)device_reg_entry_counter_set(dev_i, total_s);
+                /* Also update via time_ctr if this is the current rider. */
+                if (dev_i == device_reg_current_rider_get())
+                {
+                    (void)time_ctr_counter_set(total_s);
+                }
+            }
+        }
+    }
+
+    /* Add Device action */
+    {
+        char action_val[24];
+        if (ESP_OK == http_srv_form_field_get(body, "action", action_val, sizeof(action_val)))
+        {
+            if (0 == strcmp(action_val, "add_device"))
+            {
+                char mac_str[20];
+                char nick_str[DEVICE_REG_NICKNAME_MAX_LEN + 2U];
+                if ((ESP_OK !=
+                        http_srv_form_field_get(body, "new_dev_mac", mac_str, sizeof(mac_str))) ||
+                    (ESP_OK != http_srv_form_field_get(body, "new_dev_nickname", nick_str,
+                                   sizeof(nick_str))))
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                        "MAC and nickname are required to add a device");
+                    return ESP_FAIL;
+                }
+
+                uint8_t   mac_bytes[6];
+                esp_err_t mac_ret = parse_mac_address(mac_str, mac_bytes);
+                if (ESP_OK != mac_ret)
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Invalid MAC address format");
+                    return ESP_FAIL;
+                }
+
+                esp_err_t add_ret = device_reg_entry_add(mac_bytes, nick_str);
+                if (ESP_ERR_NO_MEM == add_ret)
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                        "Registry full — max 4 devices");
+                    return ESP_FAIL;
+                }
+                if (ESP_ERR_INVALID_STATE == add_ret)
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Device already registered");
+                    return ESP_FAIL;
+                }
+                if (ESP_ERR_INVALID_ARG == add_ret)
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                        "Invalid nickname (empty or too long)");
+                    return ESP_FAIL;
+                }
+                if (ESP_OK != add_ret)
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Failed to add device");
+                    return ESP_FAIL;
+                }
+            }
+        }
     }
 
     /* Notify all modules that have cached config values. */
@@ -721,6 +933,75 @@ esp_err_t http_srv_config_reset_handler(httpd_req_t * p_req)
     httpd_resp_set_hdr(p_req, "Location", "/config?reset=1");
     httpd_resp_send(p_req, NULL, 0);
     return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+//==================================================================================================
+// Private Functions
+//==================================================================================================
+
+/**
+ * \brief Parse a MAC address string into a 6-byte array.
+ *
+ * Accepts colon-separated format \c "AA:BB:CC:DD:EE:FF" (17 characters) and
+ * packed hex format \c "AABBCCDDEEFF" (12 hex characters without separators).
+ *
+ * \param[in]  p_str      Null-terminated input string.
+ * \param[out] p_mac_out  Caller-supplied 6-byte array to fill.
+ *
+ * \return \c ESP_OK on success.
+ * \return \c ESP_ERR_INVALID_ARG on any malformed input.
+ */
+static esp_err_t parse_mac_address(const char * p_str, uint8_t * p_mac_out)
+{
+    if ((NULL == p_str) || (NULL == p_mac_out))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t len = strlen(p_str);
+
+    if (17U == len)
+    {
+        /* Colon-separated: "AA:BB:CC:DD:EE:FF" */
+        for (int i = 0; i < 6; i++)
+        {
+            char          tok[3] = { p_str[i * 3], p_str[i * 3 + 1], '\0' };
+            char *        endptr;
+            unsigned long byte_val = strtoul(tok, &endptr, 16);
+            if (('\0' != *endptr) || (byte_val > 0xFFUL))
+            {
+                return ESP_ERR_INVALID_ARG;
+            }
+            /* Verify separator except after last byte. */
+            if ((i < 5) && (':' != p_str[i * 3 + 2]))
+            {
+                return ESP_ERR_INVALID_ARG;
+            }
+            p_mac_out[i] = (uint8_t)byte_val;
+        }
+        return ESP_OK;
+    }
+
+    if (12U == len)
+    {
+        /* No-colon format: "AABBCCDDEEFF" */
+        for (int i = 0; i < 6; i++)
+        {
+            char          tok[3] = { p_str[i * 2], p_str[i * 2 + 1], '\0' };
+            char *        endptr;
+            unsigned long byte_val = strtoul(tok, &endptr, 16);
+            if (('\0' != *endptr) || (byte_val > 0xFFUL))
+            {
+                return ESP_ERR_INVALID_ARG;
+            }
+            p_mac_out[i] = (uint8_t)byte_val;
+        }
+        return ESP_OK;
+    }
+
+    return ESP_ERR_INVALID_ARG;
 }
 
 //--------------------------------------------------------------------------------------------------

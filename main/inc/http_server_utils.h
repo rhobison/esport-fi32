@@ -34,7 +34,7 @@ extern "C"
 #define HTTP_SRV_POST_BODY_MAX_LEN (2048U)
 
 /** Heap buffer size for JSON and CSV response bodies. */
-#define HTTP_SRV_JSON_BUF_LEN (4096U)
+#define HTTP_SRV_JSON_BUF_LEN (8192U)
 
 /** Number of calendar days in the daily-aggregates window. */
 #define HTTP_SRV_DAILY_WINDOW_DAYS (31U)

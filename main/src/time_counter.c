@@ -21,9 +21,9 @@
 #include "freertos/FreeRTOS.h"
 
 #include "config_manager.h"
+#include "device_registry.h"
 #include "event_ids.h"
 #include "pulse_input.h"
-#include "wifi_manager.h"
 
 //==================================================================================================
 // Internal Constants/Macros/Datatypes
@@ -32,20 +32,18 @@
 /** Periodic decrement interval in microseconds (1 second). */
 #define TIME_CTR_TICK_PERIOD_US (1000000U)
 
-/** Interval in seconds between periodic NVS saves of the counter value. */
-#define TIME_CTR_SAVE_INTERVAL_S (60U)
-
 /**
  * \brief Internal state of the time counter state machine.
  */
 typedef enum time_ctr_state_tag
 {
-    /** No active session; reward AP off; counter is 0. */
-    TIME_CTR_STATE_IDLE      = 0,
-    /** Session confirmed open; threshold timer running; counter accumulating from pulses. */
-    TIME_CTR_STATE_SESSION   = 1,
-    /** Session has been active for soft_ap_start_threshold_s; reward AP on; tick decrementing. */
-    TIME_CTR_STATE_AP_ACTIVE = 2,
+    /** No active session; threshold timer not running. */
+    TIME_CTR_STATE_IDLE    = 0,
+    /** Session confirmed open; threshold timer running; credits accumulating in g_session_credits.
+     */
+    TIME_CTR_STATE_SESSION = 1,
+    /** Session active past threshold; pulses add directly to rider's device_reg counter. */
+    TIME_CTR_STATE_EARNING = 2,
 } time_ctr_state_t;
 
 //==================================================================================================
@@ -55,23 +53,26 @@ typedef enum time_ctr_state_tag
 /** Module log tag. */
 static const char * gp_tag = "time_counter";
 
-/** Time credit counter value in seconds; protected by #g_spinlock. */
-static uint32_t g_counter_s = 0U;
-
-/** Spinlock that protects #g_counter_s and #g_state against concurrent task access. */
+/** Spinlock protecting #g_state and #g_session_credits against concurrent task access. */
 static portMUX_TYPE g_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
-/** Current reward AP state machine state; protected by #g_spinlock. */
+/** Current state machine state; protected by #g_spinlock. */
 static time_ctr_state_t g_state = TIME_CTR_STATE_IDLE;
 
-/** Handle for the 1-second periodic decrement timer (created in #time_ctr_init). */
+/**
+ * \brief Session credit accumulator; accumulates pulse credits during TIME_CTR_STATE_SESSION.
+ *
+ * Flushed to the current rider's device_reg counter when the threshold fires.
+ * Reset to zero if the session closes before the threshold fires.
+ * Protected by #g_spinlock.
+ */
+static volatile uint32_t g_session_credits = 0U;
+
+/** Handle for the 1-second periodic tick timer (created in #time_ctr_init, runs permanently). */
 static esp_timer_handle_t gp_tick_timer = NULL;
 
 /** Handle for the one-shot threshold timer that fires after #soft_ap_start_threshold_s seconds. */
 static esp_timer_handle_t gp_threshold_timer = NULL;
-
-/** Handle for the periodic NVS save timer created in #time_ctr_init. */
-static esp_timer_handle_t g_save_timer = NULL;
 
 /**
  * \brief Cached runtime configuration values; loaded at #time_ctr_init() and
@@ -79,25 +80,8 @@ static esp_timer_handle_t g_save_timer = NULL;
  *
  * Protected by #g_spinlock where accessed from the tick callback.
  */
-static uint16_t g_cfg_spp        = 1U; /**< Seconds credited per accepted pulse. */
-static uint16_t g_cfg_min_spd    = 0U; /**< Minimum speed gate in km/h x10 (0 = disabled). */
-static uint16_t g_cfg_dec_kbps   = 0U; /**< AP throughput threshold for decrement pause. */
-static uint16_t g_cfg_idle_tmo_s = 0U; /**< Ticks of low throughput before pause activates. */
-
-/**
- * \brief Tracks how many consecutive ticks throughput was below threshold.
- *
- * Protected by #g_spinlock; reset to 0 when AP is disabled or throughput
- * rises above threshold.
- */
-static uint16_t g_below_ticks = 0U;
-
-/**
- * \brief True when the countdown is currently paused due to low AP traffic;
- * protected by #g_spinlock.
- */
-static volatile bool g_paused = false;
-
+static uint16_t g_cfg_seconds_per_pulse = 1U; /**< Seconds credited per accepted pulse. */
+static uint16_t g_cfg_min_speed_kmh_x10 = 0U; /**< Minimum speed gate in km/h x10 (0 = disabled). */
 
 //==================================================================================================
 // Internal Function Prototypes
@@ -113,20 +97,16 @@ static void time_ctr_config_changed_handler(void * p_handler_arg, esp_event_base
     int32_t event_id, void * p_event_data);
 static void time_ctr_threshold_cb(void * p_arg);
 static void time_ctr_tick_cb(void * p_arg);
-static void time_ctr_save_cb(void * p_arg);
 
 //==================================================================================================
 // Public Functions
 //==================================================================================================
 
-/** Load (or reload) all cached config values; call within or outside spinlock — all are plain
- * reads. */
+/** Load (or reload) cached config values; call within or outside spinlock — all are plain reads. */
 static void time_ctr_config_cache_refresh(void)
 {
-    g_cfg_spp        = config_mngr_seconds_per_pulse_get();
-    g_cfg_min_spd    = config_mngr_min_speed_to_increment_time_kmh_x10_get();
-    g_cfg_dec_kbps   = config_mngr_soft_ap_dec_threshold_kbps_get();
-    g_cfg_idle_tmo_s = config_mngr_soft_ap_idle_throughput_timeout_s_get();
+    g_cfg_seconds_per_pulse = config_mngr_seconds_per_pulse_get();
+    g_cfg_min_speed_kmh_x10 = config_mngr_min_speed_to_increment_time_kmh_x10_get();
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -198,60 +178,33 @@ esp_err_t time_ctr_init(void)
         return ret;
     }
 
-    /* Boot restore: if a non-zero counter was persisted before the last shutdown, resume. */
-    uint32_t restored_val = config_mngr_reward_counter_s_get();
-    if (restored_val > 0U)
+    /* One-time migration from Feature 3 global counter to per-device counter. */
+    uint32_t legacy_val = config_mngr_reward_counter_s_get();
+    if (legacy_val > 0U)
     {
-        portENTER_CRITICAL(&g_spinlock);
-        g_counter_s = restored_val;
-        g_state     = TIME_CTR_STATE_AP_ACTIVE;
-        portEXIT_CRITICAL(&g_spinlock);
-
-        esp_err_t ap_ret = wifi_mngr_reward_ap_set(true);
-        if (ESP_OK != ap_ret)
+        uint8_t rider = device_reg_current_rider_get();
+        if ((DEVICE_REG_NO_RIDER != rider) && (0U == device_reg_entry_counter_get(rider)))
         {
-            ESP_LOGW(gp_tag, "boot restore: wifi_mngr_reward_ap_set(true) failed: %s",
-                esp_err_to_name(ap_ret));
+            esp_err_t set_ret = device_reg_entry_counter_set(rider, legacy_val);
+            if (ESP_OK == set_ret)
+            {
+                (void)config_mngr_reward_counter_s_set(0U);
+                ESP_LOGI(gp_tag,
+                    "init: migrated legacy counter %" PRIu32 "s to rider %u; legacy key cleared",
+                    legacy_val, (unsigned)rider);
+            }
         }
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
-        esp_err_t tmr_ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
-        if (ESP_OK != tmr_ret)
-        {
-            ESP_LOGE(gp_tag, "boot restore: esp_timer_start_periodic failed: %s",
-                esp_err_to_name(tmr_ret));
-        }
-        ESP_LOGI(gp_tag, "boot restore: counter = %" PRIu32 " s, reward AP on", restored_val);
     }
 
-    /* Create and start the periodic NVS save timer (always active regardless of state). */
-    const esp_timer_create_args_t save_args = {
-        .callback        = time_ctr_save_cb,
-        .arg             = NULL,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name            = "time_ctr_save",
-    };
-    ret = esp_timer_create(&save_args, &g_save_timer);
+    /* Start the tick timer permanently — runs for the lifetime of the firmware. */
+    ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
     if (ESP_OK != ret)
     {
-        ESP_LOGE(gp_tag, "esp_timer_create (save) failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ret = esp_timer_start_periodic(g_save_timer, (uint64_t)TIME_CTR_SAVE_INTERVAL_S * 1000000ULL);
-    if (ESP_OK != ret)
-    {
-        ESP_LOGE(gp_tag, "esp_timer_start_periodic (save) failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(gp_tag, "esp_timer_start_periodic (tick) failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    if (restored_val > 0U)
-    {
-        ESP_LOGI(gp_tag, "init complete — counter %" PRIu32 " s restored, reward AP on",
-            restored_val);
-    }
-    else
-    {
-        ESP_LOGI(gp_tag, "init complete — counter 0, reward AP off");
-    }
+    ESP_LOGI(gp_tag, "init complete — tick timer started permanently");
     return ESP_OK;
 }
 
@@ -259,20 +212,12 @@ esp_err_t time_ctr_init(void)
 
 uint32_t time_ctr_get(void)
 {
-    portENTER_CRITICAL(&g_spinlock);
-    uint32_t counter_snapshot = g_counter_s;
-    portEXIT_CRITICAL(&g_spinlock);
-    return counter_snapshot;
-}
-
-//--------------------------------------------------------------------------------------------------
-
-bool time_ctr_is_paused(void)
-{
-    portENTER_CRITICAL(&g_spinlock);
-    bool b_paused = g_paused;
-    portEXIT_CRITICAL(&g_spinlock);
-    return b_paused;
+    uint8_t rider = device_reg_current_rider_get();
+    if (DEVICE_REG_NO_RIDER == rider)
+    {
+        return 0U;
+    }
+    return device_reg_entry_counter_get(rider);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -286,75 +231,20 @@ uint32_t time_ctr_current_speed_x10_get(void)
 
 esp_err_t time_ctr_counter_set(uint32_t val)
 {
-    portENTER_CRITICAL(&g_spinlock);
-    g_counter_s                      = val;
-    time_ctr_state_t const old_state = g_state;
-    portEXIT_CRITICAL(&g_spinlock);
-
-    /* Persist to NVS immediately. */
-    (void)config_mngr_reward_counter_s_set(val);
-
-    if ((val > 0U) && (TIME_CTR_STATE_IDLE == old_state))
+    uint8_t rider = device_reg_current_rider_get();
+    if (DEVICE_REG_NO_RIDER == rider)
     {
-        /* Transition IDLE → AP_ACTIVE. */
-        portENTER_CRITICAL(&g_spinlock);
-        g_state       = TIME_CTR_STATE_AP_ACTIVE;
-        g_below_ticks = 0U;
-        g_paused      = false;
-        portEXIT_CRITICAL(&g_spinlock);
-
-        esp_err_t ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
-        if (ESP_OK != ret)
-        {
-            ESP_LOGE(gp_tag, "time_ctr_counter_set: esp_timer_start_periodic failed: %s",
-                esp_err_to_name(ret));
-        }
-
-        ret = wifi_mngr_reward_ap_set(true);
-        if (ESP_OK != ret)
-        {
-            ESP_LOGW(gp_tag, "time_ctr_counter_set: wifi_mngr_reward_ap_set(true) failed: %s",
-                esp_err_to_name(ret));
-        }
-
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
-        ESP_LOGI(gp_tag, "IDLE->AP_ACTIVE via counter_set: val = %" PRIu32, val);
-    }
-    else if ((0U == val) && (TIME_CTR_STATE_AP_ACTIVE == old_state))
-    {
-        /* Transition AP_ACTIVE → IDLE immediately — do not wait for the next tick. */
-        (void)esp_timer_stop(gp_tick_timer);
-
-        portENTER_CRITICAL(&g_spinlock);
-        g_state       = TIME_CTR_STATE_IDLE;
-        g_below_ticks = 0U;
-        g_paused      = false;
-        portEXIT_CRITICAL(&g_spinlock);
-
-        esp_err_t ret = wifi_mngr_reward_ap_set(false);
-        if (ESP_OK != ret)
-        {
-            ESP_LOGW(gp_tag, "time_ctr_counter_set: wifi_mngr_reward_ap_set(false) failed: %s",
-                esp_err_to_name(ret));
-        }
-
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_OFF, NULL, 0U, 0U);
-        ESP_LOGI(gp_tag, "AP_ACTIVE->IDLE via counter_set: val=0, reward AP off");
-    }
-    else if ((0U == val) && (TIME_CTR_STATE_SESSION == old_state))
-    {
-        /* Cancel the pending threshold timer and return to IDLE. */
-        (void)esp_timer_stop(gp_threshold_timer);
-
-        portENTER_CRITICAL(&g_spinlock);
-        g_state = TIME_CTR_STATE_IDLE;
-        portEXIT_CRITICAL(&g_spinlock);
-
-        ESP_LOGI(gp_tag, "SESSION->IDLE via counter_set: val=0, threshold timer cancelled");
+        ESP_LOGW(gp_tag, "time_ctr_counter_set: no rider selected");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &val, sizeof(val), 0U);
-    return ESP_OK;
+    esp_err_t ret = device_reg_entry_counter_set(rider, val);
+    if (ESP_OK == ret)
+    {
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &val, sizeof(val),
+            0U);
+    }
+    return ret;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -366,12 +256,12 @@ esp_err_t time_ctr_counter_set(uint32_t val)
 /**
  * \brief ESP event loop handler called for each accepted debounced pulse.
  *
- * Adds #config_mngr_seconds_per_pulse_get() credits to #g_counter_s when the
- * state machine is in #TIME_CTR_STATE_SESSION or #TIME_CTR_STATE_AP_ACTIVE
- * and the rider's instantaneous speed meets or exceeds
- * #config_mngr_min_speed_to_increment_time_kmh_x10_get().  When the gate
- * threshold is 0 all pulses earn credits (original behaviour).  Pulses in
- * #TIME_CTR_STATE_IDLE are ignored.
+ * In #TIME_CTR_STATE_SESSION: accumulates credits in #g_session_credits.
+ * In #TIME_CTR_STATE_EARNING: adds credits directly to the current rider's
+ * device_reg counter.  Pulses in #TIME_CTR_STATE_IDLE are ignored.
+ *
+ * The speed gate (#config_mngr_min_speed_to_increment_time_kmh_x10_get) is
+ * applied in both earning states.
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
@@ -386,26 +276,41 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
     (void)event_id;
     (void)p_event_data;
 
-    /* Instantaneous speed (km/h × 10) — single source of truth in pulse_input. */
+    /* Speed gate (outside spinlock — single-source read from pulse_input). */
     uint32_t speed_x10 = pulse_in_speed_kmh_x10_get();
 
     portENTER_CRITICAL(&g_spinlock);
-    bool b_credit = (TIME_CTR_STATE_SESSION == g_state) || (TIME_CTR_STATE_AP_ACTIVE == g_state);
-    /* Apply speed gate: skip credit if threshold > 0 and speed is below it. */
-    if (b_credit && (g_cfg_min_spd > 0U) && (speed_x10 < (uint32_t)g_cfg_min_spd))
+    bool b_credit = (TIME_CTR_STATE_SESSION == g_state) || (TIME_CTR_STATE_EARNING == g_state);
+    if (b_credit && (g_cfg_min_speed_kmh_x10 > 0U) &&
+        (speed_x10 < (uint32_t)g_cfg_min_speed_kmh_x10))
     {
         b_credit = false;
     }
-    if (b_credit)
+
+    time_ctr_state_t state_snap = g_state;
+    uint16_t         spp        = g_cfg_seconds_per_pulse;
+
+    if (b_credit && (TIME_CTR_STATE_SESSION == state_snap))
     {
-        g_counter_s += (uint32_t)g_cfg_spp;
+        g_session_credits += (uint32_t)spp;
     }
-    uint32_t counter_snapshot = g_counter_s;
+
+    /* Read rider index under spinlock so we can call device_reg outside. */
     portEXIT_CRITICAL(&g_spinlock);
 
-    /* Always post COUNTER_CHANGED so consumers stay up to date. */
-    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_snapshot,
-        sizeof(counter_snapshot), 0U);
+    if (b_credit && (TIME_CTR_STATE_EARNING == state_snap))
+    {
+        uint8_t rider = device_reg_current_rider_get();
+        if (DEVICE_REG_NO_RIDER != rider)
+        {
+            uint32_t current = device_reg_entry_counter_get(rider);
+            (void)device_reg_entry_counter_set(rider, current + (uint32_t)spp);
+        }
+    }
+
+    uint32_t counter_val = time_ctr_get();
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_val,
+        sizeof(counter_val), 0U);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -414,10 +319,8 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
  * \brief ESP event loop handler called when an exercise session is confirmed open.
  *
  * Transitions from #TIME_CTR_STATE_IDLE to #TIME_CTR_STATE_SESSION and starts
- * the one-shot threshold timer for #config_mngr_soft_ap_start_threshold_s_get()
- * seconds.  When the timer fires, the reward AP is enabled.  Events received
- * in non-IDLE states are silently ignored (AP already active or session already
- * in progress).
+ * the one-shot threshold timer.  Events received in non-IDLE states are
+ * silently ignored.
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
@@ -436,13 +339,14 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
     bool b_start = (TIME_CTR_STATE_IDLE == g_state);
     if (b_start)
     {
-        g_state = TIME_CTR_STATE_SESSION;
+        g_state           = TIME_CTR_STATE_SESSION;
+        g_session_credits = 0U;
     }
     portEXIT_CRITICAL(&g_spinlock);
 
     if (!b_start)
     {
-        return; /* Already in SESSION or AP_ACTIVE — ignore. */
+        return; /* Already in SESSION or EARNING — ignore. */
     }
 
     uint32_t threshold    = config_mngr_soft_ap_start_threshold_s_get();
@@ -450,7 +354,7 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
 
     if (0U == threshold)
     {
-        /* Threshold of zero means enable AP immediately. */
+        /* Threshold of zero means transition to EARNING immediately. */
         time_ctr_threshold_cb(NULL);
     }
     else
@@ -460,12 +364,13 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
         {
             ESP_LOGE(gp_tag, "esp_timer_start_once failed: %s", esp_err_to_name(ret));
             portENTER_CRITICAL(&g_spinlock);
-            g_state = TIME_CTR_STATE_IDLE;
+            g_state           = TIME_CTR_STATE_IDLE;
+            g_session_credits = 0U;
             portEXIT_CRITICAL(&g_spinlock);
         }
     }
 
-    ESP_LOGI(gp_tag, "IDLE→SESSION: session opened, AP threshold %" PRIu32 "s", threshold);
+    ESP_LOGI(gp_tag, "IDLE->SESSION: session opened, threshold %" PRIu32 "s", threshold);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -473,10 +378,11 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
 /**
  * \brief ESP event loop handler called when an exercise session closes.
  *
- * If in #TIME_CTR_STATE_SESSION (before the threshold timer has fired), the
- * threshold timer is cancelled, the counter is reset to zero, and the state
- * returns to #TIME_CTR_STATE_IDLE.  If in #TIME_CTR_STATE_AP_ACTIVE the close
- * is silently ignored — the reward AP continues until the counter drains.
+ * In #TIME_CTR_STATE_SESSION: cancels the threshold timer, resets
+ * #g_session_credits to zero, and returns to #TIME_CTR_STATE_IDLE (no credits
+ * are applied).  In #TIME_CTR_STATE_EARNING: transitions to IDLE and posts
+ * #ESPORT_EVENT_REWARD_AP_OFF (device counters continue to drain normally via
+ * the always-running tick timer).
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
@@ -492,21 +398,26 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     (void)p_event_data;
 
     portENTER_CRITICAL(&g_spinlock);
-    bool b_cancel = (TIME_CTR_STATE_SESSION == g_state);
-    if (b_cancel)
+    time_ctr_state_t prev_state = g_state;
+    if ((TIME_CTR_STATE_SESSION == prev_state) || (TIME_CTR_STATE_EARNING == prev_state))
     {
-        g_state     = TIME_CTR_STATE_IDLE;
-        g_counter_s = 0U;
+        g_state           = TIME_CTR_STATE_IDLE;
+        g_session_credits = 0U;
     }
     portEXIT_CRITICAL(&g_spinlock);
 
-    if (b_cancel)
+    if (TIME_CTR_STATE_SESSION == prev_state)
     {
         (void)esp_timer_stop(gp_threshold_timer);
         uint32_t zero = 0U;
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &zero, sizeof(zero),
             0U);
-        ESP_LOGI(gp_tag, "SESSION→IDLE: session closed before threshold, counter reset");
+        ESP_LOGI(gp_tag, "SESSION->IDLE: session closed before threshold, credits discarded");
+    }
+    else if (TIME_CTR_STATE_EARNING == prev_state)
+    {
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_OFF, NULL, 0U, 0U);
+        ESP_LOGI(gp_tag, "EARNING->IDLE: session closed, device counters continue");
     }
 }
 
@@ -515,11 +426,11 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
 /**
  * \brief One-shot timer callback that fires after #soft_ap_start_threshold_s seconds.
  *
- * Transitions from #TIME_CTR_STATE_SESSION to #TIME_CTR_STATE_AP_ACTIVE, starts
- * the 1-second decrement timer, and enables the reward AP via
- * #wifi_mngr_reward_ap_set().  If the state is no longer SESSION when the timer
- * fires (e.g. session closed just before expiry), the callback exits without
- * activating the AP.
+ * Transitions from #TIME_CTR_STATE_SESSION to #TIME_CTR_STATE_EARNING, flushes
+ * the accumulated session credits to the current rider's device_reg counter,
+ * and posts #ESPORT_EVENT_REWARD_AP_ON.  If the state is no longer SESSION when
+ * the timer fires (e.g. session closed just before expiry), the callback exits
+ * without awarding credits.
  *
  * \param[in] p_arg  Unused context pointer passed by the timer subsystem.
  */
@@ -528,12 +439,13 @@ static void time_ctr_threshold_cb(void * p_arg)
     (void)p_arg;
 
     portENTER_CRITICAL(&g_spinlock);
-    bool b_activate = (TIME_CTR_STATE_SESSION == g_state);
+    bool     b_activate     = (TIME_CTR_STATE_SESSION == g_state);
+    uint32_t credits_to_add = g_session_credits;
     if (b_activate)
     {
-        g_state = TIME_CTR_STATE_AP_ACTIVE;
+        g_state           = TIME_CTR_STATE_EARNING;
+        g_session_credits = 0U;
     }
-    uint32_t counter_snapshot = g_counter_s;
     portEXIT_CRITICAL(&g_spinlock);
 
     if (!b_activate)
@@ -541,20 +453,20 @@ static void time_ctr_threshold_cb(void * p_arg)
         return; /* State changed before timer fired — session likely closed. */
     }
 
-    esp_err_t ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
-    if (ESP_OK != ret)
+    /* Flush accumulated session credits to the current rider's counter. */
+    if (credits_to_add > 0U)
     {
-        ESP_LOGE(gp_tag, "esp_timer_start_periodic failed: %s", esp_err_to_name(ret));
-    }
-
-    ret = wifi_mngr_reward_ap_set(true);
-    if (ESP_OK != ret)
-    {
-        ESP_LOGW(gp_tag, "wifi_mngr_reward_ap_set(true) failed: %s", esp_err_to_name(ret));
+        uint8_t rider = device_reg_current_rider_get();
+        if (DEVICE_REG_NO_RIDER != rider)
+        {
+            uint32_t current = device_reg_entry_counter_get(rider);
+            (void)device_reg_entry_counter_set(rider, current + credits_to_add);
+        }
     }
 
     (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
-    ESP_LOGI(gp_tag, "SESSION→AP_ACTIVE: reward AP on, counter = %" PRIu32 " s", counter_snapshot);
+    ESP_LOGI(gp_tag, "SESSION->EARNING: threshold fired, %" PRIu32 " session credits flushed",
+        credits_to_add);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -579,119 +491,30 @@ static void time_ctr_config_changed_handler(void * p_handler_arg, esp_event_base
     time_ctr_config_cache_refresh();
     portEXIT_CRITICAL(&g_spinlock);
 
-    ESP_LOGI(gp_tag, "config reloaded: spp=%u min_spd=%u dec_kbps=%u idle_tmo=%u",
-        (unsigned)g_cfg_spp, (unsigned)g_cfg_min_spd, (unsigned)g_cfg_dec_kbps,
-        (unsigned)g_cfg_idle_tmo_s);
+    ESP_LOGI(gp_tag, "config reloaded: seconds_per_pulse=%u min_speed_kmh_x10=%u",
+        (unsigned)g_cfg_seconds_per_pulse, (unsigned)g_cfg_min_speed_kmh_x10);
 }
 
 //--------------------------------------------------------------------------------------------------
 
 /**
- * \brief 1-second periodic timer callback that applies the traffic-gated decrement.
+ * \brief 1-second periodic timer callback that delegates per-device decrement to device_registry.
  *
- * Evaluates the sliding-window pause logic using current reward AP throughput
- * from #wifi_mngr_reward_ap_throughput_kbps() against the configured threshold
- * and timeout.  Decrements #g_counter_s only when throughput is above threshold
- * or the below-threshold streak has not yet reached the timeout.  When the
- * counter reaches zero, stops the tick timer and transitions back to
- * #TIME_CTR_STATE_IDLE.
+ * Called unconditionally every second for the lifetime of the firmware.
+ * Calls #device_reg_tick() which applies the per-device sliding-window traffic
+ * gate and decrements eligible device counters.
  *
- * \\param[in] p_arg  Unused context pointer passed by the timer subsystem.
+ * \param[in] p_arg  Unused context pointer passed by the timer subsystem.
  */
 static void time_ctr_tick_cb(void * p_arg)
 {
     (void)p_arg;
 
-    /* Read throughput outside the spinlock (this call may sleep). */
-    uint32_t throughput = wifi_mngr_reward_ap_throughput_kbps();
+    (void)device_reg_tick();
 
-    portENTER_CRITICAL(&g_spinlock);
-
-    uint16_t threshold      = g_cfg_dec_kbps;
-    uint16_t timeout        = g_cfg_idle_tmo_s;
-    bool     b_reached_zero = false;
-
-    if (throughput > (uint32_t)threshold)
-    {
-        /* Traffic above threshold — reset streak and clear pause. */
-        g_below_ticks = 0U;
-        g_paused      = false;
-    }
-    else
-    {
-        /* Traffic at or below threshold — advance streak counter. */
-        if (g_below_ticks < UINT16_MAX)
-        {
-            g_below_ticks++;
-        }
-        /* Pause if streak >= timeout, or immediately when timeout == 0. */
-        if ((0U == timeout) || (g_below_ticks >= (uint32_t)timeout))
-        {
-            g_paused = true;
-        }
-    }
-
-    /* Decrement whenever not paused (covers: above-threshold AND grace-period ticks). */
-    if (!g_paused)
-    {
-        if (0U < g_counter_s)
-        {
-            g_counter_s--;
-        }
-        b_reached_zero = (0U == g_counter_s);
-        if (b_reached_zero)
-        {
-            g_state = TIME_CTR_STATE_IDLE;
-        }
-    }
-
-    uint32_t counter_snapshot = g_counter_s;
-
-    portEXIT_CRITICAL(&g_spinlock);
-
-    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_snapshot,
-        sizeof(counter_snapshot), 0U);
-
-    if (b_reached_zero)
-    {
-        (void)esp_timer_stop(gp_tick_timer);
-
-        /* Reset sliding-window state when leaving AP_ACTIVE. */
-        portENTER_CRITICAL(&g_spinlock);
-        g_below_ticks = 0U;
-        g_paused      = false;
-        portEXIT_CRITICAL(&g_spinlock);
-
-        /* Persist zero counter before disabling the AP (spec §5.5). */
-        (void)config_mngr_reward_counter_s_set(0U);
-
-        esp_err_t ret = wifi_mngr_reward_ap_set(false);
-        if (ESP_OK != ret)
-        {
-            ESP_LOGW(gp_tag, "wifi_mngr_reward_ap_set(false) failed: %s", esp_err_to_name(ret));
-        }
-
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_OFF, NULL, 0U, 0U);
-        ESP_LOGI(gp_tag, "AP_ACTIVE->IDLE: reward AP off, counter reached 0");
-    }
+    uint32_t counter_val = time_ctr_get();
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_val,
+        sizeof(counter_val), 0U);
 }
 
 //--------------------------------------------------------------------------------------------------
-
-/**
- * \brief Periodic timer callback that saves the current counter to NVS.
- *
- * Fired every #TIME_CTR_SAVE_INTERVAL_S seconds.  Reads the current counter
- * value and persists it via #config_mngr_reward_counter_s_set().
- *
- * \param[in] p_arg  Unused context pointer.
- */
-static void time_ctr_save_cb(void * p_arg)
-{
-    (void)p_arg;
-    (void)config_mngr_reward_counter_s_set(time_ctr_get());
-}
-
-//--------------------------------------------------------------------------------------------------
-
-/*** end of file ***/
