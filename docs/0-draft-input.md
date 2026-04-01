@@ -44,3 +44,4 @@ The buzzer will be used in the following situations:
     - During the session, if the speed is below the minimum threshold, a short beep of 2 units should be issued every second while the speed is below the threshold. The beep should stop completely if the speed reaches 0.
     - When a session is closed, 3 short beeps of 4 units should be issued in sequence, with 1 unit off between them: (4 units ON, 1 unit OFF, 4 units ON, 1 unit OFF, 4 units ON).
     - All beep timings should be defined as a constant (#define, for example) according to the number of beep units.
+There must be a way to disable the buzzer in the `/config` page. -- planned.

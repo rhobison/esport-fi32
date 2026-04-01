@@ -1021,6 +1021,12 @@ This section tracks incremental improvements beyond the base specification.  Eac
 | 4.4   | 4       | HTTP Server: Config Device Management          | `http_server_config.c`                                                 |
 | 4.5   | 4       | HTTP Server: API & Dashboard Per-Device Status | `http_server_api.c`, `http_server_dashboard.c`                         |
 | 4.6   | 4       | Spec Update                                    | `docs/1-specification.md`                                              |
+| 5.1   | 5       | Buzzer Core Module                             | `buzzer.c/h`, `Kconfig.projbuild`, `CMakeLists.txt`                    |
+| 5.2   | 5       | Config Manager — buzzer enable param           | `config_manager.c/h`                                                   |
+| 5.3   | 5       | Session Tracker — buzzer integration           | `session_tracker.c`                                                    |
+| 5.4   | 5       | Time Counter — speed-low beep integration      | `time_counter.c`                                                       |
+| 5.5   | 5       | HTTP Server — buzzer enable config field       | `http_server_config.c`                                                 |
+| 5.6   | 5       | Spec Update                                    | `docs/1-specification.md`                                              |
 
 ---
 
@@ -2339,3 +2345,431 @@ Update the specification to reflect all architectural changes introduced by Feat
 - [ ] §6.3 JSON schema includes `"current_rider_idx"` and `"devices"` array with full element schema (including `"throughput_kbps"` and `"paused"`); `"countdown_paused"` is absent from the top-level schema.
 - [ ] §8 includes the `esport_dev` NVS namespace.
 - [ ] Module Prefix Table includes `device_registry`.
+
+---
+
+## Feature 5 — Buzzer Feedback
+
+### Overview
+
+An active buzzer connected to a configurable GPIO pin provides audio feedback for key session events and real-time speed warnings.  The buzzer is driven by a time-base of 50 ms per unit ("beep unit"); all timing constants are expressed as multiples of this unit and defined as `#define` macros.
+
+The buzzer module is **passive**: other modules call its API directly to trigger patterns.  `session_tracker.c` calls `buzzer_pattern_play()` at state-transition points; `time_counter.c` calls `buzzer_speed_low_update()` from its 1-second tick callback.  No new event IDs are added to `event_ids.h`.
+
+Audio feedback can be disabled at runtime via an NVS-backed boolean exposed on the web configuration page.  When disabled every buzzer API call is a no-op and the GPIO remains LOW.
+
+### Hardware
+
+| Item | Details |
+| ---- | ------- |
+| Buzzer type | Active (ON/OFF duty control) |
+| Control GPIO | `CONFIG_ESPORT_BUZZER_GPIO` (Kconfig, default GPIO 11) |
+| Active level | HIGH = on, LOW = off |
+
+### New Configuration Parameter
+
+| Parameter | Type | NVS key | Default | Valid range |
+| --------- | ---- | ------- | ------- | ----------- |
+| `buzzer_enabled` | `bool` (stored as `uint8`) | `"buzzer_en"` | `true` | true / false |
+
+### Beep Patterns
+
+One beep unit = `BUZZER_UNIT_MS` = 50 ms.
+
+| Pattern ID constant | Trigger | Sequence |
+| ------------------- | ------- | -------- |
+| `BUZZER_PATTERN_SESSION_QUALIFYING` | ST_IDLE → ST_QUALIFYING | 10 units ON (`BUZZER_PATTERN_QUALIFYING_UNITS`) |
+| `BUZZER_PATTERN_SESSION_QUALIFIED` | ST_QUALIFYING → ST_ACTIVE | 20 units ON (`BUZZER_PATTERN_QUALIFIED_UNITS`) |
+| `BUZZER_PATTERN_SESSION_CLOSED` | ST_ACTIVE → ST_IDLE (idle timeout) | 4 ON, 1 OFF, 4 ON, 1 OFF, 4 ON (`BUZZER_PATTERN_CLOSED_BEEP_UNITS`, `BUZZER_PATTERN_CLOSED_GAP_UNITS`, `BUZZER_PATTERN_CLOSED_BEEP_COUNT`) |
+| `BUZZER_PATTERN_SPEED_LOW` | Per tick: EARNING state, 0 < speed < min\_speed | 2 units ON (`BUZZER_PATTERN_SPEED_LOW_UNITS`) |
+
+### Interruption Rule
+
+A new call to `buzzer_pattern_play()` while a pattern is playing **immediately interrupts** the current pattern and starts the new one.  The sole exception is `buzzer_speed_low_update(false)`: it stops a `SPEED_LOW` pattern in progress but does **not** interrupt any other pattern (e.g. a `SESSION_CLOSED` pattern triggered at the same tick must not be cut short).
+
+### Speed-Low Beep Firing Condition
+
+Called from `time_ctr_tick_cb()` once per second.  `buzzer_speed_low_update(true)` is passed when **all** of the following hold; `buzzer_speed_low_update(false)` otherwise:
+
+1. `g_state == TIME_CTR_STATE_EARNING` (session confirmed and active)
+2. `config_mngr_min_speed_to_increment_time_kmh_x10_get() > 0` (speed gate is enabled)
+3. `time_ctr_current_speed_x10_get() > 0` (rider is moving — not stopped)
+4. `time_ctr_current_speed_x10_get() < min_speed_to_increment_time_kmh_x10` (speed below threshold)
+
+The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE when no session was confirmed) does **not** play `BUZZER_PATTERN_SESSION_CLOSED` — only a confirmed session that closes plays that pattern.
+
+---
+
+### Phase 5.1 — Buzzer Core Module
+
+**Goal:** Implement the buzzer driver: GPIO initialisation, non-blocking pattern engine driven by an `esp_timer` at 50 ms intervals, all four predefined patterns, interrupt-on-new-pattern semantics, and the speed-low update helper.
+
+**Inputs**
+- `docs/0-draft-input.md` §Improvements item 5
+- `main/Kconfig.projbuild`, `main/CMakeLists.txt` (existing)
+- `config_manager` (existing — `config_mngr_buzzer_enabled_get()` is added in Phase 5.2; `buzzer_init()` is called after Phase 5.2's `config_mngr_init()`)
+
+**Tasks**
+
+1. **`main/Kconfig.projbuild`** — add inside the existing `menu "esport-fi32 Configuration"`:
+   ```
+   config ESPORT_BUZZER_GPIO
+       int "Buzzer GPIO number"
+       range 0 21
+       default 11
+   ```
+
+2. **Create `main/inc/buzzer.h`** (public header):
+   - Define timing and pattern constants (each replacement value in parentheses):
+     ```c
+     #define BUZZER_UNIT_MS                   (50U)
+     #define BUZZER_PATTERN_QUALIFYING_UNITS  (10U)
+     #define BUZZER_PATTERN_QUALIFIED_UNITS   (20U)
+     #define BUZZER_PATTERN_CLOSED_BEEP_UNITS (4U)
+     #define BUZZER_PATTERN_CLOSED_GAP_UNITS  (1U)
+     #define BUZZER_PATTERN_CLOSED_BEEP_COUNT (3U)
+     #define BUZZER_PATTERN_SPEED_LOW_UNITS   (2U)
+     ```
+   - Define the pattern ID enum:
+     ```c
+     typedef enum buzzer_pattern_id_tag {
+         BUZZER_PATTERN_SESSION_QUALIFYING = 0,
+         BUZZER_PATTERN_SESSION_QUALIFIED  = 1,
+         BUZZER_PATTERN_SESSION_CLOSED     = 2,
+         BUZZER_PATTERN_SPEED_LOW          = 3,
+     } buzzer_pattern_id_t;
+     ```
+   - Declare the public API with full Doxygen (`\\` tags, direction annotations, blank line before `\\return`):
+     ```c
+     esp_err_t buzzer_init(void);
+     void      buzzer_pattern_play(buzzer_pattern_id_t pattern);
+     void      buzzer_stop(void);
+     void      buzzer_speed_low_update(bool b_active);
+     ```
+   - Use `hhtemplate` structure; guard with `BUZZER_H`.
+
+3. **Create `main/src/buzzer.c`**:
+   - Declare `static const char *gp_tag = "buzzer"`.
+   - Define the internal step type and pattern tables as file-scope `const` data:
+     ```c
+     typedef struct buzzer_step_tag {
+         uint8_t on_units;
+         uint8_t off_units;
+     } buzzer_step_t;
+
+     static const buzzer_step_t s_pat_qualifying[1] = { { BUZZER_PATTERN_QUALIFYING_UNITS, 0U } };
+     static const buzzer_step_t s_pat_qualified[1]  = { { BUZZER_PATTERN_QUALIFIED_UNITS,  0U } };
+     static const buzzer_step_t s_pat_closed[3]     = {
+         { BUZZER_PATTERN_CLOSED_BEEP_UNITS, BUZZER_PATTERN_CLOSED_GAP_UNITS },
+         { BUZZER_PATTERN_CLOSED_BEEP_UNITS, BUZZER_PATTERN_CLOSED_GAP_UNITS },
+         { BUZZER_PATTERN_CLOSED_BEEP_UNITS, 0U },
+     };
+     static const buzzer_step_t s_pat_speed_low[1]  = { { BUZZER_PATTERN_SPEED_LOW_UNITS,  0U } };
+     ```
+   - Declare playback state protected by `static portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED`:
+     ```c
+     static const buzzer_step_t *gp_steps        = NULL;
+     static uint8_t              g_step_count     = 0U;
+     static uint8_t              g_step_idx       = 0U;
+     static uint8_t              g_remaining_on   = 0U;
+     static uint8_t              g_remaining_off  = 0U;
+
+     typedef enum bz_phase_tag { BZ_PHASE_ON = 0, BZ_PHASE_OFF = 1, BZ_PHASE_IDLE = 2 } bz_phase_t;
+     static bz_phase_t           g_phase          = BZ_PHASE_IDLE;
+     static buzzer_pattern_id_t  g_current_pat_id = BUZZER_PATTERN_SESSION_QUALIFYING;
+     ```
+   - Declare `static esp_timer_handle_t g_timer = NULL`.
+   - Internal static helpers (declare in the Internal Function Prototypes section):
+     - `buzzer_pattern_start_locked(const buzzer_step_t *p_steps, uint8_t count, buzzer_pattern_id_t id)` — loads state under the already-held spinlock, sets GPIO HIGH for the first ON unit, starts the 50 ms timer if it is not already running.
+     - `buzzer_gpio_set(uint8_t level)` — thin wrapper around `gpio_set_level(CONFIG_ESPORT_BUZZER_GPIO, level)`.
+
+   - **Timer callback `buzzer_timer_cb(void *arg)`** — runs in the `esp_timer` task; must be O(1), no heap, no NVS:
+     - Enter spinlock.
+     - If `g_phase == BZ_PHASE_IDLE`: exit spinlock, stop timer (or let it auto-stop if one-shot), return.
+     - If `g_phase == BZ_PHASE_ON`:
+       - Decrement `g_remaining_on`.
+       - If `g_remaining_on == 0`:
+         - If `gp_steps[g_step_idx].off_units > 0`: set GPIO LOW, `g_remaining_off = gp_steps[g_step_idx].off_units`, `g_phase = BZ_PHASE_OFF`.
+         - Else: advance step via `buzzer_advance_step_locked()` (see below).
+     - If `g_phase == BZ_PHASE_OFF`:
+       - Decrement `g_remaining_off`.
+       - If `g_remaining_off == 0`: advance step via `buzzer_advance_step_locked()`.
+     - Exit spinlock.  (GPIO toggle is done inside the spinlock via `buzzer_gpio_set`; safe on single-core ESP32-C6.)
+
+   - Internal helper `buzzer_advance_step_locked()` — runs under spinlock:
+     - Increment `g_step_idx`.
+     - If `g_step_idx >= g_step_count`: set GPIO LOW, `g_phase = BZ_PHASE_IDLE` (pattern done).
+     - Else: set GPIO HIGH, `g_remaining_on = gp_steps[g_step_idx].on_units`, `g_phase = BZ_PHASE_ON`.
+
+   - **`buzzer_init()`**:
+     - Configure `CONFIG_ESPORT_BUZZER_GPIO` as `GPIO_MODE_OUTPUT`, no pull, initial level LOW.
+     - Create a **periodic** `esp_timer` with period `BUZZER_UNIT_MS * 1000` µs (50 000 µs) and callback `buzzer_timer_cb`. **Do not start it yet** — it is started by `buzzer_pattern_start_locked()` when needed.  Starting a periodic timer and never stopping it would waste CPU; starting it only when a pattern is playing and stopping it from the callback when `g_phase == BZ_PHASE_IDLE` is efficient.  Alternative: use a **one-shot** timer that re-arms itself from the callback while `g_phase != BZ_PHASE_IDLE` — either approach is acceptable; choose whichever is simpler in the implementation.
+     - Log `ESP_LOGI(gp_tag, "buzzer init: GPIO %d", CONFIG_ESPORT_BUZZER_GPIO)`.
+     - Return `ESP_OK`.
+
+   - **`buzzer_pattern_play(buzzer_pattern_id_t pattern)`**:
+     - Call `config_mngr_buzzer_enabled_get()`; if `false`, return immediately (no-op).
+     - Select the step array and count from `pattern` using a `switch` statement.  On unknown value, log `ESP_LOGW` and return.
+     - Enter spinlock; call `buzzer_pattern_start_locked(p_steps, count, pattern)`; exit spinlock.
+
+   - **`buzzer_stop()`**:
+     - Enter spinlock; set `g_phase = BZ_PHASE_IDLE`; exit spinlock.
+     - Call `buzzer_gpio_set(0U)`.
+     - Call `esp_timer_stop(g_timer)` (ignore return value — timer may already be stopped).
+
+   - **`buzzer_speed_low_update(bool b_active)`**:
+     - If `b_active == true`: call `buzzer_pattern_play(BUZZER_PATTERN_SPEED_LOW)` (interrupt semantics already provided by `buzzer_pattern_play`).
+     - If `b_active == false`: enter spinlock; check if `g_current_pat_id == BUZZER_PATTERN_SPEED_LOW` and `g_phase != BZ_PHASE_IDLE`; exit spinlock.  If both, call `buzzer_stop()`.  Otherwise, do nothing.
+
+   - Follow `cctemplate` structure with all section separators and `/*** end of file ***/` footer.
+
+4. **`main/CMakeLists.txt`** — add `"src/buzzer.c"` to the `SRCS` list.
+
+5. **`main/src/main.c`** — add `buzzer_init()` after the `config_mngr_init()` call in the boot sequence, guarded by `ESP_ERROR_CHECK`.  Add `#include "buzzer.h"`.
+
+**Notes**
+
+> The timer callback runs in the `esp_timer` task.  All operations in the callback are O(1), spinlock-guarded, GPIO-only — no heap allocation, no NVS access, no logging.
+
+> `buzzer_pattern_play()` is called from the app event loop task (session tracker FreeRTOS timer callbacks, time counter ESP timer callback).  `buzzer_speed_low_update()` is called from `time_ctr_tick_cb()` (ESP timer task).  Both are O(1) with spinlock protection and safe from any task context.
+
+> `buzzer_gpio_set()` calls `gpio_set_level()` from inside the spinlock.  On the single-core ESP32-C6, `portENTER_CRITICAL` / `portEXIT_CRITICAL` disable interrupts; `gpio_set_level` is an O(1) register write and completes within the critical section window.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING)`: GPIO HIGH for 500 ms (10 × 50 ms), then LOW.
+- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED)`: GPIO HIGH for 1 000 ms (20 × 50 ms), then LOW.
+- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED)`: sequence HIGH 200 ms, LOW 50 ms, HIGH 200 ms, LOW 50 ms, HIGH 200 ms, then LOW.
+- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SPEED_LOW)`: GPIO HIGH for 100 ms (2 × 50 ms), then LOW.
+- [ ] Calling `buzzer_pattern_play()` while a pattern is in progress immediately starts the new pattern (old pattern truncated).
+- [ ] `buzzer_stop()` sets GPIO LOW immediately and halts the timer.
+- [ ] `buzzer_speed_low_update(false)` while `SPEED_LOW` is playing stops it (GPIO LOW).
+- [ ] `buzzer_speed_low_update(false)` while `SESSION_CLOSED` is playing does **not** interrupt it.
+- [ ] After `buzzer_init()`, GPIO is LOW.
+- [ ] No heap allocation or NVS access occurs in the timer callback.
+
+---
+
+### Phase 5.2 — Config Manager: Buzzer Enable Parameter
+
+**Goal:** Add getter and setter for `buzzer_enabled` to the configuration manager.
+
+**Inputs**
+- `main/inc/config_manager.h`, `main/src/config_manager.c` (existing)
+
+**Tasks**
+
+1. **`main/src/config_manager.c`** — add:
+   - `#define CONFIG_MNGR_KEY_BUZZER_ENABLED  ("buzzer_en")`
+   - `#define CONFIG_MNGR_DEF_BUZZER_ENABLED  ((uint8_t)1U)`
+   - In `config_mngr_init()`: read `"buzzer_en"`; if `ESP_ERR_NVS_NOT_FOUND`, write the default `1`.
+
+2. **`main/inc/config_manager.h`** — declare (with complete Doxygen, following existing style):
+   ```c
+   bool      config_mngr_buzzer_enabled_get(void);
+   esp_err_t config_mngr_buzzer_enabled_set(bool b_enabled);
+   ```
+
+3. **`main/src/config_manager.c`** — implement:
+   - `config_mngr_buzzer_enabled_get()`: read NVS key `"buzzer_en"` as `uint8_t`; return `(val != 0U)`; on any NVS error return `true` (fail-safe: buzzer on by default).
+   - `config_mngr_buzzer_enabled_set(b_enabled)`: write `(uint8_t)(b_enabled ? 1U : 0U)` to NVS key `"buzzer_en"`; commit; return `ESP_OK` or the NVS error code.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `config_mngr_buzzer_enabled_set(false)` returns `ESP_OK`; subsequent `config_mngr_buzzer_enabled_get()` returns `false`.
+- [ ] `config_mngr_buzzer_enabled_set(true)` returns `ESP_OK`; subsequent `config_mngr_buzzer_enabled_get()` returns `true`.
+- [ ] Value survives `config_mngr_init()` reinit (simulated reboot).
+- [ ] Factory default `true` applied when NVS key is absent.
+
+---
+
+### Phase 5.3 — Session Tracker: Buzzer Integration
+
+**Goal:** Call `buzzer_pattern_play()` at the three session state-transition points inside `session_tracker.c`.
+
+**Inputs**
+- `main/src/session_tracker.c` (existing)
+- `buzzer.h / buzzer.c` (Phase 5.1 output)
+
+**Tasks**
+
+1. **`main/src/session_tracker.c`** — add `#include "buzzer.h"`.
+
+2. **ST_IDLE → ST_QUALIFYING** (pulse event handler, inside the `s_state == ST_IDLE` branch) — after `s_state` is set to `ST_QUALIFYING`:
+   ```c
+   buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING);
+   ```
+
+3. **ST_QUALIFYING → ST_ACTIVE** (qualify timer callback, after `s_state = ST_ACTIVE`):
+   ```c
+   buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED);
+   ```
+
+4. **ST_ACTIVE → ST_IDLE idle-timeout close** (idle timer callback, `s_state == ST_ACTIVE` branch, before the state reset and `ESPORT_EVENT_SESSION_CLOSED` post):
+   ```c
+   buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED);
+   ```
+
+5. **ST_QUALIFYING → ST_IDLE gap-reset** (idle timer callback, `s_state == ST_QUALIFYING` branch): **do not add any buzzer call here** — a session that was never confirmed is not considered "closed".
+
+**Notes**
+
+> `buzzer_pattern_play()` is called from FreeRTOS software timer callbacks (`s_qualify_timer`, `s_idle_timer`).  These run in the FreeRTOS timer daemon task.  The buzzer call is O(1) with a spinlock and safe from any task.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] First pulse (ST_IDLE → ST_QUALIFYING): `BUZZER_PATTERN_SESSION_QUALIFYING` plays (500 ms HIGH).
+- [ ] Qualify timer fires (ST_QUALIFYING → ST_ACTIVE): `BUZZER_PATTERN_SESSION_QUALIFIED` plays (1 000 ms HIGH).
+- [ ] Idle timer fires in ST_ACTIVE: `BUZZER_PATTERN_SESSION_CLOSED` plays (3 × short beep sequence).
+- [ ] Idle timer fires in ST_QUALIFYING (qualifying gap, no session confirmed): no buzzer pattern plays.
+- [ ] With `buzzer_enabled == false`, none of the above patterns produce any GPIO toggle.
+
+---
+
+### Phase 5.4 — Time Counter: Speed-Low Beep Integration
+
+**Goal:** Call `buzzer_speed_low_update()` from the time counter 1-second tick callback, gated on `TIME_CTR_STATE_EARNING` state and the speed-to-threshold comparison.
+
+**Inputs**
+- `main/src/time_counter.c` (existing, Feature 4.3 output)
+- `buzzer.h / buzzer.c` (Phase 5.1 output)
+- `config_manager` (Phase 5.2 output)
+
+**Tasks**
+
+1. **`main/src/time_counter.c`** — add `#include "buzzer.h"`.
+
+2. In `time_ctr_tick_cb()`, after the unconditional `device_reg_tick()` call, add the speed-low beep computation:
+   ```c
+   bool b_speed_low = false;
+   if (g_state == TIME_CTR_STATE_EARNING)
+   {
+       uint32_t speed_x10 = time_ctr_current_speed_x10_get();
+       uint16_t min_spd   = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+       b_speed_low = (min_spd > 0U) && (speed_x10 > 0U) && (speed_x10 < (uint32_t)min_spd);
+   }
+   buzzer_speed_low_update(b_speed_low);
+   ```
+   When `g_state` is `TIME_CTR_STATE_IDLE` or `TIME_CTR_STATE_SESSION`, `b_speed_low` remains `false` and `buzzer_speed_low_update(false)` is called, which cleanly stops any residual speed-low beep.
+
+3. In the `ESPORT_EVENT_SESSION_CLOSED` handler inside `time_counter.c` (where the state returns to `TIME_CTR_STATE_IDLE`), add an explicit `buzzer_speed_low_update(false)` call to stop the speed-low beep immediately without waiting for the next tick.
+
+**Notes**
+
+> `buzzer_speed_low_update()` is called from `time_ctr_tick_cb()`, which is an `esp_timer` callback (runs in the `esp_timer` task).  The call is O(1) with a spinlock and safe in this context.
+
+> If `min_speed_to_increment_time_kmh_x10 == 0` (Feature 2 speed gate is disabled), `b_speed_low` is always `false`, and no speed-low beep is ever produced.  This is the correct behaviour: when there is no minimum speed requirement, "below threshold" has no meaning.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] In `TIME_CTR_STATE_EARNING` with `min_speed > 0`, `0 < speed < min_speed`: `buzzer_speed_low_update(true)` is called each tick; GPIO pulses HIGH for 100 ms once per second.
+- [ ] Speed reaches 0: `buzzer_speed_low_update(false)` is called; active speed-low beep stops immediately.
+- [ ] Speed reaches or exceeds `min_speed`: `buzzer_speed_low_update(false)` is called; no more speed-low beeps.
+- [ ] `min_speed == 0` (gate disabled): `buzzer_speed_low_update(false)` is called every tick; no speed-low beep is ever produced.
+- [ ] State is `TIME_CTR_STATE_IDLE` or `TIME_CTR_STATE_SESSION`: `buzzer_speed_low_update(false)` is called; no speed-low beep produced.
+- [ ] `ESPORT_EVENT_SESSION_CLOSED` received: `buzzer_speed_low_update(false)` is called immediately; speed-low beep stops without waiting for the next tick.
+- [ ] With `buzzer_enabled == false`: no GPIO toggle occurs regardless of speed or state.
+
+---
+
+### Phase 5.5 — HTTP Server: Buzzer Enable Config Field
+
+**Goal:** Add a "Buzzer feedback" enable/disable checkbox to the `/config` web page.
+
+**Inputs**
+- `main/src/http_server_config.c` (existing)
+- `config_manager` (Phase 5.2 output)
+
+**Tasks**
+
+1. **GET `/config` handler** — add one field to the config form HTML:
+   - Label: "Buzzer feedback"
+   - `<input type="checkbox" name="buzzer_enabled" value="1"` with `checked` attribute if `config_mngr_buzzer_enabled_get()` returns `true`.
+   - Unchecked checkboxes are absent from the POST body in standard HTML form encoding; the POST handler must treat absence as `false`.
+
+2. **POST `/config` handler** — add parsing for `buzzer_enabled`:
+   - Call `http_srv_form_field_get(p_body, "buzzer_enabled", val_buf, sizeof(val_buf))`.
+   - If the field is present (returns `ESP_OK`): `b_enabled = true`.
+   - If the field is absent (returns `ESP_ERR_NOT_FOUND`): `b_enabled = false`.
+   - Call `config_mngr_buzzer_enabled_set(b_enabled)`.
+   - This field requires no range validation — the checkbox is a binary `true`/`false`.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `GET /config` renders the "Buzzer feedback" checkbox; it is checked when `buzzer_enabled` is `true`, unchecked when `false`.
+- [ ] Submitting with the checkbox checked saves `true`; subsequent `GET /config` shows it checked.
+- [ ] Submitting with the checkbox unchecked saves `false`; subsequent `GET /config` shows it unchecked.
+- [ ] After disabling via the config page, no buzzer patterns play (verified by monitoring GPIO behaviour).
+- [ ] After re-enabling via the config page, buzzer patterns resume normally.
+- [ ] The change persists across a simulated reboot (`config_mngr_init()` reinit).
+
+---
+
+### Phase 5.6 — Spec Update: `docs/1-specification.md`
+
+**Goal:** Update the firmware specification to document the buzzer hardware component, the buzzer module, the new configuration parameter, and all affected sections.
+
+**Inputs**
+- `docs/0-draft-input.md` §Improvements item 5
+- `docs/1-specification.md` (current)
+- All Phase 5.1–5.5 outputs
+
+**Tasks**
+
+1. **§2 Hardware** — add a row to the hardware table:
+   - Item: "Buzzer", Details: "Active buzzer on `CONFIG_ESPORT_BUZZER_GPIO` (Kconfig, default GPIO 11). Active HIGH. Driven by the Buzzer Module."
+
+2. **§3 Configuration Parameters table** — add one row:
+   - `buzzer_enabled` — `bool` (stored as `uint8`), NVS key `"buzzer_en"`, default `true`, range `true / false`, description: "Enable/disable all buzzer audio feedback.  Configurable via the web configuration page.  When `false`, all `buzzer_*` calls are no-ops and the GPIO stays LOW."
+
+3. **§4 Component/File Layout** — add `buzzer.h` to the `inc/` listing and `buzzer.c` to the `src/` listing.
+
+4. **New §5.X — Buzzer Module** — insert after §5.9 (Device Registry):
+   - **File:** `buzzer.c` / `buzzer.h`
+   - **Responsibilities:** GPIO output control; non-blocking pattern playback via `esp_timer` (50 ms period); four predefined beep patterns; interrupt-on-new-pattern semantics; speed-low update helper; runtime enable/disable via `config_mngr_buzzer_enabled_get()`.
+   - **Hardware:** `CONFIG_ESPORT_BUZZER_GPIO`, active HIGH.
+   - **Beep unit:** `BUZZER_UNIT_MS` = 50 ms.
+   - **Pattern table:** list all four patterns with their sequences (same table as the Overview above).
+   - **Public API** listing:
+     ```c
+     esp_err_t buzzer_init(void);
+     void      buzzer_pattern_play(buzzer_pattern_id_t pattern);
+     void      buzzer_stop(void);
+     void      buzzer_speed_low_update(bool b_active);
+     ```
+   - **Interruption rule:** a new `buzzer_pattern_play()` always interrupts the current pattern. `buzzer_speed_low_update(false)` only stops a `SPEED_LOW` pattern; it does not interrupt other patterns.
+   - **Thread safety note:** the `esp_timer` callback is O(1), spinlock-guarded, and does only GPIO writes. `buzzer_pattern_play()` and `buzzer_speed_low_update()` are safe to call from any task (app event loop, FreeRTOS timer daemon, `esp_timer` callback).
+
+5. **§5.6 Session Tracker** — add a note under the state-transition descriptions:
+   - ST_IDLE → ST_QUALIFYING: `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING)` (10 units, 500 ms).
+   - ST_QUALIFYING → ST_ACTIVE: `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED)` (20 units, 1 000 ms).
+   - ST_ACTIVE → ST_IDLE (idle timeout): `buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED)` (3 × 4-unit beeps).
+   - ST_QUALIFYING → ST_IDLE (qualifying gap): no buzzer call.
+
+6. **§5.5 Time Counter & Reward AP State Machine** — add a note to the tick callback description: `buzzer_speed_low_update(b_speed_low)` is called once per second; `b_speed_low` is `true` when `TIME_CTR_STATE_EARNING` is active, `min_speed > 0`, and `0 < current_speed < min_speed`.
+
+7. **§6.2 Configuration Page** — add "Buzzer feedback" to the field table: checkbox (`true`/`false`), description "Enable/disable all audio feedback from the buzzer".
+
+8. **§7.1 Boot Sequence** — add `buzzer_init()` to the boot sequence, called immediately after `config_mngr_init()`.
+
+9. **§8 NVS Layout — namespace `esport_cfg`** — add `"buzzer_en"` (`uint8`) to the key table.
+
+10. **Module Prefix Table** — add row: `buzzer` | `buzzer_` | `BUZZER_`.
+
+**Acceptance Criteria**
+
+- [ ] §2 Hardware table includes the buzzer row with GPIO default and active level.
+- [ ] §3 includes `buzzer_enabled` with correct type, NVS key, default, and description.
+- [ ] §4 file layout lists `buzzer.h` and `buzzer.c`.
+- [ ] New §5.X fully documents the Buzzer module (responsibilities, hardware, beep unit, all four patterns, public API, interruption rule, thread safety).
+- [ ] §5.6 Session Tracker notes document all three `buzzer_pattern_play()` call points and the no-call case.
+- [ ] §5.5 Time Counter tick description documents the `buzzer_speed_low_update()` call and its condition.
+- [ ] §6.2 Configuration Page field table includes "Buzzer feedback".
+- [ ] §7.1 Boot Sequence includes `buzzer_init()` after `config_mngr_init()`.
+- [ ] §8 includes `"buzzer_en"` (`uint8`) in the `esport_cfg` key table.
+- [ ] Module Prefix Table includes `buzzer` | `buzzer_` | `BUZZER_`.
