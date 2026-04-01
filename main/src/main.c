@@ -21,6 +21,7 @@
 #include "freertos/task.h"
 
 #include "config_manager.h"
+#include "device_registry.h"
 #include "event_ids.h"
 #include "http_server.h"
 #include "pulse_input.h"
@@ -83,6 +84,9 @@ void app_main(void)
 
     /* Step 2: Load runtime configuration from NVS; apply factory defaults. */
     ESP_ERROR_CHECK(config_mngr_init());
+
+    /* Step 2a: Initialise device registry before WiFi so the MAC filter is ready. */
+    ESP_ERROR_CHECK(device_reg_init());
 
     /* Step 3: Create the default event loop before any module that posts. */
     ESP_ERROR_CHECK(esp_event_loop_create_default());

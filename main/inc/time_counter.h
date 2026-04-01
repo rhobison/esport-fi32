@@ -2,28 +2,34 @@
  * \file
  * \brief Time counter and reward AP state machine public API.
  *
- * Maintains the exercise time counter (unit: seconds, minimum 0).
- * Listens for #ESPORT_EVENT_SESSION_OPENED and starts a one-shot timer for
- * \c soft_ap_start_threshold_s seconds.  When the timer fires the reward AP
- * is enabled and a 1-second periodic timer starts decrementing the counter.
+ * Maintains the exercise credit state machine.  Listens for
+ * #ESPORT_EVENT_SESSION_OPENED and starts a one-shot timer for
+ * \c soft_ap_start_threshold_s seconds.  When the timer fires the state
+ * transitions to EARNING and accumulated session credits are flushed to the
+ * current rider's #device_registry counter.
  *
  * While a session is open (#ESPORT_EVENT_SESSION_OPENED received), each
- * #ESPORT_EVENT_PULSE credits \c seconds_per_pulse seconds to the counter.
- * If the session closes (#ESPORT_EVENT_SESSION_CLOSED) before the threshold
- * timer fires, the threshold timer is cancelled and the counter resets to
- * zero.  If the AP is already active the session-close event is ignored and
- * the counter continues to drain.
+ * #ESPORT_EVENT_PULSE credits \c seconds_per_pulse seconds to a local
+ * accumulator (#g_session_credits).  Credits are flushed to the current
+ * rider's #device_registry counter when the threshold fires.  If the session
+ * closes (#ESPORT_EVENT_SESSION_CLOSED) before the threshold timer fires, the
+ * threshold timer is cancelled and the accumulator is reset to zero with no
+ * credits awarded.  Pulses in EARNING state add directly to the rider's
+ * #device_registry counter.
+ *
+ * The 1-second tick timer runs permanently from #time_ctr_init() and calls
+ * #device_reg_tick() unconditionally once per second.  Per-device counter
+ * decrement and the sliding-window traffic gate are handled entirely inside
+ * #device_reg_tick().
  *
  * State machine:
- *   - \b IDLE: no session, counter 0, reward AP off.
- *   - \b SESSION: session confirmed open; threshold timer running; pulses add
- *     credits.  Transitions to AP_ACTIVE when the timer fires, or back to
- *     IDLE when the session closes (counter reset).
- *   - \b AP_ACTIVE: reward AP on; pulses still add credits; 1-second tick
- *     decrements.  Transitions back to IDLE when counter reaches 0.
- *
- * The counter variable is protected by a spinlock against concurrent access
- * from the FreeRTOS timer callback and the ESP event loop callbacks.
+ *   - \b IDLE: no session open; threshold timer not running.
+ *   - \b SESSION: session confirmed open; threshold timer running; pulses
+ *     accumulate in #g_session_credits.  Transitions to EARNING when the
+ *     timer fires, or back to IDLE when the session closes (accumulator reset).
+ *   - \b EARNING: session has been active for \c soft_ap_start_threshold_s;
+ *     pulses add directly to the current rider's counter; device counters
+ *     decrement via #device_reg_tick() in tick callback.
  *
  * \date 2026-03-14
  */
@@ -54,34 +60,28 @@ extern "C"
 //==================================================================================================
 
 /**
- * \brief Initialise the time counter and register the pulse event handler.
+ * \brief Initialise the time counter and register event handlers.
  *
- * Registers a handler for #ESPORT_EVENT_PULSE on the default event loop
- * and creates the 1-second decrement timer (not started until the counter
- * first reaches the threshold).
+ * Registers handlers for #ESPORT_EVENT_PULSE, #ESPORT_EVENT_SESSION_OPENED,
+ * #ESPORT_EVENT_SESSION_CLOSED, and #ESPORT_EVENT_CONFIG_CHANGED.  Creates
+ * the 1-second tick timer and starts it immediately so that #device_reg_tick()
+ * is called every second for the lifetime of the firmware.
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
 esp_err_t time_ctr_init(void);
 
 /**
- * \brief Return the current time counter value in seconds.
+ * \brief Return the current rider's internet time counter in seconds.
+ *
+ * Delegates to #device_reg_entry_counter_get() for the index returned by
+ * #device_reg_current_rider_get().  Returns \c 0 when no rider is selected.
  *
  * Thread-safe: acquires and releases the internal spinlock.
  *
- * \return Current counter value in seconds (>= 0).
+ * \return Current rider counter value in seconds, or \c 0 when no rider is selected.
  */
 uint32_t time_ctr_get(void);
-
-/**
- * \brief Return whether the countdown is currently paused due to low AP traffic.
- *
- * Thread-safe: acquires and releases the internal spinlock.
- *
- * \return \c true if paused (below-threshold throughput timeout elapsed),
- *         \c false if decrementing normally or reward AP is inactive.
- */
-bool time_ctr_is_paused(void);
 
 /**
  * \brief Return the most recently computed instantaneous speed in km/h x 10.
@@ -95,24 +95,21 @@ bool time_ctr_is_paused(void);
 uint32_t time_ctr_current_speed_x10_get(void);
 
 /**
- * \brief Set the counter to \p val, persist to NVS immediately, and enable
- * the reward AP if the state machine is currently idle and \p val > 0.
+ * \brief Set the current rider's counter to \p val and persist to NVS immediately.
  *
- * If \p val is \c 0 while the AP is active (#TIME_CTR_STATE_AP_ACTIVE), the
- * AP is disabled and the state machine transitions to #TIME_CTR_STATE_IDLE
- * immediately.  If \p val is \c 0 while a session is pending
- * (#TIME_CTR_STATE_SESSION), the threshold timer is cancelled and the state
- * returns to #TIME_CTR_STATE_IDLE.
+ * Delegates to #device_reg_entry_counter_set() for the index returned by
+ * #device_reg_current_rider_get().  Returns #ESP_ERR_INVALID_STATE and logs a
+ * warning when no rider is selected.
  *
  * Calling this function is the correct way for the web UI to grant or edit
- * internet time at runtime.  Do \b not call
- * \c config_mngr_reward_counter_s_set() separately afterwards.
+ * internet time at runtime.
  *
  * Thread-safe: acquires and releases the internal spinlock.
  *
- * \param[in] val  New counter value in seconds (0 \u2013 UINT32_MAX).
+ * \param[in] val  New counter value in seconds (0 -- UINT32_MAX).
  *
- * \return \c ESP_OK.
+ * \return \c ESP_OK on success.
+ * \return \c ESP_ERR_INVALID_STATE when no rider is currently selected.
  */
 esp_err_t time_ctr_counter_set(uint32_t val);
 

@@ -1,7 +1,7 @@
 # esport-fi32 Firmware Specification
 
-**Version:** 1.0
-**Date:** 2026-03-14
+**Version:** 2.0
+**Date:** 2026-06-01
 **Target:** ESP32-C6 (ESP-IDF v5.x)
 
 ---
@@ -24,6 +24,7 @@
     - [5.6 Session Tracker](#56-session-tracker)
     - [5.7 NVS Session Log](#57-nvs-session-log)
     - [5.8 HTTP Server](#58-http-server)
+    - [5.9 Device Registry](#59-device-registry)
   - [6. Web Interface](#6-web-interface)
     - [6.1 Status Dashboard — `GET /`](#61-status-dashboard--get-)
     - [6.2 Configuration Page — `GET /config`](#62-configuration-page--get-config)
@@ -55,13 +56,16 @@
 Key behaviour:
 
 - The device permanently operates in **AP+STA** (simultaneous Access Point + Station) Wi-Fi mode with NAT so that devices connected to the reward Soft AP can reach the internet through the home network.
-- A GPIO interrupt counts mechanical pulses from the bike sensor. Each pulse adds `seconds_per_pulse` seconds to a **time counter**.
-- Once the exercise session has been active for `soft_ap_start_threshold_s` seconds, a **reward Soft AP** is created and the accumulated pulse credits start counting down in real time. Pulses still add to the counter while the AP is active.
-- When the counter reaches 0 the reward Soft AP is disabled.
+- The **reward Soft AP is always active from boot**, so children's devices remain connected at all times. Internet access for each registered device is gated individually: frames from a device are forwarded to the internet only while that device's per-device counter is greater than zero and the device is enabled.
+- A GPIO interrupt counts mechanical pulses from the bike sensor. Each pulse adds `seconds_per_pulse` seconds to a **time counter** while a session is in progress.
+- Once the exercise session has been active for `soft_ap_start_threshold_s` seconds (EARNING state), the accumulated pulse credits start counting down in real time. Pulses still add to the current rider's counter while EARNING is active.
+- When the current rider's counter reaches 0, internet access is revoked for that device until more credits are earned.
+- The **Device Registry** (up to 4 entries) stores one record per child's Wi-Fi device: MAC address, nickname, internet-time counter, enabled flag, and a throughput-gated sliding-window lock identical to the former global gate.
+- A **current rider** selector on the config page binds one device slot to the exercise bike: earned credits go to that slot.
 - Exercise sessions are detected and logged to NVS (non-volatile storage) as a ring buffer.
 - Date/time is synchronised via SNTP at boot; a POSIX timezone string converts stored UTC timestamps to local time for display.
 - A **configuration web portal** is always reachable: via the home network (station IP) when connected, or via a dedicated fallback config AP (`esport-fi32_config`) when STA connection is unavailable.
-- A **status dashboard** shows live state (counter, AP status, session info, connected clients, NTP status) and session history.
+- A **status dashboard** shows live state (per-device counters, AP status, session info, connected clients, NTP status) and session history.
 
 ---
 
@@ -98,7 +102,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 | `soft_ap_dec_time_above_threshold_kbps` | `ap_thr_kbps`  | uint16 | `1`             | 0   | 65535       | Combined RX+TX throughput (kbps) below which the countdown is considered idle.                                                                                                                                           |
 | `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo`  | uint16 | `30`            | 0   | 65535       | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses.                                                                                                               |
 | `min_speed_to_increment_time_kmh_x10`   | `min_spd_x10`  | uint16 | `30`            | 0   | 65535       | Minimum instantaneous speed in km/h × 10 required for a pulse to earn time credits.  Set to `0` to disable the gate.                                                                                                     |
-| `reward_counter_s`                      | `reward_ctr_s` | uint32 | `0`             | 0   | (unlimited) | Reward internet time counter (seconds remaining). Persisted to NVS every 60 s and immediately when the AP is disabled; restored on boot. Setting a non-zero value via the config page enables the reward AP immediately. |
+| `reward_counter_s`                      | `reward_ctr_s` | uint32 | `0`             | 0   | (unlimited) | **Legacy / migration only.** Read once at boot by `time_ctr_init()` to seed the current rider's device-registry counter when that slot is still zero. No longer written by the firmware after Feature 4. |
 
 ---
 
@@ -110,7 +114,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 │                                                                   │
 │  ┌─────────────┐   pulses  ┌──────────────────────────────────┐   │
 │  │ Pulse Input │──────────▶│   Time Counter State Machine     │   │
-│  │   Module    │           │  (credits + reward AP control)   │   │
+│  │   Module    │           │  (credits + per-device gating)   │   │
 │  └─────────────┘           └──────────────┬───────────────────┘   │
 │                                           │ session events        │
 │  ┌─────────────┐           ┌──────────────▼───────────────────┐   │
@@ -123,11 +127,11 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 │  │  Manager    │           │       (ring buffer)              │   │
 │  └─────────────┘           └──────────────────────────────────┘   │
 │                                                                   │
-│  ┌──────────────────────────────────────────────────────────────┐ │
-│  │                      WiFi Manager                            │ │
-│  │   STA (home network)  +  Reward SoftAP  +  Config SoftAP     │ │
-│  │                       (NAT enabled)                          │ │
-│  └──────────────────────────────────────────────────────────────┘ │
+│  ┌─────────────────────────┐  ┌──────────────────────────────┐   │
+│  │     Device Registry     │  │        WiFi Manager          │   │
+│  │  (per-device counter,   │◀─▶│  STA + Always-On SoftAP(s)  │   │
+│  │   MAC filter, NVS)      │  │  NAT + per-MAC frame gate    │   │
+│  └─────────────────────────┘  └──────────────────────────────┘   │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  │                       HTTP Server                            │ │
@@ -148,10 +152,11 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 ```
 firmware/
   CMakeLists.txt
-  Kconfig.projbuild          ← build-time defaults
+  Kconfig.projbuild          <- build-time defaults
   idf_component.yml
   inc/
     config_manager.h
+    device_registry.h
     wifi_manager.h
     time_manager.h
     pulse_input.h
@@ -161,8 +166,9 @@ firmware/
     http_server.h
     event_ids.h
   src/
-    main.c                   ← app_main, module init sequencing
+    main.c                   <- app_main, module init sequencing
     config_manager.c
+    device_registry.c
     wifi_manager.c
     time_manager.c
     pulse_input.c
@@ -251,10 +257,13 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
 **Responsibilities:**
 - Initialise the WiFi subsystem in **AP+STA mode** from the first call.
 - Manage three logical interfaces:
-  1. **STA** – connects to the home network (`wifi_ssid` / `wifi_password`).
-  2. **Reward SoftAP** – enabled/disabled by the Time Counter module.
-  3. **Config SoftAP** – enabled only when STA is not connected.
+  1. **STA** - connects to the home network (`wifi_ssid` / `wifi_password`).
+  2. **Reward SoftAP** - **always active from boot**; never torn down. `wifi_mngr_reward_ap_set(false)` is a no-op (logs and returns `ESP_OK` without changing state).
+  3. **Config SoftAP** - enabled only when STA is not connected.
 - Enable **IP_NAPT** on the AP netif so devices connected to either softAP can route traffic through the STA interface.
+- Install **lwIP netif input and linkoutput hooks** on the reward AP netif to implement per-device internet access control:
+  - **Input hook** (`wifi_mngr_ap_input_hook`): For each received Ethernet frame, call `device_reg_mac_rx_bytes_add()` to count RX bytes for the source MAC. Then, for IPv4 frames with a destination outside the local subnet (`192.168.5.0/24`), check `device_reg_mac_internet_allowed()`. If the source MAC is not allowed (device unregistered, disabled, or counter == 0), call `pbuf_free()` and return `ERR_OK` to silently discard the frame. Allowed frames are forwarded to the original input function.
+  - **Output hook** (`wifi_mngr_ap_linkoutput_hook`): Call `device_reg_mac_tx_bytes_add()` to count TX bytes for the destination MAC, then forward to the original linkoutput function.
 - Post ESP events on the application event loop to notify other modules of connectivity changes.
 
 **Config SoftAP (fallback):**
@@ -270,8 +279,9 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
 - Channel: follows the STA channel after STA connects; default channel 6 before STA connects.
 - Max connected stations: 4.
 - IP subnet: `192.168.5.0/24`, gateway `192.168.5.1`.
-- Enabled/disabled only via `wifi_mngr_reward_ap_set(bool enable)`.
-- NAT must be (re-)applied if NAPT was reset when the AP was toggled.
+- **Always active from boot**; `wifi_mngr_reward_ap_set(false)` does nothing.
+- Internet access for each client is controlled per-MAC by the Device Registry MAC filter in the input hook; being connected to the AP does not itself grant internet access.
+- NAT is applied once at init and never removed.
 
 **STA reconnection:**
 - Retry indefinitely at 10-second intervals (not a configurable parameter; hardcoded).
@@ -361,82 +371,53 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
 **File:** `time_counter.c` / `time_counter.h`
 
 **Responsibilities:**
-- Maintain the **time counter** (integer, unit: seconds, minimum 0).
-- Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to the counter for each pulse received while a session is open (SESSION or AP_ACTIVE states). Pulses in IDLE state are ignored.
+- Maintain the **time counter** per device slot via the Device Registry (`device_reg_entry_counter_set/get`).
+- Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to `g_session_credits` (SESSION state) or directly to the current rider's device-registry counter (EARNING state). Pulses in IDLE state are ignored.
 - Listen for `ESPORT_EVENT_SESSION_OPENED` and start a one-shot timer for `soft_ap_start_threshold_s` seconds.
-- Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer and reset the counter to 0. If the AP is already active (AP_ACTIVE state), ignore the close — the AP stays on until the counter drains.
-- Run a 1-second periodic timer (`esp_timer_create`) that decrements the counter by 1 when the reward AP is active. The counter never goes below 0.
-- Manage reward AP state:
-  - **Enable reward AP** when the threshold timer fires (session has been open for `soft_ap_start_threshold_s` seconds). Call `wifi_mngr_reward_ap_set(true)`.
-  - **Disable reward AP** when counter reaches 0 while AP is active. Call `wifi_mngr_reward_ap_set(false)`.
-  - Once the reward AP is enabled, it stays enabled until the counter reaches 0.
-- Post `ESPORT_EVENT_COUNTER_CHANGED` (payload: `uint32_t counter_s`) after every change (pulse or tick), including paused ticks.
-- Post `ESPORT_EVENT_REWARD_AP_ON` and `ESPORT_EVENT_REWARD_AP_OFF` when AP transitions occur.
-- **NVS persistence:** On `time_ctr_init()`, restore `g_counter_s` from `config_mngr_reward_counter_s_get()`. If > 0, transition directly to `TIME_CTR_STATE_AP_ACTIVE`: call `wifi_mngr_reward_ap_set(true)`, post `ESPORT_EVENT_REWARD_AP_ON`, and start the decrement timer (bypassing IDLE/SESSION/threshold flow). A hardcoded periodic save timer (`TIME_CTR_SAVE_INTERVAL_S = 60` s) persists the current counter to NVS via `config_mngr_reward_counter_s_set()`. The counter is also saved immediately when it reaches 0, before the reward AP is disabled.
-- **Runtime counter override:** `time_ctr_counter_set(val)` sets the counter to the supplied value, saves to NVS immediately, and handles all state transitions synchronously: if `val > 0` and the state machine is `TIME_CTR_STATE_IDLE`, transitions to `TIME_CTR_STATE_AP_ACTIVE` (enables reward AP, starts decrement timer); if `val == 0` and the state is `TIME_CTR_STATE_AP_ACTIVE`, disables the reward AP and transitions to `TIME_CTR_STATE_IDLE` immediately (does not wait for the next tick); if `val == 0` and the state is `TIME_CTR_STATE_SESSION`, cancels the threshold timer and returns to `TIME_CTR_STATE_IDLE`.
-- **Traffic-gated decrement (sliding window, evaluated once per 1-second tick):** When the reward AP is active, the counter is only decremented if throughput on the reward AP exceeds the configured threshold or the timeout has not yet elapsed since throughput dropped below threshold:
-
-```
-throughput = wifi_mngr_reward_ap_throughput_kbps()  // combined RX+TX, kbps
-threshold  = config_mngr_soft_ap_dec_threshold_kbps_get()
-timeout    = config_mngr_soft_ap_idle_throughput_timeout_s_get()
-
-if throughput > threshold:
-    g_below_ticks = 0        // reset grace-period streak
-    g_paused      = false    // resume decrement if it was paused
-else:
-    g_below_ticks++
-    if timeout == 0 or g_below_ticks >= timeout:
-        g_paused = true
-
-if not g_paused:             // decrement while above threshold OR within grace period
-    decrement counter by 1
-```
-
-  - `timeout = 0` means pause immediately on the first below-threshold tick.
-  - While throughput is below threshold but `g_below_ticks < timeout` (the grace period), the
-    counter continues to decrement.
-  - If throughput rises above the threshold during the grace period, `g_below_ticks` resets to 0.
-  - `g_below_ticks` is reset to `0` when the state machine exits `TIME_CTR_STATE_AP_ACTIVE`.
+- Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer, flush `g_session_credits` into the current rider's counter, and return to IDLE. If already EARNING, ignore the close event -- the AP stays on until the rider's counter drains.
+- Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, post `ESPORT_EVENT_COUNTER_CHANGED`.
+- Post `ESPORT_EVENT_REWARD_AP_ON` when the threshold timer fires (SESSION -> EARNING transition).
+- Post `ESPORT_EVENT_REWARD_AP_OFF` when the EARNING state exits to IDLE (session closed while earning).
+- **Legacy migration:** `time_ctr_init()` reads `config_mngr_reward_counter_s_get()` and, if the returned value is non-zero and the current rider's counter is still zero, seeds the rider's counter with that value.
+- **Runtime counter override:** `time_ctr_counter_set(val)` delegates to `device_reg_entry_counter_set(current_rider, val)`. Returns `ESP_ERR_INVALID_STATE` when no rider is selected (`DEVICE_REG_NO_RIDER`).
 
 **State machine:**
 
 ```
-        ┌──────────────────────────────────────────────────────┐
-        │                   IDLE state                         │
-        │  counter = 0, reward AP: OFF                         │
-        │                                                      │
-        │  On SESSION_OPENED: start threshold timer →          │
-        └──────────────────┬───────────────────────────────────┘
-                           │  ESPORT_EVENT_SESSION_OPENED
-                           ▼
-        ┌──────────────────────────────────────────────────────┐
-        │                 SESSION state                        │
-        │  reward AP: OFF; threshold timer running             │
-        │                                                      │
-        │  On pulse:        counter += seconds_per_pulse       │
-        │  On SESSION_CLOSED: cancel timer, counter = 0 → IDLE │
-        └──────────────────┬───────────────────────────────────┘
-                           │  threshold timer fires
-                           │  (soft_ap_start_threshold_s elapsed)
-                           ▼
-        ┌──────────────────────────────────────────────────────┐
-        │                AP_ACTIVE state                       │
-        │  reward AP: ON                                       │
-        │                                                      │
-        │  On pulse:  counter += seconds_per_pulse             │
-        │  On tick:   counter -= 1  (min 0)                    │
-        └──────────────────┬───────────────────────────────────┘
-                           │  counter == 0
-                           ▼
+        +------------------------------------------------------+
+        |                   IDLE state                         |
+        |  current rider counter may be non-zero (paused)      |
+        |                                                      |
+        |  On SESSION_OPENED: start threshold timer ->         |
+        +------------------+-----------------------------------+
+                           |  ESPORT_EVENT_SESSION_OPENED
+                           v
+        +------------------------------------------------------+
+        |                SESSION state                         |
+        |  g_session_credits accumulating from pulses          |
+        |                                                      |
+        |  On pulse:        g_session_credits += spp           |
+        |  On SESSION_CLOSED: flush credits to rider, -> IDLE  |
+        +------------------+-----------------------------------+
+                           |  threshold timer fires
+                           |  (soft_ap_start_threshold_s elapsed)
+                           v
+        +------------------------------------------------------+
+        |                EARNING state                         |
+        |  Internet access gated per-device by device_reg      |
+        |                                                      |
+        |  On pulse:  rider counter += spp                     |
+        |  On tick:   device_reg_tick() decrements all enabled |
+        |             devices with internet access             |
+        +------------------+-----------------------------------+
+                           |  SESSION_CLOSED
+                           v
                     back to IDLE state
 ```
 
-**Boot restore:** If `config_mngr_reward_counter_s_get()` returns a non-zero value during `time_ctr_init()`, the state machine bypasses IDLE and SESSION states and enters `TIME_CTR_STATE_AP_ACTIVE` directly.
+**Thread safety:** All counter access is via the Device Registry spinlock (`g_dev_mux`). The tick callback runs in the ESP timer task and is safe to call from any context.
 
-**Thread safety:** The counter variable is accessed from the FreeRTOS timer callback and from ESP event loop callbacks. Protect it with a `portMUX_TYPE` spinlock or a FreeRTOS mutex.
-
-**Speed-gated pulse crediting:** When a `ESPORT_EVENT_PULSE` is received, the instantaneous speed is obtained from `pulse_in_speed_kmh_x10_get()` — the single source of truth owned by the Pulse Input module:
+**Speed-gated pulse crediting:** When an `ESPORT_EVENT_PULSE` is received, the instantaneous speed is obtained from `pulse_in_speed_kmh_x10_get()` -- the single source of truth owned by the Pulse Input module:
 
 ```
 speed_x10 = pulse_in_speed_kmh_x10_get()   /* 0 when fewer than 2 pulses accepted */
@@ -454,10 +435,9 @@ if min_spd > 0 and speed_x10 < min_spd:
 
 ```c
 esp_err_t time_ctr_init(void);
-uint32_t  time_ctr_get(void);
-bool      time_ctr_is_paused(void);        /* true when countdown is paused due to below-threshold traffic */
-uint32_t  time_ctr_current_speed_x10_get(void);  /* most recent instantaneous speed in km/h × 10; 0 when idle */
-esp_err_t time_ctr_counter_set(uint32_t val);    /* set counter; save to NVS; handles IDLE↔AP_ACTIVE transitions immediately */
+uint32_t  time_ctr_get(void);                        /* returns current rider's device_reg counter; 0 if no rider */
+uint32_t  time_ctr_current_speed_x10_get(void);      /* most recent instantaneous speed in km/h x 10; 0 when idle */
+esp_err_t time_ctr_counter_set(uint32_t val);        /* delegates to device_reg; ESP_ERR_INVALID_STATE if no rider */
 ```
 
 ---
@@ -555,6 +535,89 @@ esp_err_t http_srv_init(void);
 
 ---
 
+### 5.9 Device Registry
+
+**File:** `device_registry.c` / `device_registry.h`
+
+**Responsibilities:**
+- Store up to `DEVICE_REG_MAX_ENTRIES` (4) device records in NVS, each containing: 6-byte MAC address, 15-char nickname, 32-bit internet-time counter (seconds), enabled flag, and a per-device throughput sliding-window state.
+- Track a **current rider** index (`uint8_t`; `DEVICE_REG_NO_RIDER = 0xFF` when unset) persisted in NVS.
+- Expose `device_reg_mac_internet_allowed(mac)` called from the WiFi Manager input hook to gate IPv4 forwarding per source MAC. Returns `true` if the MAC matches an enabled entry with `counter_s > 0` that is not paused by the throughput gate.
+- Accept per-MAC byte counts from the WiFi Manager (`device_reg_mac_rx_bytes_add`, `device_reg_mac_tx_bytes_add`) and aggregate them into a per-second throughput figure updated on each `device_reg_tick()` call.
+- Implement `device_reg_tick()` called once per second from `time_ctr_tick_cb()`. For each connected, enabled entry with `counter_s > 0`:
+  - Compute `throughput_kbps` from accumulated RX+TX bytes since last tick.
+  - Apply the sliding-window traffic gate (same logic as the former global gate in Feature 3):
+    ```
+    if throughput > dec_threshold:
+        below_ticks[i] = 0; paused[i] = false
+    else:
+        below_ticks[i]++
+        if timeout == 0 or below_ticks[i] >= timeout:
+            paused[i] = true
+    if not paused[i]:
+        counter_s--
+    ```
+  - Trigger a NVS save when `counter_s` reaches 0 or every `DEVICE_REG_SAVE_INTERVAL_S` (60) seconds.
+  - Post `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` after each tick.
+- Persist entries as NVS blobs (`dev_0` ... `dev_3`), count as `dev_count` uint8, and rider index as `dev_rider` uint8 in namespace `esport_dev`.
+
+**Data model:**
+
+```c
+#define DEVICE_REG_MAX_ENTRIES      (4U)
+#define DEVICE_REG_MAC_LEN          (6U)
+#define DEVICE_REG_NICKNAME_MAX_LEN (15U)
+#define DEVICE_REG_NO_RIDER         (0xFFU)
+#define DEVICE_REG_SAVE_INTERVAL_S  (60U)
+
+typedef struct device_reg_entry_tag
+{
+    uint8_t  mac[DEVICE_REG_MAC_LEN];
+    char     nickname[DEVICE_REG_NICKNAME_MAX_LEN + 1U];
+    uint32_t counter_s;
+    bool     b_enabled;
+} device_reg_entry_t;
+```
+
+**NVS Namespace:** `esport_dev`
+
+**Thread safety:** All read/write access to the entry array, counters, and rider index is protected by a `portMUX_TYPE` spinlock (`g_dev_mux = portMUX_INITIALIZER_UNLOCKED`). `device_reg_mac_rx_bytes_add` and `device_reg_mac_tx_bytes_add` update `volatile` byte accumulators atomically (single 32-bit writes on RISC-V are naturally atomic, but the spinlock is held for the array scan to avoid TOCTOU during add/remove).
+
+**API:**
+
+```c
+esp_err_t device_reg_init(void);
+
+/* Entry management */
+esp_err_t device_reg_entry_add(const uint8_t *p_mac, const char *p_nickname);
+esp_err_t device_reg_entry_remove(uint8_t idx);
+uint8_t   device_reg_entry_count(void);
+esp_err_t device_reg_entry_get(uint8_t idx, device_reg_entry_t *p_out);
+esp_err_t device_reg_entry_nickname_set(uint8_t idx, const char *p_nickname);
+esp_err_t device_reg_entry_enabled_set(uint8_t idx, bool b_enabled);
+esp_err_t device_reg_entry_counter_set(uint8_t idx, uint32_t val);
+uint32_t  device_reg_entry_counter_get(uint8_t idx);
+
+/* Current rider */
+uint8_t   device_reg_current_rider_get(void);
+esp_err_t device_reg_current_rider_set(uint8_t idx);   /* DEVICE_REG_NO_RIDER to clear */
+
+/* WiFi Manager hooks */
+bool      device_reg_mac_internet_allowed(const uint8_t *p_mac);
+void      device_reg_mac_rx_bytes_add(const uint8_t *p_mac, uint32_t bytes);
+void      device_reg_mac_tx_bytes_add(const uint8_t *p_mac, uint32_t bytes);
+
+/* Per-second tick (called from time_counter tick callback) */
+void      device_reg_tick(void);
+
+/* Runtime status (for HTTP API) */
+bool      device_reg_entry_is_paused(uint8_t idx);
+uint32_t  device_reg_entry_throughput_kbps(uint8_t idx);
+bool      device_reg_entry_is_connected(uint8_t idx);
+```
+
+---
+
 ## 6. Web Interface
 
 ### 6.1 Status Dashboard — `GET /`
@@ -567,13 +630,14 @@ Serves a self-contained HTML page (generated as chunked C string literals). All 
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | System           | Current local time, NTP sync status, uptime                                                                                                                                                                                                                                   |
 | Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status, reward AP SSID, reward AP IP (dashboard access URL from the reward AP network), connected clients count                                                                                                |
-| Exercise Counter | Current counter value (seconds + human-readable h:mm:ss), threshold, AP enabled, reward AP throughput (kbps), countdown status (Decrementing / ⏸ Paused (low traffic)), current speed (km/h, one decimal place), pulse-crediting status (Crediting / ⊘ Gated (speed too low)) |
+| Exercise Counter | Current rider's counter value (seconds + human-readable h:mm:ss), threshold, current speed (km/h, one decimal place), pulse-crediting status (Crediting / Gated (speed too low)) |
 | Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average)                                                                                                                                                                       |
 | Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count                                                                                                                                                                              |
 | Session Graphs   | Bar charts with day-of-month on X axis: average speed and total session duration per day                                                                                                                                                                                      |
 
 Dashboard requirements for reports:
 
+- Include a **Devices** table updated every 2 seconds by the JS polling loop, showing one row per registered device: nickname (starred if current rider), counter (h:mm:ss), enabled status, connected status, throughput (kbps) + pause indicator, internet access active status.
 - Include an **Export Reports** panel with two actions:
   - Download CSV
   - Download JSON
@@ -601,9 +665,22 @@ Serves a form pre-populated with current config values.
 | Session Start Window (s) | number     | `start_session_interval_s`  |
 | Pulse Debounce (ms)      | number     | `pulse_debounce_time_ms`    |
 | Timezone (POSIX TZ)      | text       | `timezone`                  |
-| Reward Counter           | text       | `reward_counter_s`          |
 
-The **Reward Counter** field uses `hh:mm:ss` format with zero-padded two-digit hours (e.g. `02:01:00`). The GET handler formats the stored seconds value as `%02h:%02m:%02s`; the POST handler parses it back to seconds (`h*3600 + m*60 + s`). An unparseable value returns HTTP 400. Setting a non-zero value enables the reward AP immediately; setting it to `00:00:00` disables the reward AP immediately. The input field has `maxlength="8"` and an `oninput` JS mask that strips all non-digit characters and auto-inserts colons at positions 2 and 5 as the user types, so the user only types digits and the `hh:mm:ss` format is enforced automatically without needing a `pattern` attribute.
+**Device Management section** (rendered after the base parameters):
+
+| Element                   | Description                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------- |
+| Registered Devices table  | One row per device: nickname input, MAC (read-only), counter h:mm:ss input, enabled checkbox, current-rider radio, Remove button |
+| No Rider radio            | Clears the current rider assignment (`DEVICE_REG_NO_RIDER`)                                        |
+| Add Device sub-form       | MAC address text input (`AA:BB:CC:DD:EE:FF` or `AABBCCDDEEFF`), nickname text input, Add button  |
+
+POST handling for device management fields:
+- `current_rider`: sets current rider index or `DEVICE_REG_NO_RIDER` if value is `"255"`.
+- `dev_N_remove`: removes device at index N.
+- `dev_N_nickname`: updates nickname for device N.
+- `dev_N_enabled`: checkbox; absence means `false`.
+- `dev_N_counter_hms`: h:mm:ss counter value; parsed to seconds and applied via `device_reg_entry_counter_set()`.
+- `action=add_device` + `new_dev_mac` + `new_dev_nickname`: adds a new device entry.
 
 On submit: `POST /config` with `application/x-www-form-urlencoded` body.
 On success: redirect to `/config?saved=1` with a success banner.
@@ -657,8 +734,23 @@ Returns JSON:
   "session_pulse_count": 1800,
   "live_speed_kmh_x10": 123,
   "reward_ap_throughput_kbps": 42,
-  "countdown_paused": false,
-  "current_speed_kmh_x10": 0
+  "current_speed_kmh_x10": 0,
+  "current_rider_idx": 0,
+  "devices": [
+    {
+      "idx": 0,
+      "nickname": "Alice",
+      "mac": "AA:BB:CC:DD:EE:FF",
+      "counter_s": 147,
+      "counter_hms": "0:02:27",
+      "enabled": true,
+      "internet_active": true,
+      "is_current_rider": true,
+      "connected": true,
+      "throughput_kbps": 42,
+      "paused": false
+    }
+  ]
 }
 ```
 
@@ -743,17 +835,18 @@ Aggregation rules:
 
 ```
 1. nvs_flash_init()
-2. config_mngr_init()         ← load config, apply factory defaults
+2. config_mngr_init()         <- load config, apply factory defaults
+2a. device_reg_init()         <- load device registry from NVS (esport_dev namespace)
 3. esp_event_loop_create_default()
-4. wifi_mngr_init()           ← start AP+STA, attempt STA connect
+4. wifi_mngr_init()           <- start AP+STA; reward AP always-on from init
    a. if wifi_ssid is empty: skip STA, enable config AP immediately
    b. otherwise: attempt STA connection; config AP is enabled immediately on
       the first WIFI_EVENT_STA_DISCONNECTED (no retry count needed); STA
       keeps retrying every 10 s in the background until it gets an IP
-5. http_srv_init()            ← start web server (reachable immediately via config AP)
-6. time_mngr_init()           ← register callback: sync SNTP on STA_GOT_IP
+5. http_srv_init()            <- start web server (reachable immediately via config AP)
+6. time_mngr_init()           <- register callback: sync SNTP on STA_GOT_IP
 7. pulse_in_init()
-8. time_ctr_init()            ← restore counter from NVS; if counter > 0, enter AP_ACTIVE directly
+8. time_ctr_init()            <- start permanent tick timer; legacy migration from esport_cfg
 9. session_trk_init()
 10. session_log_init()
 ```
@@ -779,35 +872,36 @@ app_main  →  wifi_manager attempts to connect to wifi_ssid
 ### 7.3 Pulse & Counter Flow
 
 ```
-Bike sensor → falling edge on GPIO 10
-            → ISR: check debounce (esp_timer_get_time)
-            → if valid: post ESPORT_EVENT_PULSE
+Bike sensor -> falling edge on GPIO 10
+            -> ISR: check debounce (esp_timer_get_time)
+            -> if valid: post ESPORT_EVENT_PULSE
 
 ESPORT_EVENT_PULSE
-  → time_counter: if state == SESSION or AP_ACTIVE: counter += seconds_per_pulse
-  → session_tracker: update pulse count, last_pulse_time, manage timers
+  -> time_counter: if state == SESSION: g_session_credits += spp
+                   if state == EARNING: current rider counter += spp
+  -> session_tracker: update pulse count, last_pulse_time, manage timers
 
-ESPORT_EVENT_SESSION_OPENED (posted by session_tracker on QUALIFYING→ACTIVE)
-  → time_counter: IDLE→SESSION, start one-shot threshold timer
+ESPORT_EVENT_SESSION_OPENED (posted by session_tracker on QUALIFYING->ACTIVE)
+  -> time_counter: IDLE->SESSION, start one-shot threshold timer
                   (soft_ap_start_threshold_s seconds)
 
 threshold timer fires
-  → time_counter: SESSION→AP_ACTIVE
-                  wifi_mngr_reward_ap_set(true)
-                  post ESPORT_EVENT_REWARD_AP_ON
-                  start 1-second decrement tick timer
+  -> time_counter: SESSION->EARNING
+                   flush g_session_credits to current rider counter
+                   post ESPORT_EVENT_REWARD_AP_ON
 ```
 
 ### 7.4 Counter Decrement & AP Shutdown
 
 ```
-1-second periodic timer (only runs in ACTIVE state)
-  → counter -= 1
-  → post ESPORT_EVENT_COUNTER_CHANGED
-  if counter == 0:
-      state = IDLE
-      wifi_mngr_reward_ap_set(false)
-      post ESPORT_EVENT_REWARD_AP_OFF
+1-second periodic tick (permanent; runs in all states)
+  -> device_reg_tick(): for each connected+enabled device with counter_s > 0
+       compute throughput; apply sliding-window gate; decrement if not paused
+  -> post ESPORT_EVENT_COUNTER_CHANGED
+
+On EARNING->IDLE (SESSION_CLOSED while in EARNING state):
+  -> post ESPORT_EVENT_REWARD_AP_OFF
+  -> state = IDLE
 ```
 
 ### 7.5 Session Lifecycle
@@ -841,23 +935,23 @@ ESPORT_EVENT_SESSION_CLOSED
 
 ```
 POST /config
-  → http_server validates all fields
-  → calls config_mngr_*_set() for each field
-  → if wifi_ssid or wifi_password changed:
+  -> http_server validates all fields
+  -> calls config_mngr_*_set() for each field
+  -> if wifi_ssid or wifi_password changed:
       schedule wifi_manager reconnect after 1 s
-  → if timezone changed:
+  -> if timezone changed:
       time_mngr_timezone_apply()
-  → if reward_counter_s changed:
-      time_ctr_counter_set(new_val)  ← applies immediately; enables AP if val > 0, disables AP if val == 0
-  → redirect to GET /config with success message
+  -> device management fields (add/remove/nickname/enabled/counter/rider) applied
+      immediately via device_registry API calls
+  -> redirect to GET /config with success message
 
 POST /config/reset
-  → config_mngr_reset_to_defaults()
+  -> config_mngr_reset_to_defaults()
       nvs_erase_all() on esport_cfg namespace
       write all factory defaults and commit
-  → time_mngr_timezone_apply()  (apply default TZ immediately)
-  → post ESPORT_EVENT_CONFIG_CHANGED
-  → redirect to GET /config?reset=1
+  -> time_mngr_timezone_apply()  (apply default TZ immediately)
+  -> post ESPORT_EVENT_CONFIG_CHANGED
+  -> redirect to GET /config?reset=1
 ```
 
 ---
@@ -907,7 +1001,17 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | `pulse_count`       | 12     | uint16_t   | total pulses (max 65535)                |
 | `avg_speed_kmh_x10` | 14     | uint16_t   | km/h × 10 (e.g. 123 = 12.3 km/h)        |
 
-> Total: 16 bytes × 50 entries = 800 bytes plus ~50 bytes for metadata keys.
+> Total: 16 bytes x 50 entries = 800 bytes plus ~50 bytes for metadata keys.
+
+---
+
+### Namespace: `esport_dev`
+
+| Key              | Type   | Content                                                     |
+| ---------------- | ------ | ----------------------------------------------------------- |
+| `dev_count`      | uint8  | Number of registered devices (0-4)                          |
+| `dev_rider`      | uint8  | Current rider index; `0xFF` = no rider                      |
+| `dev_0`...`dev_3` | blob   | `device_reg_entry_t` binary (MAC + nickname + counter + enabled) |
 
 ---
 
@@ -928,6 +1032,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 | `ESPORT_EVENT_STA_CONNECTED`    | —                      | `wifi_manager`       | `time_manager` (start SNTP)       |
 | `ESPORT_EVENT_STA_DISCONNECTED` | —                      | `wifi_manager`       | (logging, status)                 |
 | `ESPORT_EVENT_CONFIG_CHANGED`   | none (NULL)            | `http_server_config` | `pulse_input`, `time_counter`     |
+| `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` | none (NULL) | `device_registry`    | `http_server` (status refresh)    |
 
 `ESPORT_EVENT_CONFIG_CHANGED` is posted once at the end of a successful `POST /config` or `POST /config/reset` request.  Modules that cache NVS-backed config values subscribe to this event and re-read only the values they own, so configuration changes take effect immediately without a reboot.
 
