@@ -12,9 +12,9 @@
  *   - \c GET  /api/sessions/export  Downloadable CSV or JSON report.
  *   - \c GET  /api/sessions/daily   Daily aggregates for graph rendering.
  *
- * The server is reachable on every active IP (STA, reward AP, config AP)
+ * The server is reachable on every active IP (STA, reward AP)
  * and starts before the STA connection attempt so that the config portal
- * is immediately available via the config AP.
+ * is immediately available via the reward AP (192.168.5.1).
  *
  * \date 2026-03-14
  */

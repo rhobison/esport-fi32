@@ -8,3 +8,10 @@ CONFIG_GPIO_CTRL_FUNC_IN_IRAM=y
 CONFIG_LWIP_IP_FORWARD=y
 CONFIG_LWIP_IPV4_NAPT=y
 CONFIG_LWIP_STATS=y
+# Increase FreeRTOS timer daemon task stack from the 2048-byte default.
+# The session_trk_qualify_timer_cb and session_trk_idle_timer_cb perform
+# multiple 64-bit divisions and call esp_event_post + ESP_LOGI with PRId64,
+# all of which use substantial stack via software arithmetic routines on
+# RISC-V 32-bit.  2048 bytes is insufficient and causes stack overflow,
+# which manifests as a Cache access error (MCAUSE=0x19) on ESP32-C6.
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096

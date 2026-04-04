@@ -2,14 +2,12 @@
  * \file
  * \brief Wi-Fi manager public API (AP+STA mode with NAT).
  *
- * Manages three logical Wi-Fi interfaces:
+ * Manages two logical Wi-Fi interfaces:
  *   - \b STA: connects to the home network.
- *   - \b Reward SoftAP: enabled/disabled by the time counter module.
- *   - \b Config SoftAP: automatically enabled when STA is not connected,
- *     providing access to the configuration web portal.
+ *   - \b Reward SoftAP: always active from boot; never torn down.
  *
- * IP_NAPT is enabled on the AP netif so devices on either softAP can route
- * traffic through the STA interface.
+ * IP_NAPT is enabled on the AP netif so devices on the Reward SoftAP can
+ * route traffic through the STA interface.
  *
  * \date 2026-03-14
  */
@@ -44,9 +42,9 @@ extern "C"
  * \brief Initialise the TCP/IP stack and Wi-Fi subsystem in AP+STA mode.
  *
  * Creates the default netif instances, registers event handlers, and
- * attempts STA connection using credentials from \c config_manager.
- * If the STA SSID is empty, STA connection is skipped and the config AP
- * is enabled immediately.
+ * attempts STA connection using credentials from \c config_manager (if an
+ * SSID is configured).  The reward AP is brought up unconditionally and
+ * remains active for the lifetime of the device.
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
@@ -96,16 +94,6 @@ uint8_t wifi_mngr_reward_ap_client_count(void);
  * \param[in]  len  Size of \p p_buf in bytes (including NUL terminator).
  */
 void wifi_mngr_sta_ip_get(char * p_buf, size_t len);
-
-/**
- * \brief Query whether the config (fallback) Soft AP is currently active.
- *
- * The config AP is automatically enabled when STA is disconnected and
- * disabled when STA obtains an IP.
- *
- * \return \c true if the config AP is up, \c false otherwise.
- */
-bool wifi_mngr_config_ap_is_active(void);
 
 /**
  * \brief Return the combined RX+TX throughput on the reward AP in kbps.

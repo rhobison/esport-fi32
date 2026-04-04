@@ -2,6 +2,9 @@
  * \file
  * \brief Wi-Fi manager (AP+STA mode with NAT) — full implementation.
  *
+ * The Config SoftAP has been removed (Feature 4): the Reward AP is always-on
+ * from boot, so a separate fallback AP is no longer needed.
+ *
  * \date 2026-03-14
  */
 
@@ -11,6 +14,7 @@
 
 #include "wifi_manager.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stddef.h>
 #include <string.h>
@@ -25,6 +29,7 @@
 #include "freertos/task.h"
 #include "lwip/netif.h"
 #include "lwip/pbuf.h"
+#include "lwip/sockets.h"
 
 #include "config_manager.h"
 #include "device_registry.h"
@@ -39,12 +44,6 @@
 
 /** Maximum number of stations allowed on the reward AP. */
 #define WIFI_MNGR_REWARD_AP_MAX_STA (4U)
-
-/** Maximum number of stations allowed on the config AP. */
-#define WIFI_MNGR_CONFIG_AP_MAX_STA (4U)
-
-/** Channel for the config AP (fixed, spec §5.2). */
-#define WIFI_MNGR_CONFIG_AP_CHANNEL (1U)
 
 /** Default channel for reward AP before STA connects. */
 #define WIFI_MNGR_REWARD_AP_DEFAULT_CHANNEL (6U)
@@ -84,6 +83,11 @@
 /** IPv4 /24 subnet mask as a uint32 bitmask (255.255.255.0). */
 #define WIFI_MNGR_IPV4_SUBNET_MASK_24 (0xFFFFFF00U)
 
+/** IPv4 limited broadcast address (255.255.255.255).
+ *  DHCP Discover/Request frames use this as the destination; they must always
+ *  be passed through so that unregistered devices can obtain an IP address. */
+#define WIFI_MNGR_IPV4_LIMITED_BROADCAST (0xFFFFFFFFU)
+
 //==================================================================================================
 // Variables/Data
 //==================================================================================================
@@ -91,7 +95,7 @@
 /** Module log tag. */
 static const char * gp_tag = "wifi_manager";
 
-/** Default network interface for the AP (shared by config AP and reward AP). */
+/** Default network interface for the AP (reward AP). */
 static esp_netif_t * gp_netif_ap = NULL;
 
 /** Default network interface for the STA. */
@@ -106,11 +110,15 @@ static volatile bool gb_reward_ap_active = false;
 /** One-shot timer used to trigger STA reconnect attempts. */
 static esp_timer_handle_t gp_reconnect_timer = NULL;
 
-/** true if the config AP is currently enabled. */
-static volatile bool gb_config_ap_active = false;
-
 /** true when NAPT should be armed on the next WIFI_EVENT_AP_START. */
 static volatile bool gb_napt_pending = false;
+
+/** Set when a config change should trigger an immediate reconnect instead of the 10 s delay.
+ *
+ * Written by the #ESPORT_EVENT_CONFIG_CHANGED handler (event loop task) before calling
+ * \c esp_wifi_disconnect().  Read and cleared by the \c WIFI_EVENT_STA_DISCONNECTED
+ * handler (event loop task).  Both accesses run in the same task, so no spinlock is needed. */
+static volatile bool gb_reconnect_immediate = false;
 
 /** Previous RX byte count snapshot for throughput measurement. */
 static uint32_t g_prev_rx_bytes = 0U;
@@ -147,8 +155,8 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
     void * p_event_data);
 static void wifi_mngr_reconnect_timer_cb(void * p_arg);
 static void wifi_mngr_ap_dns_forward(void);
-static esp_err_t wifi_mngr_config_ap_enable(void);
-static esp_err_t wifi_mngr_config_ap_disable(void);
+static void wifi_mngr_config_changed_handler(void * p_arg, esp_event_base_t base, int32_t event_id,
+    void * p_event_data);
 static esp_err_t wifi_mngr_sta_connect(void);
 static err_t     wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp);
 static err_t     wifi_mngr_ap_linkoutput_hook(struct netif * netif, struct pbuf * p);
@@ -179,6 +187,24 @@ esp_err_t wifi_mngr_init(void)
         return ESP_FAIL;
     }
 
+    /* Pre-configure the AP netif to 192.168.5.0/24 before the WiFi driver
+     * starts.  The event loop task has higher priority than app_main, so
+     * every WIFI_EVENT_AP_START (including the very first one fired from
+     * esp_wifi_set_mode(APSTA)) is processed before wifi_mngr_reward_ap_set
+     * can run esp_netif_set_ip_info.  By setting the IP here we ensure the
+     * AP always uses 192.168.5.1, even on the first boot DHCP start.
+     * DHCP is left stopped; the WIFI_EVENT_AP_START handler starts it with
+     * the correct DNS option so the custom option is never lost on restarts. */
+    {
+        esp_netif_ip_info_t ap_ip;
+        memset(&ap_ip, 0, sizeof(ap_ip));
+        ip4addr_aton(WIFI_MNGR_REWARD_AP_GW_IP, (ip4_addr_t *)&ap_ip.ip);
+        ip4addr_aton(WIFI_MNGR_REWARD_AP_GW_IP, (ip4_addr_t *)&ap_ip.gw);
+        ip4addr_aton(WIFI_MNGR_REWARD_AP_NETMASK, (ip4_addr_t *)&ap_ip.netmask);
+        (void)esp_netif_dhcps_stop(gp_netif_ap);
+        (void)esp_netif_set_ip_info(gp_netif_ap, &ap_ip);
+    }
+
     /* Initialise WiFi driver with default config. */
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ret                    = esp_wifi_init(&cfg);
@@ -203,8 +229,15 @@ esp_err_t wifi_mngr_init(void)
         return ret;
     }
 
-    /* Start in STA-only mode; AP interface is brought up on demand by
-     * wifi_mngr_config_ap_enable() or wifi_mngr_reward_ap_set(true). */
+    ret = esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_CONFIG_CHANGED,
+        wifi_mngr_config_changed_handler, NULL);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "register CONFIG_CHANGED handler failed: 0x%x", ret);
+        return ret;
+    }
+
+    /* Start in STA-only mode; AP interface is brought up by wifi_mngr_reward_ap_set(true). */
     ret = esp_wifi_set_mode(WIFI_MODE_STA);
     if (ESP_OK != ret)
     {
@@ -240,8 +273,7 @@ esp_err_t wifi_mngr_init(void)
 
     if ('\0' == ssid[0])
     {
-        ESP_LOGI(gp_tag, "No STA SSID configured \u2014 enabling config AP immediately");
-        ret = wifi_mngr_config_ap_enable();
+        ESP_LOGI(gp_tag, "No STA SSID configured \u2014 skipping STA connection");
     }
     else
     {
@@ -298,33 +330,6 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
             ESP_LOGE(gp_tag, "esp_wifi_set_mode(APSTA) for reward AP failed: 0x%x", ret);
             return ret;
         }
-
-        /* Stop DHCP server before changing IP configuration. */
-        esp_netif_dhcps_stop(gp_netif_ap);
-
-        /* Set subnet/gateway for the reward AP (192.168.5.0/24). */
-        esp_netif_ip_info_t ip_info;
-        memset(&ip_info, 0, sizeof(ip_info));
-        ip4addr_aton(WIFI_MNGR_REWARD_AP_GW_IP, (ip4_addr_t *)&ip_info.ip);
-        ip4addr_aton(WIFI_MNGR_REWARD_AP_GW_IP, (ip4_addr_t *)&ip_info.gw);
-        ip4addr_aton(WIFI_MNGR_REWARD_AP_NETMASK, (ip4_addr_t *)&ip_info.netmask);
-
-        ret = esp_netif_set_ip_info(gp_netif_ap, &ip_info);
-        if (ESP_OK != ret)
-        {
-            ESP_LOGE(gp_tag, "esp_netif_set_ip_info for reward AP failed: 0x%x", ret);
-            esp_netif_dhcps_start(gp_netif_ap);
-            return ret;
-        }
-
-        /* Restart DHCP server with new pool. */
-        ret = esp_netif_dhcps_start(gp_netif_ap);
-        if (ESP_OK != ret)
-        {
-            ESP_LOGE(gp_tag, "esp_netif_dhcps_start for reward AP failed: 0x%x", ret);
-            return ret;
-        }
-
 
         /* Configure the AP interface. */
         wifi_config_t ap_cfg;
@@ -441,18 +446,6 @@ void wifi_mngr_reward_ap_ip_get(char * p_buf, size_t len)
 //--------------------------------------------------------------------------------------------------
 
 /**
- * \brief Query whether the config (fallback) Soft AP is currently active.
- *
- * \return \c true if the config AP is up, \c false otherwise.
- */
-bool wifi_mngr_config_ap_is_active(void)
-{
-    return gb_config_ap_active;
-}
-
-//--------------------------------------------------------------------------------------------------
-
-/**
  * \brief Return the combined RX+TX throughput on the reward AP in kbps.
  *
  * Reads cumulative byte counters maintained by the netif input/linkoutput
@@ -502,84 +495,6 @@ uint32_t wifi_mngr_reward_ap_throughput_kbps(void)
 //==================================================================================================
 // Private Functions
 //==================================================================================================
-
-/**
- * \brief Enable the config (fallback) SoftAP.
- *
- * Configures the AP interface with Kconfig-defined SSID/password,
- * channel 1, max #WIFI_MNGR_CONFIG_AP_MAX_STA stations.
- *
- * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
- */
-static esp_err_t wifi_mngr_config_ap_enable(void)
-{
-    if (gb_config_ap_active)
-    {
-        return ESP_OK;
-    }
-
-    /* Bring the AP interface up if it is not already running. */
-    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
-    if (ESP_OK != ret)
-    {
-        ESP_LOGE(gp_tag, "esp_wifi_set_mode(APSTA) for config AP failed: 0x%x", ret);
-        return ret;
-    }
-
-    wifi_config_t ap_cfg;
-    memset(&ap_cfg, 0, sizeof(ap_cfg));
-
-    strncpy((char *)ap_cfg.ap.ssid, CONFIG_ESPORT_CONFIG_AP_SSID, sizeof(ap_cfg.ap.ssid) - 1U);
-    ap_cfg.ap.ssid_len = (uint8_t)strlen(CONFIG_ESPORT_CONFIG_AP_SSID);
-    strncpy((char *)ap_cfg.ap.password, CONFIG_ESPORT_CONFIG_AP_PASSWORD,
-        sizeof(ap_cfg.ap.password) - 1U);
-    ap_cfg.ap.channel        = WIFI_MNGR_CONFIG_AP_CHANNEL;
-    ap_cfg.ap.max_connection = WIFI_MNGR_CONFIG_AP_MAX_STA;
-    ap_cfg.ap.authmode = (ap_cfg.ap.password[0] != '\0') ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-
-    ret = esp_wifi_set_config(WIFI_IF_AP, &ap_cfg);
-    if (ESP_OK != ret)
-    {
-        ESP_LOGE(gp_tag, "esp_wifi_set_config(AP) for config AP failed: 0x%x", ret);
-        return ret;
-    }
-
-    gb_config_ap_active = true;
-    ESP_LOGI(gp_tag, "Config AP enabled: SSID='%s'", CONFIG_ESPORT_CONFIG_AP_SSID);
-    return ESP_OK;
-}
-
-//--------------------------------------------------------------------------------------------------
-
-/**
- * \brief Disable the config (fallback) SoftAP.
- *
- * Clears the AP SSID so it is no longer visible; does not stop the WiFi
- * driver (AP+STA mode is maintained for the reward AP).
- *
- * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
- */
-static esp_err_t wifi_mngr_config_ap_disable(void)
-{
-    if (!gb_config_ap_active)
-    {
-        return ESP_OK;
-    }
-
-    gb_config_ap_active = false;
-
-    if (!gb_reward_ap_active)
-    {
-        /* No AP needed at all — revert to STA-only mode so the AP interface
-         * stops transmitting entirely (no ESP_XXXXXX default beacon). */
-        (void)esp_wifi_set_mode(WIFI_MODE_STA);
-    }
-
-    ESP_LOGI(gp_tag, "Config AP disabled");
-    return ESP_OK;
-}
-
-//--------------------------------------------------------------------------------------------------
 
 /**
  * \brief Configure and initiate a STA connection attempt.
@@ -711,8 +626,19 @@ static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
                               ((uint32_t)p_eth[WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET + 2U] << 8U) |
                               (uint32_t)p_eth[WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET + 3U];
 
-            /* Drop internet-destined packets from devices without access. */
-            if (WIFI_MNGR_REWARD_AP_SUBNET_U32 != (dst_ip & WIFI_MNGR_IPV4_SUBNET_MASK_24))
+            /* Drop internet-destined packets from devices without access.
+             * Two destination classes are ALWAYS passed through regardless of
+             * registration status:
+             *   1. Subnet-local destinations (192.168.5.0/24): covers traffic to
+             *      the gateway (status dashboard) and DNS on 192.168.5.1.
+             *   2. Limited broadcast (255.255.255.255): used by DHCP Discover and
+             *      DHCP Request frames — without this, unregistered devices can
+             *      never obtain an IP address and cannot reach the gateway. */
+            bool b_local =
+                (WIFI_MNGR_REWARD_AP_SUBNET_U32 == (dst_ip & WIFI_MNGR_IPV4_SUBNET_MASK_24)) ||
+                (WIFI_MNGR_IPV4_LIMITED_BROADCAST == dst_ip);
+
+            if (!b_local)
             {
                 /* Destination outside 192.168.5.0/24 — check device allowance. */
                 if (!device_reg_mac_internet_allowed(p_eth + WIFI_MNGR_ETH_SRC_MAC_OFFSET))
@@ -835,29 +761,42 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
              * set before any mode/config call, so it is always visible here. */
             if (gb_napt_pending || gb_reward_ap_active)
             {
-                /* Forward DNS from STA to AP DHCP so clients receive a working
-                 * name server on their first lease. */
+                /* Forward DNS and enable NAPT only when STA is connected.
+                 * NAPT requires a valid STA IP to route AP-client traffic to
+                 * the internet; enabling it when STA is disconnected causes
+                 * `esp_netif_napt_enable` to read the wrong AP IP (the default
+                 * 192.168.4.1, set before our explicit 192.168.5.x assignment)
+                 * and registers that address as the NAPT-local address.  Any
+                 * packets to 192.168.5.1 are then mis-identified as external
+                 * and forwarded to STA (not connected) → silently dropped,
+                 * preventing ALL traffic to the gateway including the web UI. */
                 if (gb_sta_connected)
                 {
                     wifi_mngr_ap_dns_forward();
-                }
-                /* Assert STA as the default netif so that the lwIP routing layer
-                 * sends outbound traffic (incl. NATted AP-client traffic) through
-                 * the home network. */
-                esp_netif_set_default_netif(gp_netif_sta);
-                esp_err_t napt_err = esp_netif_napt_enable(gp_netif_ap);
-                if (ESP_OK != napt_err)
-                {
-                    ESP_LOGE(gp_tag, "esp_netif_napt_enable failed: 0x%x", napt_err);
+                    /* Assert STA as the default netif so that the lwIP routing
+                     * layer sends NATted AP-client traffic through the home
+                     * network. */
+                    esp_netif_set_default_netif(gp_netif_sta);
+                    esp_err_t napt_err = esp_netif_napt_enable(gp_netif_ap);
+                    if (ESP_OK != napt_err)
+                    {
+                        ESP_LOGE(gp_tag, "esp_netif_napt_enable failed: 0x%x", napt_err);
+                    }
+                    else
+                    {
+                        ESP_LOGI(gp_tag, "NAPT enabled on reward AP");
+                    }
                 }
                 else
                 {
-                    ESP_LOGI(gp_tag, "NAPT enabled on reward AP");
+                    /* STA not yet connected: (re)start the DHCP server.
+                     * Must run on every WIFI_EVENT_AP_START because the
+                     * ESP-IDF netif glue resets DHCP state on each AP restart. */
+                    (void)esp_netif_dhcps_stop(gp_netif_ap);
+                    (void)esp_netif_dhcps_start(gp_netif_ap);
                 }
-                /* Install byte-count hooks on the AP netif after each (re-)start so that
-                 * wifi_mngr_reward_ap_throughput_kbps() receives actual traffic data.
-                 * The lwIP struct netif is re-created on every AP restart, so we must
-                 * re-hook on every WIFI_EVENT_AP_START. */
+                /* Always re-install byte-count hooks because the lwIP struct
+                 * netif is re-created on every AP restart. */
                 wifi_mngr_ap_hooks_install();
             }
             /* Consume the pending flag regardless. */
@@ -867,18 +806,25 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
         {
             gb_sta_connected = false;
 
-            /* Enable config AP immediately — no retry counter threshold. */
-            wifi_mngr_config_ap_enable();
-
-            /* Schedule reconnect attempt in 10 s. */
-            esp_timer_stop(gp_reconnect_timer);
-            esp_timer_start_once(gp_reconnect_timer, WIFI_MNGR_RECONNECT_PERIOD_US);
+            if (gb_reconnect_immediate)
+            {
+                /* Config was just saved with new credentials: reconnect without delay. */
+                gb_reconnect_immediate = false;
+                esp_timer_stop(gp_reconnect_timer);
+                wifi_mngr_sta_connect();
+                ESP_LOGI(gp_tag, "STA disconnected — reconnecting immediately (config changed)");
+            }
+            else
+            {
+                /* Normal path: schedule reconnect attempt in 10 s. */
+                esp_timer_stop(gp_reconnect_timer);
+                esp_timer_start_once(gp_reconnect_timer, WIFI_MNGR_RECONNECT_PERIOD_US);
+                ESP_LOGI(gp_tag, "STA disconnected — reconnect in 10 s");
+            }
 
             /* Notify application. */
             esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_STA_DISCONNECTED, NULL, 0,
                 pdMS_TO_TICKS(10));
-
-            ESP_LOGI(gp_tag, "STA disconnected — config AP enabled, reconnect in 10 s");
         }
     }
     else if (IP_EVENT == event_base)
@@ -895,16 +841,24 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
             /* Stop pending reconnect timer. */
             esp_timer_stop(gp_reconnect_timer);
 
-            /* Disable config AP — STA now connected. */
-            wifi_mngr_config_ap_disable();
-
-            /* If the reward AP is already active (edge case: STA reconnected
-             * while AP was up), re-apply DNS and re-assert the default netif
-             * so NAPT resumes routing correctly. */
+            /* If the reward AP is already active: forward DNS, assert the
+             * default netif, and enable NAPT.  NAPT is intentionally deferred
+             * to this point (not enabled on WIFI_EVENT_AP_START) so that
+             * esp_netif_napt_enable always reads the correct AP IP (192.168.5.1)
+             * and a valid STA IP exists for the routing layer. */
             if (gb_reward_ap_active)
             {
                 wifi_mngr_ap_dns_forward();
                 esp_netif_set_default_netif(gp_netif_sta);
+                esp_err_t napt_err = esp_netif_napt_enable(gp_netif_ap);
+                if (ESP_OK != napt_err)
+                {
+                    ESP_LOGE(gp_tag, "esp_netif_napt_enable on STA connect failed: 0x%x", napt_err);
+                }
+                else
+                {
+                    ESP_LOGI(gp_tag, "NAPT enabled on reward AP (STA connected)");
+                }
             }
 
             /* Notify application. */
@@ -918,4 +872,77 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
 
 //--------------------------------------------------------------------------------------------------
 
-/*** end of file ***/
+/**
+ * \brief ESP-IDF event loop handler for #ESPORT_EVENT_CONFIG_CHANGED.
+ *
+ * Called when the user saves new configuration via the web UI.  If an SSID is
+ * configured and the STA is not yet connected, initiates a connection attempt
+ * immediately (bypassing the 10-second reconnect timer).  If the STA is already
+ * connected (e.g. user changed SSID/password), disconnects first; the
+ * \c WIFI_EVENT_STA_DISCONNECTED handler detects #gb_reconnect_immediate and
+ * reconnects with the fresh credentials without delay.
+ *
+ * \param[in] p_arg       Unused.
+ * \param[in] base        Event base (unused).
+ * \param[in] event_id    Event identifier (unused).
+ * \param[in] p_event_data Unused.
+ */
+static void wifi_mngr_config_changed_handler(void * p_arg, esp_event_base_t base, int32_t event_id,
+    void * p_event_data)
+{
+    (void)p_arg;
+    (void)base;
+    (void)event_id;
+    (void)p_event_data;
+
+    char new_ssid[33] = { 0 };
+    char new_pwd[65]  = { 0 };
+    config_mngr_wifi_ssid_get(new_ssid, sizeof(new_ssid));
+    config_mngr_wifi_password_get(new_pwd, sizeof(new_pwd));
+
+    if ('\0' == new_ssid[0])
+    {
+        /* No SSID configured — nothing to connect to. */
+        return;
+    }
+
+    /* Read what credentials the WiFi driver is currently using.
+     * Only reconnect if SSID or password actually changed to avoid
+     * disrupting the STA connection on every unrelated config save
+     * (e.g. session interval, pulse debounce, device nicknames). */
+    wifi_config_t cur_cfg;
+    memset(&cur_cfg, 0, sizeof(cur_cfg));
+    (void)esp_wifi_get_config(WIFI_IF_STA, &cur_cfg);
+
+    bool b_ssid_changed =
+        (0 != strncmp(new_ssid, (const char *)cur_cfg.sta.ssid, sizeof(cur_cfg.sta.ssid)));
+    bool b_pwd_changed =
+        (0 != strncmp(new_pwd, (const char *)cur_cfg.sta.password, sizeof(cur_cfg.sta.password)));
+
+    if (!b_ssid_changed && !b_pwd_changed)
+    {
+        /* Credentials unchanged — other config fields were saved; no reconnect needed. */
+        return;
+    }
+
+    if (gb_sta_connected)
+    {
+        /* STA is up with old credentials: arm immediate-reconnect flag then disconnect.
+         * WIFI_EVENT_STA_DISCONNECTED will call wifi_mngr_sta_connect() immediately
+         * (no 10 s delay) using the newly saved credentials. */
+        gb_reconnect_immediate = true;
+        esp_wifi_disconnect();
+        ESP_LOGI(gp_tag, "Config changed: STA credentials updated, reconnecting");
+    }
+    else
+    {
+        /* STA is not connected: connect now using the new credentials. */
+        esp_timer_stop(gp_reconnect_timer);
+        wifi_mngr_sta_connect();
+        ESP_LOGI(gp_tag, "Config changed: initiating STA connection with new credentials");
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/*** end of file */
