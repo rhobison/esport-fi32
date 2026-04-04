@@ -1294,6 +1294,7 @@ if not g_paused:             // decrement while above threshold OR within grace 
 - [ ] Dashboard throughput display updates on each JS fetch cycle.
 - [ ] Dashboard pause indicator is hidden when `countdown_paused` is `false`.
 - [ ] Dashboard pause indicator shows "⏸ Paused (low traffic)" when `countdown_paused` is `true`.
+- [ ] Devices table has no Rider column; the Nickname column shows &#9733; suffix for the current rider.
 
 ---
 
@@ -2067,11 +2068,11 @@ Replace the global counter with per-device credit logic. Pulse credits go to the
    - Note: `wifi_mngr_reward_ap_throughput_kbps()` is **not** removed from `wifi_manager.c`; it is still called from `http_server_api.c` for the `"reward_ap_throughput_kbps"` total-AP diagnostic field.
 
 9. **Session-closed handler** — transitions in all states:
-   - `TIME_CTR_STATE_SESSION` + `ESPORT_EVENT_SESSION_CLOSED`: reset `g_session_credits = 0`; cancel threshold timer → `TIME_CTR_STATE_IDLE`.
+   - `TIME_CTR_STATE_SESSION` + `ESPORT_EVENT_SESSION_CLOSED`: capture `g_session_credits`, reset it to `0`, cancel the threshold timer → `TIME_CTR_STATE_IDLE`, then flush the captured credits to the current rider's `device_reg` counter (same logic as the threshold callback). Credits are earned from session start; the threshold only gates when `ESPORT_EVENT_REWARD_AP_ON` is posted. Post `ESPORT_EVENT_COUNTER_CHANGED` with the updated counter value.
    - `TIME_CTR_STATE_EARNING` + `ESPORT_EVENT_SESSION_CLOSED`: transition to `TIME_CTR_STATE_IDLE`; post `ESPORT_EVENT_REWARD_AP_OFF`. (`g_paused` and `g_below_ticks` have been removed in task 8; no reset needed.)
    - Remove the old `TIME_CTR_STATE_AP_ACTIVE + SESSION_CLOSED → ignore` branch.
 
-10. **`time_ctr_get()`** — return `device_reg_entry_counter_get(device_reg_current_rider_get())`. Returns `0` if no rider is selected (`DEVICE_REG_NO_RIDER`).
+10. **`time_ctr_get()`** — return `device_reg_entry_counter_get(current_rider) + session_credits`, where `session_credits` is `g_session_credits` read under `g_spinlock` if `g_state == TIME_CTR_STATE_SESSION`, otherwise `0`. This ensures the dashboard displays live credit accumulation during the SESSION phase (before the threshold fires). Returns `0` if no rider is selected (`DEVICE_REG_NO_RIDER`).
 
 11. **`time_ctr_counter_set(uint32_t val)`** (Feature 3 API) — update semantics: call `device_reg_entry_counter_set(rider_idx, val)` for the current rider. If no rider is selected, return `ESP_ERR_INVALID_STATE` and log `ESP_LOGW`. Remove all AP on/off logic that this function previously contained (it was calling `wifi_mngr_reward_ap_set()` — now redundant).
 
@@ -2088,7 +2089,8 @@ Replace the global counter with per-device credit logic. Pulse credits go to the
 - [ ] Per-device counters only decrement when the per-device traffic gate is not paused (gating is handled inside `device_reg_tick()`).
 - [ ] `time_ctr_is_paused()` no longer exists in `main/inc/time_counter.h`.
 - [ ] `time_ctr_get()` returns the current rider's `device_reg` counter; returns `0` when no rider is selected.
-- [ ] Session closed in `SESSION` state: `g_session_credits` is reset to `0`, no credits are applied to any device.
+- [ ] `time_ctr_get()` includes `g_session_credits` during SESSION state: the counter increments each pulse and is visible on the dashboard without waiting for the threshold to fire.
+- [ ] Session closed in `SESSION` state: `g_session_credits` is reset to `0` and its value is flushed to the current rider's `device_reg` counter (credits are **not** discarded). `ESPORT_EVENT_REWARD_AP_ON` is **not** posted.
 - [ ] Session closed in `EARNING` state: state returns to `IDLE`; device counters continue to decrement normally in subsequent ticks.
 - [ ] No call to `wifi_mngr_reward_ap_set()` remains anywhere in `time_counter.c`.
 - [ ] `time_ctr_counter_set()` returns `ESP_ERR_INVALID_STATE` when no rider is selected.
@@ -2138,7 +2140,8 @@ Add a complete device registry management section to the `/config` page: list al
    - Parse `dev_N_remove`: if value `"1"`, call `device_reg_entry_remove(N)`, skip remaining fields for this index (indices shift — break the per-device loop after removal and rely on the form redirect to re-render correct state).
    - Parse `dev_N_nickname`: if non-empty and different from current, call `device_reg_entry_nickname_set(N, nickname)`.
    - Parse `dev_N_enabled`: present in POST body = `true`; absent = `false`; call `device_reg_entry_enabled_set(N, b_enabled)`.
-   - Parse `dev_N_counter` (`h:mm:ss` or `hh:mm:ss`): split on `:`, expect exactly two `:` separators; `strtoul` each token; compute `total_s = h*3600 + m*60 + s`; call `device_reg_entry_counter_set(N, total_s)` and `time_ctr_counter_set(total_s)` only if `N == device_reg_current_rider_get()`. On parse failure, accumulate an error.
+   - Parse `dev_N_counter` (`h:mm:ss` or `hh:mm:ss`): split on `:`, expect exactly two `:` separators; `strtoul` each token; validate minutes and seconds `0–59`, hours `≤ 1 193 046`; compute `total_s = h*3600 + m*60 + s`; call `device_reg_entry_counter_set(N, total_s)` and `time_ctr_counter_set(total_s)` only if `N == device_reg_current_rider_get()`. On parse failure, return HTTP 400.
+   - The counter input HTML must include an `oninput` handler that auto-formats as `hh:mm:ss` while the user types: strip non-digits, limit to 6 digits, and insert colons automatically (e.g. typing `13000` produces `1:30:00`). Use `maxlength="8"` to cap the formatted output.
 
    c. Add Device: parse `new_dev_mac` and `new_dev_nickname` if `action == "add_device"`. Call static helper `parse_mac_address(p_str, p_mac_out)` (see below). Call `device_reg_entry_add(mac, nickname)`. Handle `ESP_ERR_NO_MEM` ("Registry full — max 4 devices") and `ESP_ERR_INVALID_STATE` ("Device already registered") as validation errors.
 
@@ -2209,9 +2212,9 @@ Extend `GET /api/status` with a per-device `"devices"` array and add a "Devices"
        "paused": false
      }
      ```
-   - `"internet_active"`: `entry.b_enabled && entry.counter_s > 0`.
+   - `"counter_s"` and `"counter_hms"`: for the entry where `i == rider_idx`, use `time_ctr_get()` as the display counter instead of `entry.counter_s`. `time_ctr_get()` already adds `g_session_credits` when in SESSION state, so the devices table updates live as the rider pedals, not only after the session closes. For all other devices use `entry.counter_s`.
+   - `"internet_active"`: `entry.b_enabled && display_counter_s > 0` (use the same `display_counter_s`).
    - `"is_current_rider"`: `device_reg_current_rider_get() == i`.
-   - `"counter_hms"`: format using `snprintf`.
    - `"mac"`: format as `"%02X:%02X:%02X:%02X:%02X:%02X"`.
    - `"throughput_kbps"`: `device_reg_entry_throughput_kbps_get(i)`. Always present; `0` when device is not connected or idle.
    - `"paused"`: `device_reg_entry_is_paused(i)`. Always present; `false` when the traffic gate is not active for this device.
@@ -2267,6 +2270,7 @@ Extend `GET /api/status` with a per-device `"devices"` array and add a "Devices"
 - [ ] `"internet_active"` is `true` only when `enabled == true` and `counter_s > 0`.
 - [ ] `"is_current_rider"` is `true` for at most one device; `false` for all when `current_rider_idx == 255`.
 - [ ] `"counter_hms"` matches `counter_s` (e.g. `counter_s = 3661` → `"counter_hms": "1:01:01"`).
+- [ ] For the current rider during an active session (SESSION state), `counter_s` in the devices array increments on each pulse and does not wait for the session to close or the threshold to fire.
 - [ ] Dashboard "Devices" section is rendered in the HTML structure.
 - [ ] Device table rows update every 2 seconds via the JS polling loop without a full page reload.
 - [ ] Current rider is marked with ★ in the device table.

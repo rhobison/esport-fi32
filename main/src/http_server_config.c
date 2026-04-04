@@ -24,6 +24,7 @@
 
 #include "config_manager.h"
 #include "device_registry.h"
+#include "esp_wifi.h"
 #include "event_ids.h"
 #include "time_counter.h"
 #include "time_manager.h"
@@ -114,7 +115,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     /* ---- Static header ---- */
     static const char sc_header[] =
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-        "<title>esport-fi32 Configuration</title>"
+        "<title>ESPort-fi32 Configuration</title>"
         "<style>"
         "body{font-family:sans-serif;max-width:640px;margin:2em auto;padding:0 1em}"
         "h2{margin-bottom:.5em}"
@@ -130,7 +131,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "cursor:pointer;border-radius:3px;font-size:1em}"
         ".btn-reset:hover{background:#c33}"
         "</style></head><body>"
-        "<h2>esport-fi32 &mdash; Configuration</h2>";
+        "<h2>ESPort-fi32 &mdash; Configuration</h2>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_header);
 
     if (b_saved)
@@ -320,13 +321,21 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         snprintf(mac_cell, sizeof(mac_cell), "<td><span>%s</span></td>", mac_str);
         (void)httpd_resp_sendstr_chunk(p_req, mac_cell);
 
-        /* Counter input. */
-        char ctr_cell[128];
-        snprintf(ctr_cell, sizeof(ctr_cell),
+        /* Counter input — oninput auto-formats as h:mm:ss while typing;
+         * server-side parsing rejects malformed values with HTTP 400. */
+        char ctr_open[128];
+        snprintf(ctr_open, sizeof(ctr_open),
             "<td><input type=\"text\" name=\"dev_%u_counter\""
-            " placeholder=\"0:00:00\" value=\"%s\" maxlength=\"10\"></td>",
-            (unsigned)dev_i, ctr_str);
-        (void)httpd_resp_sendstr_chunk(p_req, ctr_cell);
+            " placeholder=\"0:00:00\" value=\"",
+            (unsigned)dev_i);
+        (void)httpd_resp_sendstr_chunk(p_req, ctr_open);
+        (void)httpd_resp_sendstr_chunk(p_req, ctr_str);
+        (void)httpd_resp_sendstr_chunk(p_req,
+            "\" maxlength=\"8\""
+            " oninput=\"var d=this.value.replace(/\\D/g,'').slice(0,6);"
+            "if(d.length>4)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4);"
+            "else if(d.length>2)this.value=d.slice(0,2)+':'+d.slice(2);"
+            "else this.value=d;\"></td>");
 
         /* Enabled checkbox. */
         char en_cell[128];
@@ -368,11 +377,72 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "<h4 style=\"margin-top:1em\">Add Device</h4>"
         "<p><label>MAC Address</label>"
         "<input type=\"text\" name=\"new_dev_mac\""
-        " placeholder=\"AA:BB:CC:DD:EE:FF\" maxlength=\"17\"></p>"
+        " placeholder=\"AA:BB:CC:DD:EE:FF\" maxlength=\"17\""
+        " oninput=\"var d=this.value.replace(/[^0-9A-Fa-f]/g,'').toUpperCase().slice(0,12);"
+        "if(d.length>10)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4,6)+':'"
+        "+d.slice(6,8)+':'+d.slice(8,10)+':'+d.slice(10);"
+        "else if(d.length>8)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4,6)+':'"
+        "+d.slice(6,8)+':'+d.slice(8);"
+        "else if(d.length>6)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4,6)+':'"
+        "+d.slice(6);"
+        "else if(d.length>4)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4);"
+        "else if(d.length>2)this.value=d.slice(0,2)+':'+d.slice(2);"
+        "else this.value=d;\"></p>"
         "<p><label>Nickname</label>"
         "<input type=\"text\" name=\"new_dev_nickname\" maxlength=\"15\"></p>"
         "<p><button type=\"submit\" name=\"action\" value=\"add_device\">"
         "Add Device</button></p>");
+
+    /* ---- Connected unregistered stations ---- */
+    {
+        wifi_sta_list_t sta_list;
+        memset(&sta_list, 0, sizeof(sta_list));
+        (void)esp_wifi_ap_get_sta_list(&sta_list);
+
+        /* Collect unregistered MACs. */
+        uint8_t unreg_mac[ESP_WIFI_MAX_CONN_NUM][6];
+        int     unreg_count = 0;
+        for (int j = 0; j < (int)sta_list.num; j++)
+        {
+            if ((int8_t)-1 == device_reg_mac_find(sta_list.sta[j].mac))
+            {
+                memcpy(unreg_mac[unreg_count], sta_list.sta[j].mac, 6U);
+                unreg_count++;
+            }
+        }
+
+        if (unreg_count > 0)
+        {
+            (void)httpd_resp_sendstr_chunk(p_req,
+                "<h4 style=\"margin-top:1em\">Connected Unregistered Stations</h4>"
+                "<p style=\"font-size:0.85em;color:#666\">"
+                "These devices are connected to the AP but not registered. "
+                "Click <b>Add</b> to register with the shown MAC.</p>"
+                "<table style=\"width:100%;border-collapse:collapse\">"
+                "<tr><th>MAC</th><th>Nickname</th><th></th></tr>");
+
+            for (int u = 0; u < unreg_count; u++)
+            {
+                char row[384];
+                snprintf(row, sizeof(row),
+                    "<tr>"
+                    "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
+                    "<td><input type=\"text\" name=\"unreg_%d_nick\" "
+                    "placeholder=\"Enter nickname\" maxlength=\"15\"></td>"
+                    "<td><input type=\"hidden\" name=\"unreg_%d_mac\" "
+                    "value=\"%02X:%02X:%02X:%02X:%02X:%02X\">"
+                    "<button type=\"submit\" name=\"action\" "
+                    "value=\"add_unreg_%d\">Add</button></td>"
+                    "</tr>",
+                    unreg_mac[u][0], unreg_mac[u][1], unreg_mac[u][2], unreg_mac[u][3],
+                    unreg_mac[u][4], unreg_mac[u][5], u, u, unreg_mac[u][0], unreg_mac[u][1],
+                    unreg_mac[u][2], unreg_mac[u][3], unreg_mac[u][4], unreg_mac[u][5], u);
+                (void)httpd_resp_sendstr_chunk(p_req, row);
+            }
+
+            (void)httpd_resp_sendstr_chunk(p_req, "</table>");
+        }
+    }
 
     /* ---- Footer ---- */
     static const char sc_footer[] =
@@ -883,6 +953,60 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
                 {
                     httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Failed to add device");
                     return ESP_FAIL;
+                }
+            }
+
+            /* Handle add_unreg_N actions from connected unregistered stations. */
+            if (0 == strncmp(action_val, "add_unreg_", 10U))
+            {
+                char *        endptr;
+                unsigned long unreg_idx = strtoul(action_val + 10U, &endptr, 10);
+                if ('\0' == *endptr && unreg_idx < (unsigned long)ESP_WIFI_MAX_CONN_NUM)
+                {
+                    char mac_key[20];
+                    char nick_key[20];
+                    char mac_str_u[20];
+                    char nick_str_u[DEVICE_REG_NICKNAME_MAX_LEN + 2U];
+                    snprintf(mac_key, sizeof(mac_key), "unreg_%lu_mac", unreg_idx);
+                    snprintf(nick_key, sizeof(nick_key), "unreg_%lu_nick", unreg_idx);
+
+                    if ((ESP_OK !=
+                            http_srv_form_field_get(body, mac_key, mac_str_u, sizeof(mac_str_u))) ||
+                        (ESP_OK != http_srv_form_field_get(body, nick_key, nick_str_u,
+                                       sizeof(nick_str_u))) ||
+                        ('\0' == nick_str_u[0]))
+                    {
+                        httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                            "MAC and nickname are required");
+                        return ESP_FAIL;
+                    }
+
+                    uint8_t mac_bytes_u[6];
+                    if (ESP_OK != parse_mac_address(mac_str_u, mac_bytes_u))
+                    {
+                        httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                            "Invalid MAC address format");
+                        return ESP_FAIL;
+                    }
+
+                    esp_err_t add_ret = device_reg_entry_add(mac_bytes_u, nick_str_u);
+                    if (ESP_ERR_NO_MEM == add_ret)
+                    {
+                        httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                            "Registry full — max 4 devices");
+                        return ESP_FAIL;
+                    }
+                    if (ESP_ERR_INVALID_STATE == add_ret)
+                    {
+                        httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                            "Device already registered");
+                        return ESP_FAIL;
+                    }
+                    if (ESP_OK != add_ret)
+                    {
+                        httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Failed to add device");
+                        return ESP_FAIL;
+                    }
                 }
             }
         }

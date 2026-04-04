@@ -389,6 +389,7 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
         |  g_session_credits accumulating from pulses          |
         |                                                      |
         |  On pulse:        g_session_credits += spp           |
+        |  time_ctr_get() = stored_counter + g_session_credits |
         |  On SESSION_CLOSED: flush credits to rider, -> IDLE  |
         +------------------+-----------------------------------+
                            |  threshold timer fires
@@ -427,7 +428,7 @@ if min_spd > 0 and speed_x10 < min_spd:
 
 ```c
 esp_err_t time_ctr_init(void);
-uint32_t  time_ctr_get(void);                        /* returns current rider's device_reg counter; 0 if no rider */
+uint32_t  time_ctr_get(void);                        /* current rider's device_reg counter + g_session_credits (SESSION state only); 0 if no rider */
 uint32_t  time_ctr_current_speed_x10_get(void);      /* most recent instantaneous speed in km/h x 10; 0 when idle */
 esp_err_t time_ctr_counter_set(uint32_t val);        /* delegates to device_reg; ESP_ERR_INVALID_STATE if no rider */
 ```
@@ -662,7 +663,7 @@ Serves a form pre-populated with current config values.
 
 | Element                   | Description                                                                                       |
 | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| Registered Devices table  | One row per device: nickname input, MAC (read-only), counter h:mm:ss input, enabled checkbox, current-rider radio, Remove button |
+| Registered Devices table  | One row per device: nickname input, MAC (read-only), counter h:mm:ss input (with `oninput` auto-format: strips non-digits, limits to 6 digits, inserts colons automatically as user types), enabled checkbox, current-rider radio, Remove button |
 | No Rider radio            | Clears the current rider assignment (`DEVICE_REG_NO_RIDER`)                                        |
 | Add Device sub-form       | MAC address text input (`AA:BB:CC:DD:EE:FF` or `AABBCCDDEEFF`), nickname text input, Add button  |
 

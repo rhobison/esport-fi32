@@ -217,7 +217,15 @@ uint32_t time_ctr_get(void)
     {
         return 0U;
     }
-    return device_reg_entry_counter_get(rider);
+
+    /* Include in-progress session credits so the dashboard shows live
+     * accumulation during SESSION state (before the threshold fires).
+     * Credits in EARNING state are already in the device registry counter. */
+    portENTER_CRITICAL(&g_spinlock);
+    uint32_t session_credits = (TIME_CTR_STATE_SESSION == g_state) ? g_session_credits : 0U;
+    portEXIT_CRITICAL(&g_spinlock);
+
+    return device_reg_entry_counter_get(rider) + session_credits;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -398,10 +406,12 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     (void)p_event_data;
 
     portENTER_CRITICAL(&g_spinlock);
-    time_ctr_state_t prev_state = g_state;
+    time_ctr_state_t prev_state       = g_state;
+    uint32_t         credits_to_flush = 0U;
     if ((TIME_CTR_STATE_SESSION == prev_state) || (TIME_CTR_STATE_EARNING == prev_state))
     {
         g_state           = TIME_CTR_STATE_IDLE;
+        credits_to_flush  = g_session_credits;
         g_session_credits = 0U;
     }
     portEXIT_CRITICAL(&g_spinlock);
@@ -409,10 +419,26 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     if (TIME_CTR_STATE_SESSION == prev_state)
     {
         (void)esp_timer_stop(gp_threshold_timer);
-        uint32_t zero = 0U;
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &zero, sizeof(zero),
-            0U);
-        ESP_LOGI(gp_tag, "SESSION->IDLE: session closed before threshold, credits discarded");
+
+        /* Flush accumulated session credits to the current rider's counter.
+         * Credits are earned from session start; the threshold only gates
+         * when internet access opens (ESPORT_EVENT_REWARD_AP_ON). */
+        if (credits_to_flush > 0U)
+        {
+            uint8_t rider = device_reg_current_rider_get();
+            if (DEVICE_REG_NO_RIDER != rider)
+            {
+                uint32_t current = device_reg_entry_counter_get(rider);
+                (void)device_reg_entry_counter_set(rider, current + credits_to_flush);
+            }
+        }
+
+        uint32_t counter_val = time_ctr_get();
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_val,
+            sizeof(counter_val), 0U);
+        ESP_LOGI(gp_tag,
+            "SESSION->IDLE: session closed before threshold, %" PRIu32 " credits flushed to rider",
+            credits_to_flush);
     }
     else if (TIME_CTR_STATE_EARNING == prev_state)
     {

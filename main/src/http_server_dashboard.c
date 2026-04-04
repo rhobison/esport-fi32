@@ -190,7 +190,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     static const char sc_page_hdr[] =
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>esport-fi32 Dashboard</title>"
+        "<title>ESPort-fi32 Dashboard</title>"
         "<style>"
         "body{font-family:sans-serif;max-width:720px;margin:1em auto;padding:0 .8em;"
         "font-size:14px}"
@@ -205,7 +205,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "border-radius:3px;text-decoration:none;margin-right:.5em}"
         "svg{display:block;width:100%;height:auto}"
         "</style></head><body>"
-        "<h2>esport-fi32 &mdash; Status Dashboard</h2>";
+        "<h2>ESPort-fi32 &mdash; Status Dashboard</h2>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_page_hdr);
 
     /* System section */
@@ -259,10 +259,10 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
                                           "<table id=\"devices-table\">"
                                           "<thead><tr>"
                                           "<th>Nickname</th><th>Counter</th><th>Internet</th>"
-                                          "<th>Connected</th><th>Traffic</th><th>Rider</th>"
+                                          "<th>Connected</th><th>Traffic</th>"
                                           "</tr></thead>"
                                           "<tbody id=\"devices-tbody\">"
-                                          "<tr><td colspan=\"6\">Loading&hellip;</td></tr>"
+                                          "<tr><td colspan=\"5\">Loading&hellip;</td></tr>"
                                           "</tbody></table></div>");
 
     /* Current Session section */
@@ -450,12 +450,11 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "+'<td>'+(dv.internet_active?'&#9989;':'&#10060;')+'</td>'"
         "+'<td>'+(dv.connected?'&#9989;':'&ndash;')+'</td>'"
         "+'<td>'+dv.throughput_kbps+' kbps'+pauseStr+'</td>'"
-        "+'<td>'+(dv.is_current_rider?'&#9733;':'')+'</td>'"
         "+'</tr>';"
         "tbody.innerHTML+=row;"
         "});"
         "if(d.devices.length===0){"
-        "tbody.innerHTML='<tr><td colspan=\"6\">No devices registered.</td></tr>';}"
+        "tbody.innerHTML='<tr><td colspan=\"5\">No devices registered.</td></tr>';}"
         "}"
         "e=document.getElementById('sess-state');if(e)e.textContent=d.session_state;"
         "e=document.getElementById('sess-speed');"
