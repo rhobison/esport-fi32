@@ -64,7 +64,7 @@ Key behaviour:
 - A **current rider** selector on the config page binds one device slot to the exercise bike: earned credits go to that slot.
 - Exercise sessions are detected and logged to NVS (non-volatile storage) as a ring buffer.
 - Date/time is synchronised via SNTP at boot; a POSIX timezone string converts stored UTC timestamps to local time for display.
-- A **configuration web portal** is always reachable: via the home network (station IP) when connected, or via a dedicated fallback config AP (`esport-fi32_config`) when STA connection is unavailable.
+- A **configuration web portal** is always reachable via the home network (station IP) when connected, or via the reward AP (`192.168.5.1`) at all times.
 - A **status dashboard** shows live state (per-device counters, AP status, session info, connected clients, NTP status) and session history.
 
 ---
@@ -256,23 +256,14 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
 
 **Responsibilities:**
 - Initialise the WiFi subsystem in **AP+STA mode** from the first call.
-- Manage three logical interfaces:
+- Manage two logical interfaces:
   1. **STA** - connects to the home network (`wifi_ssid` / `wifi_password`).
   2. **Reward SoftAP** - **always active from boot**; never torn down. `wifi_mngr_reward_ap_set(false)` is a no-op (logs and returns `ESP_OK` without changing state).
-  3. **Config SoftAP** - enabled only when STA is not connected.
-- Enable **IP_NAPT** on the AP netif so devices connected to either softAP can route traffic through the STA interface.
+- Enable **IP_NAPT** on the AP netif so devices connected to the reward SoftAP can route traffic through the STA interface.
 - Install **lwIP netif input and linkoutput hooks** on the reward AP netif to implement per-device internet access control:
-  - **Input hook** (`wifi_mngr_ap_input_hook`): For each received Ethernet frame, call `device_reg_mac_rx_bytes_add()` to count RX bytes for the source MAC. Then, for IPv4 frames with a destination outside the local subnet (`192.168.5.0/24`), check `device_reg_mac_internet_allowed()`. If the source MAC is not allowed (device unregistered, disabled, or counter == 0), call `pbuf_free()` and return `ERR_OK` to silently discard the frame. Allowed frames are forwarded to the original input function.
+  - **Input hook** (`wifi_mngr_ap_input_hook`): For each received Ethernet frame, call `device_reg_mac_rx_bytes_add()` to count RX bytes for the source MAC. Then apply the internet-access filter: two destination classes are **always** forwarded regardless of device registration: (1) subnet-local destinations (`192.168.5.0/24`) so unregistered devices can reach the gateway/dashboard; (2) limited broadcast (`255.255.255.255`) so DHCP Discover/Request frames are never dropped — without this, unregistered devices cannot obtain an IP address. All other IPv4 destinations (i.e., internet-bound traffic) are tested with `device_reg_mac_internet_allowed()`. If the source MAC is not allowed (device unregistered, disabled, or counter == 0), call `pbuf_free()` and return `ERR_OK` to silently discard the frame. Allowed frames are forwarded to the original input function.
   - **Output hook** (`wifi_mngr_ap_linkoutput_hook`): Call `device_reg_mac_tx_bytes_add()` to count TX bytes for the destination MAC, then forward to the original linkoutput function.
 - Post ESP events on the application event loop to notify other modules of connectivity changes.
-
-**Config SoftAP (fallback):**
-- SSID: `CONFIG_ESPORT_CONFIG_AP_SSID` (Kconfig build-time string, default `"esport-fi32_config"`)
-- Password: `CONFIG_ESPORT_CONFIG_AP_PASSWORD` (Kconfig build-time string, default `"esport-fi32_config"`)
-- IP: `192.168.4.1`
-- Enabled: **immediately on the first `WIFI_EVENT_STA_DISCONNECTED` event** (including the initial failed connection attempt at boot). There is no retry counter threshold — the portal is available without delay so the user can correct credentials at any time.
-- STA reconnection continues in the background every 10 seconds while the config AP is active.
-- Disabled: as soon as STA obtains an IP (`IP_EVENT_STA_GOT_IP`).
 
 **Reward SoftAP:**
 - SSID / password: from `config_manager`.
@@ -285,7 +276,10 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
 
 **STA reconnection:**
 - Retry indefinitely at 10-second intervals (not a configurable parameter; hardcoded).
-- On each `WIFI_EVENT_STA_DISCONNECTED` event, schedule a reconnect attempt.
+- On each `WIFI_EVENT_STA_DISCONNECTED` event, schedule a reconnect attempt in 10 seconds.
+- On `ESPORT_EVENT_CONFIG_CHANGED`, compare the newly saved `wifi_ssid` and `wifi_password` against the credentials currently loaded in the WiFi driver. If either changed:
+  - If the STA is not connected, cancel any pending reconnect timer and call `esp_wifi_connect()` immediately with the new credentials.
+  - If the STA is already connected, set an internal `immediate` flag and call `esp_wifi_disconnect()`. The subsequent `WIFI_EVENT_STA_DISCONNECTED` handler detects the flag, clears it, and reconnects immediately (no 10-second delay). Config changes that do not affect `wifi_ssid` or `wifi_password` (e.g. session timings, device nicknames) do not trigger any reconnect.
 - After reconnection, post `ESPORT_EVENT_STA_CONNECTED` on the app event loop.
 
 **API:**
@@ -349,11 +343,9 @@ void       time_mngr_timezone_apply(void);   /* call after timezone config chang
 
 ```
 CONFIG_ESPORT_PULSE_GPIO          int     default 6                  range 0 30
-CONFIG_ESPORT_CONFIG_AP_SSID      string  default "esport-fi32_config"  max 32 chars
-CONFIG_ESPORT_CONFIG_AP_PASSWORD  string  default "esport-fi32_config"  max 64 chars
 ```
 
-These are **build-time** constants set via `idf.py menuconfig`. They are not stored in NVS and cannot be changed at runtime. The config AP credentials are intentionally build-time only so the portal remains accessible even after a full NVS erase.
+These are **build-time** constants set via `idf.py menuconfig`. They are not stored in NVS and cannot be changed at runtime.
 
 **API:**
 
@@ -523,7 +515,7 @@ uint16_t  session_log_read(session_trk_record_t *out, uint16_t max_count);
 - Register the routes listed in §6.
 - The server runs regardless of which network interface is active; it is reachable on all active IPs.
 - Parse and validate POST body (URL-encoded form data) for the config endpoint. Reject malformed or out-of-range values with HTTP 400 and a human-readable error message.
-- After a successful config save that changes `wifi_ssid` or `wifi_password`, schedule a WiFi reconnect after a 1-second delay (to allow the HTTP response to be delivered first).
+- After a successful config save, post `ESPORT_EVENT_CONFIG_CHANGED`. The WiFi Manager handles any STA reconnect automatically if `wifi_ssid` or `wifi_password` changed.
 - Provide session export endpoints (CSV and JSON) with `Content-Disposition: attachment` so browsers download report files.
 - Provide a daily-aggregate JSON endpoint for chart rendering in the Web UI.
 
@@ -629,7 +621,7 @@ Serves a self-contained HTML page (generated as chunked C string literals). All 
 | Section          | Fields                                                                                                                                                                                                                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | System           | Current local time, NTP sync status, uptime                                                                                                                                                                                                                                   |
-| Wi-Fi            | STA status, home SSID, station IP, config AP status, reward AP status, reward AP SSID, reward AP IP (dashboard access URL from the reward AP network), connected clients count                                                                                                |
+| Wi-Fi            | STA status, home SSID, station IP, reward AP status, reward AP SSID, reward AP IP (dashboard access URL from the reward AP network), connected clients count                                                                                                |
 | Exercise Counter | Current rider's counter value (seconds + human-readable h:mm:ss), threshold, current speed (km/h, one decimal place), pulse-crediting status (Crediting / Gated (speed too low)) |
 | Current Session  | Status (idle / qualifying / active), qualification progress, live speed (km/h, rolling 5-pulse average)                                                                                                                                                                       |
 | Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count                                                                                                                                                                              |
@@ -721,7 +713,6 @@ Returns JSON:
   "sta_connected": true,
   "sta_ssid": "HomeNetwork",
   "sta_ip": "192.168.1.42",
-  "config_ap_active": false,
   "reward_ap_active": true,
   "reward_ap_ssid": "esport-fi32",
   "reward_ap_ip": "192.168.5.1",
@@ -839,11 +830,10 @@ Aggregation rules:
 2a. device_reg_init()         <- load device registry from NVS (esport_dev namespace)
 3. esp_event_loop_create_default()
 4. wifi_mngr_init()           <- start AP+STA; reward AP always-on from init
-   a. if wifi_ssid is empty: skip STA, enable config AP immediately
-   b. otherwise: attempt STA connection; config AP is enabled immediately on
-      the first WIFI_EVENT_STA_DISCONNECTED (no retry count needed); STA
-      keeps retrying every 10 s in the background until it gets an IP
-5. http_srv_init()            <- start web server (reachable immediately via config AP)
+   a. if wifi_ssid is empty: skip STA connection (reward AP still starts)
+   b. otherwise: attempt STA connection; STA keeps retrying every 10 s
+      in the background until it gets an IP
+5. http_srv_init()            <- start web server (reachable via reward AP at 192.168.5.1)
 6. time_mngr_init()           <- register callback: sync SNTP on STA_GOT_IP
 7. pulse_in_init()
 8. time_ctr_init()            <- start permanent tick timer; legacy migration from esport_cfg
@@ -856,16 +846,13 @@ Aggregation rules:
 ```
 app_main  →  wifi_manager attempts to connect to wifi_ssid
           →  STA_DISCONNECTED (first failed attempt or any later drop)
-          →  wifi_manager enables config AP immediately (no retry threshold)
           →  wifi_manager schedules reconnect in 10 s (loops indefinitely)
 
           →  STA connects → STA_GOT_IP event
           →  time_manager starts SNTP sync
-          →  wifi_manager disables config AP
-          →  (reward AP managed independently by time_counter)
+          →  (reward AP running independently; always-on)
 
           →  STA disconnects again → STA_DISCONNECTED event
-          →  wifi_manager re-enables config AP immediately
           →  wifi_manager schedules reconnect in 10 s
 ```
 
@@ -1046,7 +1033,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 - `config_manager`: if `nvs_flash_init()` returns `ESP_ERR_NVS_NO_FREE_PAGES` or `ESP_ERR_NVS_NEW_VERSION_FOUND`, call `nvs_flash_erase()` then `nvs_flash_init()` again. All config defaults are applied.
 - `session_log`: if the log namespace cannot be opened or its metadata is inconsistent (`head > MAX` or `count > MAX`), erase the log namespace and reinitialise.
 
-**No hardware factory-reset button.** Recovery is via the config web portal (accessible from the config AP).
+**No hardware factory-reset button.** Recovery is via the config web portal, accessible via the reward AP at `192.168.5.1` or via the home network STA IP.
 
 ---
 

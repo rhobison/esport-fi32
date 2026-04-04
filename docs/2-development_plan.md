@@ -53,8 +53,7 @@ Establish the complete file structure, all header files, the event bus definitio
 
 1. **Replace `firmware/Kconfig.projbuild`** with a new `menu "esport-fi32 Configuration"` containing:
    - `CONFIG_ESPORT_PULSE_GPIO` int, default 6, range 0 30.
-   - `CONFIG_ESPORT_CONFIG_AP_SSID` string, default `"esport-fi32_config"`, max 32 characters.
-   - `CONFIG_ESPORT_CONFIG_AP_PASSWORD` string, default `"esport-fi32_config"`, max 64 characters.
+   - ~~`CONFIG_ESPORT_CONFIG_AP_SSID`~~ / ~~`CONFIG_ESPORT_CONFIG_AP_PASSWORD`~~ — removed (Feature 4: Config AP removed).
    - Remove all pre-existing example entries.
 
 2. **Update `firmware/CMakeLists.txt`** so that `SRCS` lists all `.c` files under `firmware/src/` and `INCLUDE_DIRS` includes `firmware/inc/`.
@@ -149,7 +148,7 @@ Implement `config_manager.c` fully: NVS initialisation, factory defaults, typed 
 
 ### Goal
 
-Implement `wifi_manager.c` fully: AP+STA initialisation, config AP lifecycle (auto-enable on STA failure, disable on connection), reward AP enable/disable, NAPT, STA reconnection.
+Implement `wifi_manager.c` fully: AP+STA initialisation, always-on reward AP (no config AP), NAPT, STA reconnection.
 
 ### Inputs
 
@@ -163,13 +162,9 @@ Implement `wifi_manager.c` fully: AP+STA initialisation, config AP lifecycle (au
    - Init TCP/IP stack: `esp_netif_init()`, `esp_netif_create_default_wifi_ap()`, `esp_netif_create_default_wifi_sta()`.
    - Init WiFi with `WIFI_MODE_APSTA`.
    - Register event handlers for `WIFI_EVENT` and `IP_EVENT`.
-   - Attempt STA connection using `config_mngr_wifi_ssid_get/password()`. If SSID is empty, skip STA and enable config AP immediately.
+   - Attempt STA connection using `config_mngr_wifi_ssid_get/password()`. If SSID is empty, skip STA connection; reward AP still starts.
 
-2. Implement config AP logic:
-   - SSID `CONFIG_ESPORT_CONFIG_AP_SSID`, password `CONFIG_ESPORT_CONFIG_AP_PASSWORD`, channel 1, max 4 clients.
-   - Enable on `WIFI_EVENT_STA_DISCONNECTED` (after exhausting retry without IP).
-   - Disable on `IP_EVENT_STA_GOT_IP`.
-   - Post `ESPORT_EVENT_STA_CONNECTED` / `ESPORT_EVENT_STA_DISCONNECTED` on app event loop.
+2. ~~Implement config AP logic~~ — removed (Feature 4: reward AP is always-on).
 
 3. Implement STA reconnection: retry every 10 seconds indefinitely using an `esp_timer`.
 
@@ -184,9 +179,9 @@ Implement `wifi_manager.c` fully: AP+STA initialisation, config AP lifecycle (au
 ### Acceptance Criteria
 
 - [ ] `idf.py build` succeeds.
-- [ ] On boot with valid `wifi_ssid`: STA connects, config AP is NOT enabled.
-- [ ] On boot with invalid/empty `wifi_ssid`: config AP `esport-fi32_config` is active.
-- [ ] After STA disconnection, config AP is re-enabled within 1 reconnect cycle.
+- [ ] On boot with valid `wifi_ssid`: STA connects; reward AP is always active.
+- [ ] On boot with empty `wifi_ssid`: only reward AP is active (no STA attempt).
+- [ ] After STA disconnection, reconnect is retried every 10 s; reward AP stays active.
 - [ ] `wifi_mngr_reward_ap_set(true)` brings up the reward AP with correct SSID.
 - [ ] `wifi_mngr_reward_ap_set(false)` brings down the reward AP.
 - [ ] NAPT is enabled; a device on the reward AP can ping through to the internet when STA is connected.
@@ -474,7 +469,7 @@ Implement `http_server.c` with config form and JSON API endpoints. No HTML dashb
    - Parse each field using a simple key=value parser (no third-party library; implement as a local helper).
    - Validate and call the appropriate `config_set_*()` for each field.
    - Accumulate any validation errors.
-   - On success: call `time_mngr_timezone_apply()` if `timezone` changed; schedule WiFi reconnect if wifi credentials changed; redirect to `GET /config` with query `?saved=1`.
+   - On success: call `time_mngr_timezone_apply()` if `timezone` changed; post `ESPORT_EVENT_CONFIG_CHANGED` (the WiFi Manager handles reconnect automatically if wifi credentials changed); redirect to `GET /config` with query `?saved=1`.
    - On error: respond HTTP 400 with error details.
 
 4. **`GET /api/status`** handler:
@@ -539,7 +534,7 @@ Add the HTML status dashboard (`GET /`) to `http_server.c`.
    - Include an inline `<script>` block with a `setInterval(refresh, 2000)` loop (plus an immediate `refresh()` call on load) that fetches `/api/status` and updates every live span in-place.
    - Sections and fields as specified in §6.1:
      - **System**: current local time (formatted), NTP sync status, uptime.
-     - **Wi-Fi**: STA status + SSID + IP, config AP status, reward AP status.
+     - **Wi-Fi**: STA status + SSID + IP, reward AP status.
      - **Reward AP**: SSID, active/inactive, connected client count.
      - **Exercise Counter**: counter (seconds + `h:mm:ss`), threshold, AP indicator.
      - **Current Session**: state label (Idle / Qualifying / Active), live speed.
@@ -876,9 +871,9 @@ Wire all modules together in `main.c`, add final integration, and verify end-to-
 
    | #   | Test                                                                                    | Pass/Fail |
    | --- | --------------------------------------------------------------------------------------- | --------- |
-   | 1   | Boot with no wifi_ssid: config AP `esport-fi32_config` appears                          |           |
-   | 2   | Connect to config AP, open `192.168.4.1/config`, submit valid wifi credentials          |           |
-   | 3   | Device reboots/reconnects as STA; config AP disappears                                  |           |
+   | 1   | Boot with no wifi_ssid: reward AP `esport-fi32` is active at 192.168.5.1          |           |
+   | 2   | Connect to reward AP, open `192.168.5.1/config`, submit valid wifi credentials     |           |
+   | 3   | Device connects as STA; reward AP remains active                                   |           |
    | 4   | Simulate N pulses exceeding threshold; reward AP appears                                |           |
    | 5   | Counter decrements in real time; AP disappears at 0                                     |           |
    | 6   | More pulses during countdown extend the time                                            |           |
@@ -891,7 +886,7 @@ Wire all modules together in `main.c`, add final integration, and verify end-to-
    | 13  | Status dashboard renders all sections; live fields update every 2 s without page reload |           |
    | 14  | Config page: change timezone & verify local time display change                         |           |
    | 15  | Power cycle: counter = 0 (not persisted), config persists, session log persists         |           |
-   | 16  | STA disconnect mid-run: config AP reappears; reconnects; config AP disappears           |           |
+   | 16  | STA disconnect mid-run: reward AP stays active; STA reconnects after 10 s          |           |
    | 17  | NTP sync: after connecting to internet, timestamps are real UTC                         |           |
    | 18  | Debounce: rapid GPIO pulses filtered to one per debounce window                         |           |
    | 19  | `/api/sessions/export?format=csv` downloads CSV with expected columns                   |           |

@@ -93,10 +93,10 @@ void app_main(void)
 
     ESP_LOGI(gp_tag, "esport-fi32 starting. Build: " __DATE__ " " __TIME__);
 
-    /* Step 4: Start Wi-Fi — AP+STA mode; config AP enabled at first STA miss. */
+    /* Step 4: Start Wi-Fi — AP+STA mode; reward AP always-on from init. */
     ESP_ERROR_CHECK(wifi_mngr_init());
 
-    /* Step 5: HTTP server reachable immediately via config AP. */
+    /* Step 5: HTTP server reachable via reward AP (192.168.5.1) and STA IP. */
     ESP_ERROR_CHECK(http_srv_init());
 
     /* Step 6: Register SNTP sync callback; fires once STA has an IP. */

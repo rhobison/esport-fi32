@@ -21,7 +21,7 @@ ESPort-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 - **AP + STA simultaneous mode** with NAT — connected devices browse the internet via the home network.
 - **Exercise session tracking** — sessions are detected, timed, and stored in NVS as a ring buffer with start time, duration, distance, and average speed.
 - **NTP time synchronisation** — date/time is synced at boot; a configurable POSIX timezone string converts UTC timestamps to local time.
-- **Always-available configuration portal** — a web UI is reachable via the home network IP or via a dedicated fallback config AP (`esport-fi32_config`) when home network access is unavailable.
+- **Always-available configuration portal** — a web UI is reachable via the home network IP or via the reward AP (`192.168.5.1`) at all times.
 - **Live status dashboard** — shows the current counter value, AP state, connected clients, NTP status, session history, bar charts, and export actions.
 - **REST JSON API** — for status, session history, CSV/JSON export, and daily activity aggregates (suitable for charts).
 - **Speed-gated crediting** — a configurable minimum speed (`min_speed_to_increment_time_kmh_x10`) prevents credits accumulating when pedalling too slowly. The gate is disabled when set to zero.

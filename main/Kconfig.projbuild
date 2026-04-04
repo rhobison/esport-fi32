@@ -33,7 +33,8 @@ menu "esport-fi32 Configuration"
         default ""
         help
             SSID of the home network the device connects to as a station.
-            Leave empty to skip STA connection and use the config AP only.
+            Leave empty to skip STA connection (the reward AP remains
+            available for configuration at 192.168.5.1).
             Maximum 32 characters.  Build-time default; can be overridden
             at runtime via the web configuration portal (stored in NVS).
 
@@ -63,28 +64,10 @@ menu "esport-fi32 Configuration"
             characters.  Build-time default; can be overridden at runtime
             via the web configuration portal (stored in NVS).
 
-    config ESPORT_CONFIG_AP_SSID
-        string "Config SoftAP SSID"
-        default "esport-fi32_config"
-        help
-            SSID of the fallback configuration access point.
-            This AP is enabled automatically when the STA interface
-            is not connected, giving the user access to the web
-            configuration portal.  Maximum 32 characters.
-            Build-time constant; not stored in NVS.
-
-    config ESPORT_CONFIG_AP_PASSWORD
-        string "Config SoftAP Password"
-        default "esport-fi32_config"
-        help
-            WPA2 password for the fallback configuration access point.
-            Maximum 64 characters.  Build-time constant; not stored
-            in NVS.
-
     config ESPORT_AP_THRESHOLD_KBPS
         int "Reward AP idle throughput threshold (kbps)"
         range 0 65535
-        default 1
+        default 5
         help
             Combined RX+TX throughput (kbps) on the reward AP below which
             the countdown is considered idle and may pause.
