@@ -149,8 +149,8 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
     config_mngr_soft_ap_ssid_get(rew_ap_ssid, sizeof(rew_ap_ssid));
     wifi_mngr_reward_ap_ip_get(rew_ap_ip, sizeof(rew_ap_ip));
 
-    session_trk_live_status_t sess;
-    session_trk_live_status_get(&sess);
+    session_trk_live_status_t session;
+    session_trk_live_status_get(&session);
 
     /* Get connected station list once for device connection checks. */
     wifi_sta_list_t sta_list;
@@ -184,8 +184,8 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         "  \"devices\": [",
         (int64_t)now_utc, time_local_str, b_synced ? "true" : "false", uptime_s,
         b_sta ? "true" : "false", sta_ssid, sta_ip, b_rew_ap ? "true" : "false", rew_ap_ssid,
-        rew_ap_ip, ap_clients, counter_s, threshold, sess.p_state_name, sess.start_utc,
-        sess.duration_s, sess.pulse_count, sess.live_speed_kmh_x10, throughput, speed_x10,
+        rew_ap_ip, ap_clients, counter_s, threshold, session.p_state_name, session.start_utc,
+        session.duration_s, session.pulse_count, session.live_speed_kmh_x10, throughput, speed_x10,
         b_speed_gated ? "true" : "false", rider_idx);
 
     if (n >= (int)HTTP_SRV_JSON_BUF_LEN)
@@ -219,12 +219,17 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", entry.mac[0],
             entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5]);
 
-        char hms[20];
-        snprintf(hms, sizeof(hms), "%" PRIu32 ":%02" PRIu32 ":%02" PRIu32, entry.counter_s / 3600U,
-            (entry.counter_s % 3600U) / 60U, entry.counter_s % 60U);
-
-        bool     b_internet_active = entry.b_enabled && (entry.counter_s > 0U);
+        /* For the current rider, use time_ctr_get() so that in-progress
+         * session credits (g_session_credits, SESSION state only) are included
+         * in the live counter, not just the flushed device-registry value. */
         bool     b_is_rider        = (rider_idx == i);
+        uint32_t display_counter_s = b_is_rider ? time_ctr_get() : entry.counter_s;
+
+        char hms[20];
+        snprintf(hms, sizeof(hms), "%" PRIu32 ":%02" PRIu32 ":%02" PRIu32,
+            display_counter_s / 3600U, (display_counter_s % 3600U) / 60U, display_counter_s % 60U);
+
+        bool     b_internet_active = entry.b_enabled && (display_counter_s > 0U);
         uint32_t kbps              = device_reg_entry_throughput_kbps_get(i);
         bool     b_paused          = device_reg_entry_is_paused(i);
 
@@ -241,7 +246,7 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
               "\"connected\":%s,"
               "\"throughput_kbps\":%" PRIu32 ","
               "\"paused\":%s}",
-            (0U == i) ? "" : ",", i, entry.nickname, mac_str, entry.counter_s, hms,
+            (0U == i) ? "" : ",", i, entry.nickname, mac_str, display_counter_s, hms,
             entry.b_enabled ? "true" : "false", b_internet_active ? "true" : "false",
             b_is_rider ? "true" : "false", b_connected ? "true" : "false", kbps,
             b_paused ? "true" : "false");

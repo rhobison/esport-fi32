@@ -15,3 +15,10 @@ CONFIG_LWIP_STATS=y
 # RISC-V 32-bit.  2048 bytes is insufficient and causes stack overflow,
 # which manifests as a Cache access error (MCAUSE=0x19) on ESP32-C6.
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
+# Increase ESP timer task stack from 3584-byte default.  device_reg_tick()
+# allocates wifi_sta_list_t (~124 bytes) and snapshot arrays on the stack,
+# and calls esp_wifi_ap_get_sta_list(), config_mngr_* getters, ESP_LOGI
+# formatting, and wifi_mngr_dbg_filter_log().  3584 bytes is too tight and
+# causes a stack overflow that corrupts libc mutex state, resulting in an
+# abort() inside lock_acquire_generic.
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=6144
