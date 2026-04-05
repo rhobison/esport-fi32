@@ -90,4 +90,13 @@ menu "esport-fi32 Configuration"
             earn time credits.  A value of 30 represents 3.0 km/h.  Set to 0
             to disable the gate and credit all pulses regardless of speed.
 
+    config ESPORT_BUZZER_GPIO
+        int "Buzzer GPIO number"
+        range 0 21
+        default 11
+        help
+            GPIO number connected to the active buzzer.  The buzzer is driven
+            HIGH when on, LOW when off.  Build-time constant; cannot be
+            changed at runtime.
+
 endmenu

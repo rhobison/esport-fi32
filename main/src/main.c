@@ -30,6 +30,7 @@
 #include "time_counter.h"
 #include "time_manager.h"
 #include "wifi_manager.h"
+#include "buzzer.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -87,6 +88,9 @@ void app_main(void)
 
     /* Step 2a: Initialise device registry before WiFi so the MAC filter is ready. */
     ESP_ERROR_CHECK(device_reg_init());
+
+    /* Step 2b: Initialise buzzer GPIO and pattern timer. */
+    ESP_ERROR_CHECK(buzzer_init());
 
     /* Step 3: Create the default event loop before any module that posts. */
     ESP_ERROR_CHECK(esp_event_loop_create_default());

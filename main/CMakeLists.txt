@@ -28,6 +28,7 @@ idf_component_register(
         "src/http_server_export.c"
         "src/http_server_dashboard.c"
         "src/device_registry.c"
+        "src/buzzer.c"
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)
