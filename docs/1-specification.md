@@ -1087,6 +1087,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 - Language: **C11** (no C++).
 - RTOS: **FreeRTOS** via ESP-IDF.
 - Coding standard: **BARR-C:2018 (BARR-2018) is mandatory** for all source and header files.
+- **No Unicode characters** in source files, header files, or commit messages. Use only 7-bit ASCII. Doxygen comments and log strings must be plain ASCII (use e.g. `->` instead of `→`, `>=` instead of `≥`, `(R)` instead of `®`).
 - **Variable naming prefixes (BARR-C:2018):**
   - Variable names must be **entirely lowercase** (underscore-separated words). Only macros and constants defined with `#define` or `enum` use uppercase.
   - Pointer variables (including parameters) must start with `p_` (e.g. `char * p_buf`).

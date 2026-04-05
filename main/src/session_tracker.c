@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief Exercise session detection and tracking — full implementation.
+ * \brief Exercise session detection and tracking - full implementation.
  *
  * \date 2026-03-14
  */
@@ -139,7 +139,7 @@ esp_err_t session_trk_init(void)
         return ret;
     }
 
-    ESP_LOGI(gp_tag, "init complete — IDLE, timers created");
+    ESP_LOGI(gp_tag, "init complete - IDLE, timers created");
     return ESP_OK;
 }
 
@@ -168,7 +168,7 @@ void session_trk_live_status_get(session_trk_live_status_t * p_out)
         int64_t elapsed   = now_s - g_session_start_utc;
         p_out->duration_s = (elapsed > 0LL) ? (uint32_t)elapsed : 0U;
 
-        /* Live speed — pulse_input is the single source of truth and handles
+        /* Live speed - pulse_input is the single source of truth and handles
          * staleness internally (returns 0 when last pulse > 3 s ago). */
         uint32_t raw              = pulse_in_speed_kmh_x10_get();
         p_out->live_speed_kmh_x10 = (raw > (uint32_t)UINT16_MAX) ? UINT16_MAX : (uint16_t)raw;
@@ -352,7 +352,7 @@ static void session_trk_idle_timer_cb(TimerHandle_t p_timer)
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_SESSION_CLOSED, &record,
             sizeof(record), 0U);
     }
-    else /* SESSION_TRK_STATE_QUALIFYING — gap during qualification, discard */
+    else /* SESSION_TRK_STATE_QUALIFYING - gap during qualification, discard */
     {
         ESP_LOGI(gp_tag, "QUALIFYING→IDLE: idle gap before confirmation, discarding");
     }

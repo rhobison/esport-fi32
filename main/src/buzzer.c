@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief Buzzer feedback module — non-blocking pattern engine.
+ * \brief Buzzer feedback module - non-blocking pattern engine.
  *
  * Drives an active buzzer via GPIO using an esp_timer at a 50 ms time-base.
  * Four predefined beep patterns are supported; a new pattern immediately
@@ -319,7 +319,7 @@ static void buzzer_pattern_start_locked(const buzzer_step_t * p_steps, uint8_t c
  * \brief Periodic timer callback (50 ms).
  *
  * Runs in the esp_timer task.  All operations are O(1), spinlock-guarded,
- * and perform only GPIO writes — no heap, NVS, or logging.
+ * and perform only GPIO writes - no heap, NVS, or logging.
  *
  * \param[in] p_arg  Unused.
  */

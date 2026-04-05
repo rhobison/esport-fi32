@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief Wi-Fi manager (AP+STA mode with NAT) — full implementation.
+ * \brief Wi-Fi manager (AP+STA mode with NAT) - full implementation.
  *
  * The Config SoftAP has been removed (Feature 4): the Reward AP is always-on
  * from boot, so a separate fallback AP is no longer needed.
@@ -306,7 +306,7 @@ esp_err_t wifi_mngr_reward_ap_set(bool b_enable)
 
     if (b_enable == gb_reward_ap_active)
     {
-        /* Already in the requested state — guard against double-enable. */
+        /* Already in the requested state - guard against double-enable. */
         return ESP_OK;
     }
 
@@ -601,7 +601,7 @@ static void wifi_mngr_ap_dns_forward(void)
  */
 static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
 {
-    /* Per-device RX byte count — source MAC starts at byte WIFI_MNGR_ETH_SRC_MAC_OFFSET. */
+    /* Per-device RX byte count - source MAC starts at byte WIFI_MNGR_ETH_SRC_MAC_OFFSET. */
     device_reg_mac_rx_bytes_add((const uint8_t *)p->payload + WIFI_MNGR_ETH_SRC_MAC_OFFSET,
         (uint32_t)p->tot_len);
 
@@ -632,7 +632,7 @@ static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
              *   1. Subnet-local destinations (192.168.5.0/24): covers traffic to
              *      the gateway (status dashboard) and DNS on 192.168.5.1.
              *   2. Limited broadcast (255.255.255.255): used by DHCP Discover and
-             *      DHCP Request frames — without this, unregistered devices can
+             *      DHCP Request frames - without this, unregistered devices can
              *      never obtain an IP address and cannot reach the gateway. */
             bool b_local =
                 (WIFI_MNGR_REWARD_AP_SUBNET_U32 == (dst_ip & WIFI_MNGR_IPV4_SUBNET_MASK_24)) ||
@@ -640,7 +640,7 @@ static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
 
             if (!b_local)
             {
-                /* Destination outside 192.168.5.0/24 — check device allowance. */
+                /* Destination outside 192.168.5.0/24 - check device allowance. */
                 if (!device_reg_mac_internet_allowed(p_eth + WIFI_MNGR_ETH_SRC_MAC_OFFSET))
                 {
                     pbuf_free(p);
@@ -669,7 +669,7 @@ static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
  */
 static err_t wifi_mngr_ap_linkoutput_hook(struct netif * netif, struct pbuf * p)
 {
-    /* Per-device TX byte count — destination MAC starts at byte WIFI_MNGR_ETH_DST_MAC_OFFSET. */
+    /* Per-device TX byte count - destination MAC starts at byte WIFI_MNGR_ETH_DST_MAC_OFFSET. */
     device_reg_mac_tx_bytes_add((const uint8_t *)p->payload + WIFI_MNGR_ETH_DST_MAC_OFFSET,
         (uint32_t)p->tot_len);
 
@@ -812,14 +812,14 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
                 gb_reconnect_immediate = false;
                 esp_timer_stop(gp_reconnect_timer);
                 wifi_mngr_sta_connect();
-                ESP_LOGI(gp_tag, "STA disconnected — reconnecting immediately (config changed)");
+                ESP_LOGI(gp_tag, "STA disconnected - reconnecting immediately (config changed)");
             }
             else
             {
                 /* Normal path: schedule reconnect attempt in 10 s. */
                 esp_timer_stop(gp_reconnect_timer);
                 esp_timer_start_once(gp_reconnect_timer, WIFI_MNGR_RECONNECT_PERIOD_US);
-                ESP_LOGI(gp_tag, "STA disconnected — reconnect in 10 s");
+                ESP_LOGI(gp_tag, "STA disconnected - reconnect in 10 s");
             }
 
             /* Notify application. */
@@ -902,7 +902,7 @@ static void wifi_mngr_config_changed_handler(void * p_arg, esp_event_base_t base
 
     if ('\0' == new_ssid[0])
     {
-        /* No SSID configured — nothing to connect to. */
+        /* No SSID configured - nothing to connect to. */
         return;
     }
 
@@ -921,7 +921,7 @@ static void wifi_mngr_config_changed_handler(void * p_arg, esp_event_base_t base
 
     if (!b_ssid_changed && !b_pwd_changed)
     {
-        /* Credentials unchanged — other config fields were saved; no reconnect needed. */
+        /* Credentials unchanged - other config fields were saved; no reconnect needed. */
         return;
     }
 

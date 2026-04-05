@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief NVS-backed runtime configuration manager — full implementation.
+ * \brief NVS-backed runtime configuration manager - full implementation.
  *
  * \date 2026-03-14
  */

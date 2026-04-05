@@ -99,7 +99,7 @@ uint32_t pulse_in_last_interval_ms_get(void);
  * Returns \c 0 when fewer than two pulses have been accepted (interval is the
  * sentinel \c UINT32_MAX), when the stored interval is zero (division guard),
  * or when the last accepted pulse is older than 7.2 seconds (equivalent to
- * 1 km/h on a 200 cm wheel — rider treated as stopped).
+ * 1 km/h on a 200 cm wheel - rider treated as stopped).
  * Safe to call from any task context.
  *
  * \return Instantaneous speed in km/h x 10 (e.g. 123 = 12.3 km/h), or 0 when

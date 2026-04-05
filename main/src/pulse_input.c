@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief GPIO pulse input module — full implementation.
+ * \brief GPIO pulse input module - full implementation.
  *
  * \date 2026-03-14
  */
@@ -205,7 +205,7 @@ esp_err_t pulse_in_init(void)
             esp_err_to_name(ret));
     }
 
-    ESP_LOGI(gp_tag, "init complete — GPIO %d, debounce %u ms, cpp %" PRIu32 " cm",
+    ESP_LOGI(gp_tag, "init complete - GPIO %d, debounce %u ms, cpp %" PRIu32 " cm",
         CONFIG_ESPORT_PULSE_GPIO, (unsigned)debounce_ms, g_centimeters_per_pulse);
     return ESP_OK;
 }
@@ -295,7 +295,7 @@ static void IRAM_ATTR pulse_in_gpio_isr(void * p_arg)
     if (level != 0)
     {
         /* Confirmed rising edge: record the rise time for the bounce guard and
-           reset the transition flag.  Do NOT touch g_last_accepted_us — the
+           reset the transition flag.  Do NOT touch g_last_accepted_us - the
            inter-pulse debounce window must be measured from the previous
            accepted falling edge, not from the rising edge, so that fast
            consecutive pulses whose LOW period is shorter than g_debounce_us
@@ -343,7 +343,7 @@ static void IRAM_ATTR pulse_in_gpio_isr(void * p_arg)
     g_total_count++;
 
     /* esp_event_isr_post copies payload inline into a uint32_t-sized field (max 4 bytes).
-       No handler needs the exact ISR timestamp — all consumers derive timing from
+       No handler needs the exact ISR timestamp - all consumers derive timing from
        esp_timer_get_time() in handler context, where the sub-ms latency is negligible
        for second-resolution outputs. */
     BaseType_t hp_task_awoken = pdFALSE;
