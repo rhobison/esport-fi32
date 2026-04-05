@@ -77,6 +77,7 @@ Key behaviour:
 | Bike sensor input GPIO | **GPIO 10** (configurable at build time via `CONFIG_ESPORT_PULSE_GPIO`) |
 | GPIO internal pull     | Pull-up (sensor contact closes to GND)                                  |
 | GPIO active edge       | **Falling edge** (sensor closes → logic low pulse)                      |
+| Buzzer output GPIO     | **GPIO 11** (configurable at build time via `CONFIG_ESPORT_BUZZER_GPIO`). Active buzzer, HIGH = on, LOW = off. |
 
 > The GPIO number and active edge can be changed via Kconfig without changing source code.
 
@@ -103,6 +104,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 | `soft_ap_idle_throughput_timeout_s`     | `ap_idle_tmo`  | uint16 | `30`            | 0   | 65535       | Number of consecutive seconds that throughput must remain below the threshold before the countdown pauses.                                                                                                               |
 | `min_speed_to_increment_time_kmh_x10`   | `min_spd_x10`  | uint16 | `30`            | 0   | 65535       | Minimum instantaneous speed in km/h × 10 required for a pulse to earn time credits.  Set to `0` to disable the gate.                                                                                                     |
 | `reward_counter_s`                      | `reward_ctr_s` | uint32 | `0`             | 0   | (unlimited) | **Legacy / migration only.** Read once at boot by `time_ctr_init()` to seed the current rider's device-registry counter when that slot is still zero. No longer written by the firmware after Feature 4. |
+| `buzzer_enabled`                        | `buzzer_en`    | uint8  | `1` (true)      | 0   | 1           | Enable/disable all buzzer audio feedback.  When `0` (false), all `buzzer_*` calls are no-ops and the GPIO stays LOW. |
 
 ---
 
@@ -176,6 +178,7 @@ firmware/
     session_tracker.c
     session_log.c
     http_server.c
+    buzzer.c
 ```
 
 ---
@@ -367,7 +370,7 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
 - Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to `g_session_credits` (SESSION state) or directly to the current rider's device-registry counter (EARNING state). Pulses in IDLE state are ignored.
 - Listen for `ESPORT_EVENT_SESSION_OPENED` and start a one-shot timer for `soft_ap_start_threshold_s` seconds.
 - Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer, flush `g_session_credits` into the current rider's counter, and return to IDLE. If already EARNING, ignore the close event -- the AP stays on until the rider's counter drains.
-- Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, post `ESPORT_EVENT_COUNTER_CHANGED`.
+- Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, call `buzzer_speed_low_update(b_speed_low)` where `b_speed_low` is `true` when `g_state` is `TIME_CTR_STATE_SESSION` or `TIME_CTR_STATE_EARNING`, `min_speed > 0`, and `0 < current_speed < min_speed`. Then post `ESPORT_EVENT_COUNTER_CHANGED`.
 - Post `ESPORT_EVENT_REWARD_AP_ON` when the threshold timer fires (SESSION -> EARNING transition).
 - Post `ESPORT_EVENT_REWARD_AP_OFF` when the EARNING state exits to IDLE (session closed while earning).
 - **Legacy migration:** `time_ctr_init()` reads `config_mngr_reward_counter_s_get()` and, if the returned value is non-zero and the current rider's counter is still zero, seeds the rider's counter with that value.
@@ -461,6 +464,12 @@ esp_err_t time_ctr_counter_set(uint32_t val);        /* delegates to device_reg;
 **Handling qualification pulses in session stats:** Pulses during the qualification window also count toward the confirmed session (pulse_count includes them all from potential_start).
 
 **Re-read config on each session start** (re-read `start_session_interval_s`, `idle_session_interval_s`, `centimeters_per_pulse` from config_manager so changes apply to the next session without requiring a reboot).
+
+**Buzzer feedback** (calls into the Buzzer Module, §5.10):
+- ST_IDLE → ST_QUALIFYING: `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING)` (250 ms beep).
+- ST_QUALIFYING → ST_ACTIVE: `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED)` (500 ms beep).
+- ST_ACTIVE → ST_IDLE (idle timeout): `buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED)` (3 × 100 ms beeps).
+- ST_QUALIFYING → ST_IDLE (qualifying gap): no buzzer call.
 
 **API:**
 
@@ -611,6 +620,38 @@ bool      device_reg_entry_is_connected(uint8_t idx);
 
 ---
 
+### 5.10 Buzzer Module
+
+**File:** `buzzer.c` / `buzzer.h`
+
+**Responsibilities:**
+- GPIO output control for an active buzzer (`CONFIG_ESPORT_BUZZER_GPIO`, default GPIO 11, active HIGH).
+- Non-blocking pattern playback via an `esp_timer` running at a 50 ms period (`BUZZER_UNIT_MS`).
+- Four predefined beep patterns:
+
+| Pattern ID                          | Trigger                              | Sequence                                          |
+| ----------------------------------- | ------------------------------------ | ------------------------------------------------- |
+| `BUZZER_PATTERN_SESSION_QUALIFYING` | ST_IDLE → ST_QUALIFYING              | 5 units ON (250 ms)                               |
+| `BUZZER_PATTERN_SESSION_QUALIFIED`  | ST_QUALIFYING → ST_ACTIVE            | 10 units ON (500 ms)                              |
+| `BUZZER_PATTERN_SESSION_CLOSED`     | ST_ACTIVE → ST_IDLE (idle timeout)   | 2 ON, 1 OFF, 2 ON, 1 OFF, 2 ON (3 beeps)        |
+| `BUZZER_PATTERN_SPEED_LOW`          | Per tick: EARNING, 0 < speed < min   | 2 units ON (100 ms)                               |
+
+- **Interruption rule:** a new `buzzer_pattern_play()` call immediately interrupts the current pattern and starts the new one.  `buzzer_speed_low_update(false)` only stops a `SPEED_LOW` pattern; it does not interrupt other patterns.
+- Runtime enable/disable via `config_mngr_buzzer_enabled_get()`.  When disabled, all API calls are no-ops and the GPIO stays LOW.
+
+**Thread safety:** all playback state is protected by a `portMUX_TYPE` spinlock.  The timer callback is O(1), performs only GPIO writes, and is safe in the `esp_timer` task.  `buzzer_pattern_play()` and `buzzer_speed_low_update()` are safe to call from any task (app event loop, FreeRTOS timer daemon, `esp_timer` callback).
+
+**API:**
+
+```c
+esp_err_t buzzer_init(void);
+void      buzzer_pattern_play(buzzer_pattern_id_t pattern);
+void      buzzer_stop(void);
+void      buzzer_speed_low_update(bool b_active);
+```
+
+---
+
 ## 6. Web Interface
 
 ### 6.1 Status Dashboard — `GET /`
@@ -658,6 +699,7 @@ Serves a form pre-populated with current config values.
 | Session Start Window (s) | number     | `start_session_interval_s`  |
 | Pulse Debounce (ms)      | number     | `pulse_debounce_time_ms`    |
 | Timezone (POSIX TZ)      | text       | `timezone`                  |
+| Buzzer feedback          | checkbox   | `buzzer_enabled`            |
 
 **Device Management section** (rendered after the base parameters):
 
@@ -829,6 +871,7 @@ Aggregation rules:
 1. nvs_flash_init()
 2. config_mngr_init()         <- load config, apply factory defaults
 2a. device_reg_init()         <- load device registry from NVS (esport_dev namespace)
+2b. buzzer_init()             <- configure buzzer GPIO; create pattern timer
 3. esp_event_loop_create_default()
 4. wifi_mngr_init()           <- start AP+STA; reward AP always-on from init
    a. if wifi_ssid is empty: skip STA connection (reward AP still starts)
@@ -969,6 +1012,7 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | `ap_idle_tmo`  | uint16 | soft_ap_idle_throughput_timeout_s     |
 | `min_spd_x10`  | uint16 | min_speed_to_increment_time_kmh_x10   |
 | `reward_ctr_s` | uint32 | reward_counter_s (persisted counter)  |
+| `buzzer_en`    | uint8  | buzzer_enabled (0 = false, 1 = true)  |
 
 ### Namespace: `esport_log`
 

@@ -276,6 +276,16 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
 
+    /* buzzer_enabled */
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<p><label>Buzzer feedback</label>"
+        "<input type=\"checkbox\" name=\"buzzer_enabled\" value=\"1\"");
+    if (config_mngr_buzzer_enabled_get())
+    {
+        (void)httpd_resp_sendstr_chunk(p_req, " checked");
+    }
+    (void)httpd_resp_sendstr_chunk(p_req, "></p>");
+
     /* ---- Registered Devices section ---- */
     uint8_t dev_count = device_reg_count_get();
     uint8_t rider_idx = device_reg_current_rider_get();
@@ -767,6 +777,14 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
                 "Invalid min_speed_to_increment_time_kmh_x10");
             return ESP_FAIL;
         }
+    }
+
+    /* buzzer_enabled (checkbox: present = true, absent = false) */
+    {
+        char bz_val[4];
+        bool b_buzzer =
+            (ESP_OK == http_srv_form_field_get(body, "buzzer_enabled", bz_val, sizeof(bz_val)));
+        (void)config_mngr_buzzer_enabled_set(b_buzzer);
     }
 
     /* ---- Device Registry fields ---- */

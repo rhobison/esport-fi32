@@ -2377,9 +2377,9 @@ One beep unit = `BUZZER_UNIT_MS` = 50 ms.
 
 | Pattern ID constant | Trigger | Sequence |
 | ------------------- | ------- | -------- |
-| `BUZZER_PATTERN_SESSION_QUALIFYING` | ST_IDLE → ST_QUALIFYING | 10 units ON (`BUZZER_PATTERN_QUALIFYING_UNITS`) |
-| `BUZZER_PATTERN_SESSION_QUALIFIED` | ST_QUALIFYING → ST_ACTIVE | 20 units ON (`BUZZER_PATTERN_QUALIFIED_UNITS`) |
-| `BUZZER_PATTERN_SESSION_CLOSED` | ST_ACTIVE → ST_IDLE (idle timeout) | 4 ON, 1 OFF, 4 ON, 1 OFF, 4 ON (`BUZZER_PATTERN_CLOSED_BEEP_UNITS`, `BUZZER_PATTERN_CLOSED_GAP_UNITS`, `BUZZER_PATTERN_CLOSED_BEEP_COUNT`) |
+| `BUZZER_PATTERN_SESSION_QUALIFYING` | ST_IDLE → ST_QUALIFYING | 5 units ON (`BUZZER_PATTERN_QUALIFYING_UNITS`) |
+| `BUZZER_PATTERN_SESSION_QUALIFIED` | ST_QUALIFYING → ST_ACTIVE | 10 units ON (`BUZZER_PATTERN_QUALIFIED_UNITS`) |
+| `BUZZER_PATTERN_SESSION_CLOSED` | ST_ACTIVE → ST_IDLE (idle timeout) | 2 ON, 1 OFF, 2 ON, 1 OFF, 2 ON (`BUZZER_PATTERN_CLOSED_BEEP_UNITS`, `BUZZER_PATTERN_CLOSED_GAP_UNITS`, `BUZZER_PATTERN_CLOSED_BEEP_COUNT`) |
 | `BUZZER_PATTERN_SPEED_LOW` | Per tick: EARNING state, 0 < speed < min\_speed | 2 units ON (`BUZZER_PATTERN_SPEED_LOW_UNITS`) |
 
 ### Interruption Rule
@@ -2390,7 +2390,7 @@ A new call to `buzzer_pattern_play()` while a pattern is playing **immediately i
 
 Called from `time_ctr_tick_cb()` once per second.  `buzzer_speed_low_update(true)` is passed when **all** of the following hold; `buzzer_speed_low_update(false)` otherwise:
 
-1. `g_state == TIME_CTR_STATE_EARNING` (session confirmed and active)
+1. `g_state == TIME_CTR_STATE_SESSION` or `g_state == TIME_CTR_STATE_EARNING` (session open)
 2. `config_mngr_min_speed_to_increment_time_kmh_x10_get() > 0` (speed gate is enabled)
 3. `time_ctr_current_speed_x10_get() > 0` (rider is moving — not stopped)
 4. `time_ctr_current_speed_x10_get() < min_speed_to_increment_time_kmh_x10` (speed below threshold)
@@ -2422,9 +2422,9 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
    - Define timing and pattern constants (each replacement value in parentheses):
      ```c
      #define BUZZER_UNIT_MS                   (50U)
-     #define BUZZER_PATTERN_QUALIFYING_UNITS  (10U)
-     #define BUZZER_PATTERN_QUALIFIED_UNITS   (20U)
-     #define BUZZER_PATTERN_CLOSED_BEEP_UNITS (4U)
+     #define BUZZER_PATTERN_QUALIFYING_UNITS  (5U)
+     #define BUZZER_PATTERN_QUALIFIED_UNITS   (10U)
+     #define BUZZER_PATTERN_CLOSED_BEEP_UNITS (2U)
      #define BUZZER_PATTERN_CLOSED_GAP_UNITS  (1U)
      #define BUZZER_PATTERN_CLOSED_BEEP_COUNT (3U)
      #define BUZZER_PATTERN_SPEED_LOW_UNITS   (2U)
@@ -2537,9 +2537,9 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 **Acceptance Criteria**
 
 - [ ] `idf.py build` succeeds with zero errors and warnings.
-- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING)`: GPIO HIGH for 500 ms (10 × 50 ms), then LOW.
-- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED)`: GPIO HIGH for 1 000 ms (20 × 50 ms), then LOW.
-- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED)`: sequence HIGH 200 ms, LOW 50 ms, HIGH 200 ms, LOW 50 ms, HIGH 200 ms, then LOW.
+- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING)`: GPIO HIGH for 250 ms (5 × 50 ms), then LOW.
+- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED)`: GPIO HIGH for 500 ms (10 × 50 ms), then LOW.
+- [ ] `buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED)`: sequence HIGH 100 ms, LOW 50 ms, HIGH 100 ms, LOW 50 ms, HIGH 100 ms, then LOW.
 - [ ] `buzzer_pattern_play(BUZZER_PATTERN_SPEED_LOW)`: GPIO HIGH for 100 ms (2 × 50 ms), then LOW.
 - [ ] Calling `buzzer_pattern_play()` while a pattern is in progress immediately starts the new pattern (old pattern truncated).
 - [ ] `buzzer_stop()` sets GPIO LOW immediately and halts the timer.
@@ -2620,8 +2620,8 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 **Acceptance Criteria**
 
 - [ ] `idf.py build` succeeds with zero errors and warnings.
-- [ ] First pulse (ST_IDLE → ST_QUALIFYING): `BUZZER_PATTERN_SESSION_QUALIFYING` plays (500 ms HIGH).
-- [ ] Qualify timer fires (ST_QUALIFYING → ST_ACTIVE): `BUZZER_PATTERN_SESSION_QUALIFIED` plays (1 000 ms HIGH).
+- [ ] First pulse (ST_IDLE → ST_QUALIFYING): `BUZZER_PATTERN_SESSION_QUALIFYING` plays (250 ms HIGH).
+- [ ] Qualify timer fires (ST_QUALIFYING → ST_ACTIVE): `BUZZER_PATTERN_SESSION_QUALIFIED` plays (500 ms HIGH).
 - [ ] Idle timer fires in ST_ACTIVE: `BUZZER_PATTERN_SESSION_CLOSED` plays (3 × short beep sequence).
 - [ ] Idle timer fires in ST_QUALIFYING (qualifying gap, no session confirmed): no buzzer pattern plays.
 - [ ] With `buzzer_enabled == false`, none of the above patterns produce any GPIO toggle.
@@ -2630,7 +2630,7 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 
 ### Phase 5.4 — Time Counter: Speed-Low Beep Integration
 
-**Goal:** Call `buzzer_speed_low_update()` from the time counter 1-second tick callback, gated on `TIME_CTR_STATE_EARNING` state and the speed-to-threshold comparison.
+**Goal:** Call `buzzer_speed_low_update()` from the time counter 1-second tick callback, gated on `TIME_CTR_STATE_SESSION` or `TIME_CTR_STATE_EARNING` state and the speed-to-threshold comparison.
 
 **Inputs**
 - `main/src/time_counter.c` (existing, Feature 4.3 output)
@@ -2644,7 +2644,7 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 2. In `time_ctr_tick_cb()`, after the unconditional `device_reg_tick()` call, add the speed-low beep computation:
    ```c
    bool b_speed_low = false;
-   if (g_state == TIME_CTR_STATE_EARNING)
+   if ((g_state == TIME_CTR_STATE_SESSION) || (g_state == TIME_CTR_STATE_EARNING))
    {
        uint32_t speed_x10 = time_ctr_current_speed_x10_get();
        uint16_t min_spd   = config_mngr_min_speed_to_increment_time_kmh_x10_get();
@@ -2652,7 +2652,7 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
    }
    buzzer_speed_low_update(b_speed_low);
    ```
-   When `g_state` is `TIME_CTR_STATE_IDLE` or `TIME_CTR_STATE_SESSION`, `b_speed_low` remains `false` and `buzzer_speed_low_update(false)` is called, which cleanly stops any residual speed-low beep.
+   When `g_state` is `TIME_CTR_STATE_IDLE`, `b_speed_low` remains `false` and `buzzer_speed_low_update(false)` is called, which cleanly stops any residual speed-low beep.
 
 3. In the `ESPORT_EVENT_SESSION_CLOSED` handler inside `time_counter.c` (where the state returns to `TIME_CTR_STATE_IDLE`), add an explicit `buzzer_speed_low_update(false)` call to stop the speed-low beep immediately without waiting for the next tick.
 
@@ -2665,11 +2665,11 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 **Acceptance Criteria**
 
 - [ ] `idf.py build` succeeds with zero errors and warnings.
-- [ ] In `TIME_CTR_STATE_EARNING` with `min_speed > 0`, `0 < speed < min_speed`: `buzzer_speed_low_update(true)` is called each tick; GPIO pulses HIGH for 100 ms once per second.
+- [ ] In `TIME_CTR_STATE_SESSION` or `TIME_CTR_STATE_EARNING` with `min_speed > 0`, `0 < speed < min_speed`: `buzzer_speed_low_update(true)` is called each tick; GPIO pulses HIGH for 100 ms once per second.
 - [ ] Speed reaches 0: `buzzer_speed_low_update(false)` is called; active speed-low beep stops immediately.
 - [ ] Speed reaches or exceeds `min_speed`: `buzzer_speed_low_update(false)` is called; no more speed-low beeps.
 - [ ] `min_speed == 0` (gate disabled): `buzzer_speed_low_update(false)` is called every tick; no speed-low beep is ever produced.
-- [ ] State is `TIME_CTR_STATE_IDLE` or `TIME_CTR_STATE_SESSION`: `buzzer_speed_low_update(false)` is called; no speed-low beep produced.
+- [ ] State is `TIME_CTR_STATE_IDLE`: `buzzer_speed_low_update(false)` is called; no speed-low beep produced.
 - [ ] `ESPORT_EVENT_SESSION_CLOSED` received: `buzzer_speed_low_update(false)` is called immediately; speed-low beep stops without waiting for the next tick.
 - [ ] With `buzzer_enabled == false`: no GPIO toggle occurs regardless of speed or state.
 
@@ -2745,12 +2745,12 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
    - **Thread safety note:** the `esp_timer` callback is O(1), spinlock-guarded, and does only GPIO writes. `buzzer_pattern_play()` and `buzzer_speed_low_update()` are safe to call from any task (app event loop, FreeRTOS timer daemon, `esp_timer` callback).
 
 5. **§5.6 Session Tracker** — add a note under the state-transition descriptions:
-   - ST_IDLE → ST_QUALIFYING: `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING)` (10 units, 500 ms).
-   - ST_QUALIFYING → ST_ACTIVE: `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED)` (20 units, 1 000 ms).
-   - ST_ACTIVE → ST_IDLE (idle timeout): `buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED)` (3 × 4-unit beeps).
+   - ST_IDLE → ST_QUALIFYING: `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING)` (5 units, 250 ms).
+   - ST_QUALIFYING → ST_ACTIVE: `buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED)` (10 units, 500 ms).
+   - ST_ACTIVE → ST_IDLE (idle timeout): `buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED)` (3 × 2-unit beeps).
    - ST_QUALIFYING → ST_IDLE (qualifying gap): no buzzer call.
 
-6. **§5.5 Time Counter & Reward AP State Machine** — add a note to the tick callback description: `buzzer_speed_low_update(b_speed_low)` is called once per second; `b_speed_low` is `true` when `TIME_CTR_STATE_EARNING` is active, `min_speed > 0`, and `0 < current_speed < min_speed`.
+6. **§5.5 Time Counter & Reward AP State Machine** — add a note to the tick callback description: `buzzer_speed_low_update(b_speed_low)` is called once per second; `b_speed_low` is `true` when `TIME_CTR_STATE_SESSION` or `TIME_CTR_STATE_EARNING` is active, `min_speed > 0`, and `0 < current_speed < min_speed`.
 
 7. **§6.2 Configuration Page** — add "Buzzer feedback" to the field table: checkbox (`true`/`false`), description "Enable/disable all audio feedback from the buzzer".
 

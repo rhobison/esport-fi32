@@ -22,6 +22,7 @@ extern "C"
 // Includes
 //==================================================================================================
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -329,6 +330,9 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
  *
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
+bool      config_mngr_buzzer_enabled_get(void);
+esp_err_t config_mngr_buzzer_enabled_set(bool b_enabled);
+
 esp_err_t config_mngr_reset_to_defaults(void);
 
 #ifdef __cplusplus

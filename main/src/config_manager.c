@@ -58,6 +58,8 @@
 #define CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S ((uint16_t)CONFIG_ESPORT_AP_IDLE_TIMEOUT_S)
 #define CONFIG_MNGR_DEF_MIN_SPEED_X10     ((uint16_t)CONFIG_ESPORT_MIN_SPEED_KMH_X10)
 #define CONFIG_MNGR_DEF_REWARD_COUNTER_S  ((uint32_t)0U)
+#define CONFIG_MNGR_KEY_BUZZER_ENABLED    ("buzzer_en")
+#define CONFIG_MNGR_DEF_BUZZER_ENABLED    ((uint8_t)1U)
 
 /* String size limits (spec §5.1). */
 #define CONFIG_MNGR_MAX_SSID_LEN (32U) /* max 32 chars + NUL */
@@ -154,6 +156,17 @@ esp_err_t config_mngr_init(void)
         CONFIG_MNGR_DEF_MIN_SPEED_X10);
     ret |= config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_REWARD_COUNTER_S,
         CONFIG_MNGR_DEF_REWARD_COUNTER_S);
+
+    /* buzzer_enabled (uint8: 0=false, 1=true) */
+    {
+        uint8_t   bz_val = 0U;
+        esp_err_t bz_ret = nvs_get_u8(handle, CONFIG_MNGR_KEY_BUZZER_ENABLED, &bz_val);
+        if (ESP_ERR_NVS_NOT_FOUND == bz_ret)
+        {
+            ret |=
+                nvs_set_u8(handle, CONFIG_MNGR_KEY_BUZZER_ENABLED, CONFIG_MNGR_DEF_BUZZER_ENABLED);
+        }
+    }
 
     if (ESP_OK == ret)
     {
@@ -387,6 +400,53 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val)
 
 //--------------------------------------------------------------------------------------------------
 
+bool config_mngr_buzzer_enabled_get(void)
+{
+    nvs_handle_t handle;
+    uint8_t      val = CONFIG_MNGR_DEF_BUZZER_ENABLED;
+
+    esp_err_t ret = nvs_open(CONFIG_MNGR_NAMESPACE, NVS_READONLY, &handle);
+    if (ESP_OK == ret)
+    {
+        (void)nvs_get_u8(handle, CONFIG_MNGR_KEY_BUZZER_ENABLED, &val);
+        nvs_close(handle);
+    }
+
+    return (val != 0U);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t config_mngr_buzzer_enabled_set(bool b_enabled)
+{
+    nvs_handle_t handle;
+    esp_err_t    ret = nvs_open(CONFIG_MNGR_NAMESPACE, NVS_READWRITE, &handle);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "config_mngr_buzzer_enabled_set open failed: 0x%x", ret);
+        return ret;
+    }
+
+    ret = nvs_set_u8(handle, CONFIG_MNGR_KEY_BUZZER_ENABLED, (uint8_t)(b_enabled ? 1U : 0U));
+    if (ESP_OK == ret)
+    {
+        ret = nvs_commit(handle);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGE(gp_tag, "config_mngr_buzzer_enabled_set commit failed: 0x%x", ret);
+        }
+    }
+    else
+    {
+        ESP_LOGE(gp_tag, "nvs_set_u8(%s) failed: 0x%x", CONFIG_MNGR_KEY_BUZZER_ENABLED, ret);
+    }
+
+    nvs_close(handle);
+    return ret;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 esp_err_t config_mngr_reset_to_defaults(void)
 {
     nvs_handle_t handle;
@@ -424,6 +484,7 @@ esp_err_t config_mngr_reset_to_defaults(void)
         nvs_set_u16(handle, CONFIG_MNGR_KEY_AP_IDLE_TIMEOUT_S, CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S);
     ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_MIN_SPEED_X10, CONFIG_MNGR_DEF_MIN_SPEED_X10);
     ret |= nvs_set_u32(handle, CONFIG_MNGR_KEY_REWARD_COUNTER_S, CONFIG_MNGR_DEF_REWARD_COUNTER_S);
+    ret |= nvs_set_u8(handle, CONFIG_MNGR_KEY_BUZZER_ENABLED, CONFIG_MNGR_DEF_BUZZER_ENABLED);
 
     if (ESP_OK == ret)
     {

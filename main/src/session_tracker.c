@@ -25,6 +25,7 @@
 #include "event_ids.h"
 #include "pulse_input.h"
 #include "time_manager.h"
+#include "buzzer.h"
 
 //==================================================================================================
 // Internal Constants/Macros/Datatypes
@@ -250,6 +251,8 @@ static void session_trk_pulse_handler(void * p_handler_arg, esp_event_base_t bas
         g_pulse_count        = 1U;
         g_state              = SESSION_TRK_STATE_QUALIFYING;
 
+        buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFYING);
+
         TickType_t qualify_ticks =
             pdMS_TO_TICKS((uint32_t)g_start_interval_s * SESSION_TRK_MS_PER_S);
         TickType_t idle_ticks = pdMS_TO_TICKS((uint32_t)g_idle_interval_s * SESSION_TRK_MS_PER_S);
@@ -288,6 +291,8 @@ static void session_trk_qualify_timer_cb(TimerHandle_t p_timer)
 
     g_state = SESSION_TRK_STATE_ACTIVE;
 
+    buzzer_pattern_play(BUZZER_PATTERN_SESSION_QUALIFIED);
+
     int64_t elapsed_ms   = esp_timer_get_time() / 1000LL - g_potential_start_ms;
     int64_t elapsed_s    = elapsed_ms / 1000LL;
     g_session_start_utc  = (int64_t)time_mngr_utc_get() - elapsed_s;
@@ -319,6 +324,8 @@ static void session_trk_idle_timer_cb(TimerHandle_t p_timer)
 
     if (SESSION_TRK_STATE_ACTIVE == g_state)
     {
+        buzzer_pattern_play(BUZZER_PATTERN_SESSION_CLOSED);
+
         int64_t  raw_duration = (g_last_pulse_ms - g_potential_start_ms) / 1000LL;
         uint32_t duration_s =
             (raw_duration > (int64_t)UINT32_MAX) ? UINT32_MAX : (uint32_t)raw_duration;

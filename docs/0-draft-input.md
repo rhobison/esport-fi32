@@ -39,9 +39,9 @@ all the time since boot and all devices can access the dashboard (for example), 
 access only if the counter is greater than 0. -- planned
 5. A buzzer will be added to the hardware. The buzzer is an active buzzer, meaning it can be enabled/disabled via a GPIO to produce the sound (on/off). The GPIO pin must be configurable via the menuconfig and the default value is GPIO 11. The buzzer can be on or off for a given number of beep units. One beep unit is defined as 50ms.
 The buzzer will be used in the following situations:
-    - When a session is started (start qualifying), a short beep of 10 units should be issued.
-    - When a session is qualified, a long beep of 20 units should be issued.
+    - When a session is started (start qualifying), a short beep of 5 units should be issued.
+    - When a session is qualified, a long beep of 10 units should be issued.
     - During the session, if the speed is below the minimum threshold, a short beep of 2 units should be issued every second while the speed is below the threshold. The beep should stop completely if the speed reaches 0.
-    - When a session is closed, 3 short beeps of 4 units should be issued in sequence, with 1 unit off between them: (4 units ON, 1 unit OFF, 4 units ON, 1 unit OFF, 4 units ON).
+    - When a session is closed, 3 short beeps of 2 units should be issued in sequence, with 1 unit off between them: (2 units ON, 1 unit OFF, 2 units ON, 1 unit OFF, 2 units ON).
     - All beep timings should be defined as a constant (#define, for example) according to the number of beep units.
 There must be a way to disable the buzzer in the `/config` page. -- planned.

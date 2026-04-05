@@ -33,6 +33,7 @@ ESPort-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 - **Speed-gated crediting** — a configurable minimum speed (`min_speed_to_increment_time_kmh_x10`) prevents credits accumulating when pedalling too slowly. The gate is disabled when set to zero.
 - **Per-device traffic-gated countdown** — each device's countdown pauses independently when no meaningful internet traffic is detected, preventing credits from draining during idle screen time.
 - **Persistent per-device counters** — device registry data is saved to NVS every 60 seconds and on counter-reaching-zero; counters survive power cycles.
+- **Buzzer feedback** — an active buzzer on a configurable GPIO provides audio cues: a beep on session start, a longer beep on session qualification, a triple-beep on session close, and a short tick when pedalling too slowly. Can be disabled via the config page.
 - **Fully configurable** — all parameters (SSID, password, seconds-per-pulse, thresholds, timezone, ...) are stored in NVS and can be changed at runtime via the web UI without reflashing.
 
 ---
@@ -84,6 +85,7 @@ Lets you set all parameters without reflashing:
 | Bike sensor GPIO | GPIO 10 (configurable via `CONFIG_ESPORT_PULSE_GPIO`) |
 | GPIO pull        | Internal pull-up (sensor closes to GND)               |
 | Active edge      | Falling edge                                          |
+| Buzzer GPIO      | GPIO 11 (configurable via `CONFIG_ESPORT_BUZZER_GPIO`); active HIGH |
 
 Connect the exercise bike's reed switch or hall-effect sensor between **GPIO 10** and **GND**.
 
@@ -146,6 +148,7 @@ All parameters are stored in NVS and can be changed at runtime via the web UI.
 | `soft_ap_dec_time_above_threshold_kbps` | `1`     | Per-device traffic threshold (kbps) below which countdown pauses                              |
 | `soft_ap_idle_throughput_timeout_s`     | `30`    | Seconds of low traffic per device before countdown actually pauses                             |
 | `min_speed_to_increment_time_kmh_x10`   | `30`    | Minimum speed (km/h x 10, e.g. `30` = 3.0 km/h) required for a pulse to earn credits; `0` disables the gate |
+| `buzzer_enabled`                        | `true`  | Enable/disable all buzzer audio feedback                                                      |
 
 ---
 
@@ -171,6 +174,7 @@ main/
     main.c                    # Startup & module initialisation
     config_manager.c          # NVS-backed configuration
     device_registry.c         # Per-device MAC registry, counters & NVS persistence
+    buzzer.c                  # Buzzer feedback: GPIO pattern engine
     wifi_manager.c            # AP+STA+NAT Wi-Fi management & per-MAC frame filter
     time_manager.c            # SNTP / timezone
     pulse_input.c             # GPIO interrupt, debounce & speed calculation
