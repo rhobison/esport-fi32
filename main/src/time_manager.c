@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief SNTP time synchronisation and timezone management — full implementation.
+ * \brief SNTP time synchronisation and timezone management - full implementation.
  *
  * \date 2026-03-14
  */
@@ -84,7 +84,7 @@ esp_err_t time_mngr_init(void)
         return ret;
     }
 
-    ESP_LOGI(gp_tag, "init complete — awaiting STA connection for SNTP");
+    ESP_LOGI(gp_tag, "init complete - awaiting STA connection for SNTP");
     return ESP_OK;
 }
 
@@ -138,7 +138,7 @@ static void time_mngr_sync_cb(struct timeval * p_tv)
 
     localtime_r(&now, &time_info);
     strftime(time_buf, sizeof(time_buf), "%Y-%m-%dT%H:%M:%S", &time_info);
-    ESP_LOGI(gp_tag, "SNTP sync complete — local time: %s", time_buf);
+    ESP_LOGI(gp_tag, "SNTP sync complete - local time: %s", time_buf);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -153,11 +153,11 @@ static void time_mngr_sta_connected_handler(void * p_arg, esp_event_base_t p_eve
 
     if (esp_sntp_enabled())
     {
-        ESP_LOGD(gp_tag, "SNTP already running — skipping reinit");
+        ESP_LOGD(gp_tag, "SNTP already running - skipping reinit");
         return;
     }
 
-    ESP_LOGI(gp_tag, "STA connected — starting SNTP");
+    ESP_LOGI(gp_tag, "STA connected - starting SNTP");
 
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "pool.ntp.org");

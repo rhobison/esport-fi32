@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief Device registry — per-device internet access control and NVS persistence.
+ * \brief Device registry - per-device internet access control and NVS persistence.
  *
  * \date 2026-03-14
  */
@@ -118,7 +118,7 @@ esp_err_t device_reg_init(void)
     ret           = nvs_get_u8(handle, DEVICE_REG_NVS_KEY_COUNT, &count);
     if (ESP_ERR_NVS_NOT_FOUND == ret)
     {
-        /* First boot — write 0 and continue. */
+        /* First boot - write 0 and continue. */
         (void)nvs_set_u8(handle, DEVICE_REG_NVS_KEY_COUNT, 0U);
         (void)nvs_commit(handle);
         nvs_close(handle);
@@ -153,7 +153,7 @@ esp_err_t device_reg_init(void)
         esp_err_t blob_ret  = nvs_get_blob(handle, key, &g_entries[i], &blob_size);
         if (ESP_OK != blob_ret)
         {
-            ESP_LOGW(gp_tag, "nvs_get_blob(%s) failed: %s — zeroing slot", key,
+            ESP_LOGW(gp_tag, "nvs_get_blob(%s) failed: %s - zeroing slot", key,
                 esp_err_to_name(blob_ret));
             memset(&g_entries[i], 0, sizeof(g_entries[i]));
         }
@@ -173,7 +173,7 @@ esp_err_t device_reg_init(void)
     }
     else
     {
-        /* Invalid rider index — reset. */
+        /* Invalid rider index - reset. */
         g_rider = DEVICE_REG_NO_RIDER;
     }
 
@@ -514,7 +514,7 @@ esp_err_t device_reg_current_rider_set(uint8_t idx)
 
 esp_err_t device_reg_tick(void)
 {
-    /* Read global gate parameters (outside spinlock — plain function calls). */
+    /* Read global gate parameters (outside spinlock - plain function calls). */
     uint32_t threshold = (uint32_t)config_mngr_soft_ap_dec_threshold_kbps_get();
     uint32_t timeout   = (uint32_t)config_mngr_soft_ap_idle_throughput_timeout_s_get();
 

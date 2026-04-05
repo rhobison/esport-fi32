@@ -101,7 +101,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     config_mngr_timezone_get(tz, sizeof(tz));
 
     /*
-     * Single shared encoding buffer — re-used for each string field so that
+     * Single shared encoding buffer - re-used for each string field so that
      * only HTTP_SRV_ATTR_ENC_LEN bytes are allocated on the stack instead of
      * five separate buffers.  Each field is sent as three chunks:
      *   1. static HTML prefix  2. encoded value  3. static HTML suffix
@@ -130,6 +130,10 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         ".btn-reset{background:#e55;color:#fff;border:none;padding:6px 14px;"
         "cursor:pointer;border-radius:3px;font-size:1em}"
         ".btn-reset:hover{background:#c33}"
+        ".btn-right{text-align:right;margin-top:1em}"
+        ".sta-status{margin-top:1.5em;padding-top:1em;border-top:1px solid #ccc;font-size:.95em}"
+        ".sta-ok{color:#2a2;font-weight:bold}"
+        ".sta-err{color:#c00;font-weight:bold}"
         "</style></head><body>"
         "<h2>ESPort-fi32 &mdash; Configuration</h2>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_header);
@@ -268,13 +272,14 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
 
-    /* min_speed_to_increment_time_kmh_x10 */
-    snprintf(num, sizeof(num), "%" PRIu16, min_speed_kmh_x10);
+    /* min_speed_to_increment_time_kmh_x10 - displayed as km/h float (1 decimal) */
+    snprintf(num, sizeof(num), "%.1f", (double)min_speed_kmh_x10 / 10.0);
     (void)httpd_resp_sendstr_chunk(p_req,
-        "<p><label>Minimum speed to earn credits (km/h &times; 10)</label>"
-        "<input type=\"number\" name=\"min_speed_to_increment_time_kmh_x10\" value=\"");
+        "<p><label>Minimum speed to earn credits (km/h)</label>"
+        "<input type=\"number\" name=\"min_speed_to_increment_time_kmh_x10\""
+        " step=\"0.1\" min=\"0\" max=\"6553.5\" value=\"");
     (void)httpd_resp_sendstr_chunk(p_req, num);
-    (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
+    (void)httpd_resp_sendstr_chunk(p_req, "\"></p>");
 
     /* buzzer_enabled */
     (void)httpd_resp_sendstr_chunk(p_req,
@@ -304,20 +309,20 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         }
 
         /* Format MAC. */
-        char mac_str[18];
+        static char mac_str[18];
         snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", entry.mac[0],
             entry.mac[1], entry.mac[2], entry.mac[3], entry.mac[4], entry.mac[5]);
 
         /* Format counter as h:mm:ss. */
-        char     ctr_str[20];
-        uint32_t rc_h = entry.counter_s / 3600U;
-        uint32_t rc_m = (entry.counter_s % 3600U) / 60U;
-        uint32_t rc_s = entry.counter_s % 60U;
+        static char ctr_str[20];
+        uint32_t    rc_h = entry.counter_s / 3600U;
+        uint32_t    rc_m = (entry.counter_s % 3600U) / 60U;
+        uint32_t    rc_s = entry.counter_s % 60U;
         snprintf(ctr_str, sizeof(ctr_str), "%" PRIu32 ":%02" PRIu32 ":%02" PRIu32, rc_h, rc_m,
             rc_s);
 
         /* Row open + nickname input. */
-        char row_open[256];
+        static char row_open[256];
         snprintf(row_open, sizeof(row_open),
             "<tr><td><input type=\"text\" name=\"dev_%u_nickname\" maxlength=\"15\" value=\"",
             (unsigned)dev_i);
@@ -327,13 +332,13 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         (void)httpd_resp_sendstr_chunk(p_req, "\"></td>");
 
         /* MAC (read-only). */
-        char mac_cell[64];
+        static char mac_cell[64];
         snprintf(mac_cell, sizeof(mac_cell), "<td><span>%s</span></td>", mac_str);
         (void)httpd_resp_sendstr_chunk(p_req, mac_cell);
 
-        /* Counter input — oninput auto-formats as h:mm:ss while typing;
+        /* Counter input - oninput auto-formats as h:mm:ss while typing;
          * server-side parsing rejects malformed values with HTTP 400. */
-        char ctr_open[128];
+        static char ctr_open[128];
         snprintf(ctr_open, sizeof(ctr_open),
             "<td><input type=\"text\" name=\"dev_%u_counter\""
             " placeholder=\"0:00:00\" value=\"",
@@ -348,21 +353,21 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
             "else this.value=d;\"></td>");
 
         /* Enabled checkbox. */
-        char en_cell[128];
+        static char en_cell[128];
         snprintf(en_cell, sizeof(en_cell),
             "<td><input type=\"checkbox\" name=\"dev_%u_enabled\" value=\"1\"%s></td>",
             (unsigned)dev_i, entry.b_enabled ? " checked" : "");
         (void)httpd_resp_sendstr_chunk(p_req, en_cell);
 
         /* Rider radio. */
-        char rider_cell[128];
+        static char rider_cell[128];
         snprintf(rider_cell, sizeof(rider_cell),
             "<td><input type=\"radio\" name=\"current_rider\" value=\"%u\"%s></td>",
             (unsigned)dev_i, (rider_idx == dev_i) ? " checked" : "");
         (void)httpd_resp_sendstr_chunk(p_req, rider_cell);
 
         /* Remove button. */
-        char rm_cell[128];
+        static char rm_cell[128];
         snprintf(rm_cell, sizeof(rm_cell),
             "<td><button type=\"submit\" name=\"dev_%u_remove\" value=\"1\">"
             "Remove</button></td></tr>",
@@ -374,7 +379,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
 
     /* No Rider radio option. */
     {
-        char no_rider[128];
+        static char no_rider[128];
         snprintf(no_rider, sizeof(no_rider),
             "<p><label>Current Rider: No rider&nbsp;"
             "<input type=\"radio\" name=\"current_rider\" value=\"255\"%s></label></p>",
@@ -433,7 +438,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
 
             for (int u = 0; u < unreg_count; u++)
             {
-                char row[384];
+                static char row[384];
                 snprintf(row, sizeof(row),
                     "<tr>"
                     "<td>%02X:%02X:%02X:%02X:%02X:%02X</td>"
@@ -454,19 +459,48 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         }
     }
 
-    /* ---- Footer ---- */
-    static const char sc_footer[] =
-        "<p style=\"margin-top:1em\">"
-        "<input type=\"submit\" value=\"Save Configuration\"></p>"
+    /* ---- Footer: right-aligned Save + Reset buttons ---- */
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<div class=\"btn-right\">"
+        "<input type=\"submit\" value=\"Save Configuration\">"
+        "</div>"
         "</form>"
         "<form method=\"POST\" action=\"/config/reset\""
         " onsubmit=\"return confirm('Reset ALL settings to factory defaults?\\nThis cannot be "
         "undone.')\""
-        " style=\"margin-top:1.5em;padding-top:1em;border-top:1px solid #ccc\">"
-        "<p><button type=\"submit\" class=\"btn-reset\">Reset to Factory Defaults</button></p>"
-        "</form>"
-        "</body></html>";
-    (void)httpd_resp_sendstr_chunk(p_req, sc_footer);
+        " style=\"margin-top:.5em\">"
+        "<div class=\"btn-right\">"
+        "<button type=\"submit\" class=\"btn-reset\">Reset to Factory Defaults</button>"
+        "</div>"
+        "</form>");
+
+    /* ---- STA connection status ---- */
+    {
+        bool        b_sta = wifi_mngr_sta_is_connected();
+        static char sta_ip_buf[16];
+        wifi_mngr_sta_ip_get(sta_ip_buf, sizeof(sta_ip_buf));
+
+        static char sta_block[256];
+        if (b_sta)
+        {
+            snprintf(sta_block, sizeof(sta_block),
+                "<div class=\"sta-status\">"
+                "Home Wi-Fi status: <span class=\"sta-ok\">Connected</span><br>"
+                "IP: %s"
+                "</div>",
+                sta_ip_buf);
+        }
+        else
+        {
+            snprintf(sta_block, sizeof(sta_block),
+                "<div class=\"sta-status\">"
+                "Home Wi-Fi status: <span class=\"sta-err\">Disconnected</span>"
+                "</div>");
+        }
+        (void)httpd_resp_sendstr_chunk(p_req, sta_block);
+    }
+
+    (void)httpd_resp_sendstr_chunk(p_req, "</body></html>");
 
     /* Terminate chunked response. */
     (void)httpd_resp_sendstr_chunk(p_req, NULL);
@@ -759,22 +793,22 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
         }
     }
 
-    /* min_speed_to_increment_time_kmh_x10 (uint16, range 0–65535) */
+    /* min_speed_to_increment_time_kmh_x10 - submitted as km/h float, stored x10 */
     if (ESP_OK == http_srv_form_field_get(body, "min_speed_to_increment_time_kmh_x10", num_str,
                       sizeof(num_str)))
     {
-        char *        endptr;
-        unsigned long val = strtoul(num_str, &endptr, 10);
-        if (('\0' != *endptr) || (val > 65535UL))
+        char * endptr;
+        float  kmh_f = strtof(num_str, &endptr);
+        if (('\0' != *endptr) || (kmh_f < 0.0f) || (kmh_f > 6553.5f))
         {
             httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                "min_speed_to_increment_time_kmh_x10 must be 0-65535");
+                "min_speed must be a number between 0 and 6553.5 km/h");
             return ESP_FAIL;
         }
-        if (ESP_OK != config_mngr_min_speed_to_increment_time_kmh_x10_set((uint16_t)val))
+        uint16_t val_x10 = (uint16_t)(kmh_f * 10.0f + 0.5f);
+        if (ESP_OK != config_mngr_min_speed_to_increment_time_kmh_x10_set(val_x10))
         {
-            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                "Invalid min_speed_to_increment_time_kmh_x10");
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Invalid min_speed value");
             return ESP_FAIL;
         }
     }
@@ -825,7 +859,7 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
                 if (0 == strcmp(rm_val, "1"))
                 {
                     (void)device_reg_entry_remove(dev_i);
-                    /* Indices shift after removal — stop processing and let the redirect
+                    /* Indices shift after removal - stop processing and let the redirect
                      * re-render the updated form. */
                     break;
                 }
@@ -854,7 +888,7 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
                 }
             }
 
-            /* dev_N_enabled — checkbox: present = true, absent = false */
+            /* dev_N_enabled - checkbox: present = true, absent = false */
             {
                 char en_key[24];
                 snprintf(en_key, sizeof(en_key), "dev_%u_enabled", (unsigned)dev_i);
@@ -953,7 +987,7 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
                 if (ESP_ERR_NO_MEM == add_ret)
                 {
                     httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                        "Registry full — max 4 devices");
+                        "Registry full - max 4 devices");
                     return ESP_FAIL;
                 }
                 if (ESP_ERR_INVALID_STATE == add_ret)
@@ -1011,7 +1045,7 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
                     if (ESP_ERR_NO_MEM == add_ret)
                     {
                         httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                            "Registry full — max 4 devices");
+                            "Registry full - max 4 devices");
                         return ESP_FAIL;
                     }
                     if (ESP_ERR_INVALID_STATE == add_ret)

@@ -63,7 +63,7 @@ static void on_reward_ap_off(void * p_arg, esp_event_base_t base, int32_t id, vo
 //==================================================================================================
 
 /**
- * \brief Application entry point — initialises all firmware modules.
+ * \brief Application entry point - initialises all firmware modules.
  *
  * Follows the boot sequence defined in the esport-fi32 firmware specification
  * §7.1.  Every call is wrapped with \c ESP_ERROR_CHECK so that any
@@ -97,7 +97,7 @@ void app_main(void)
 
     ESP_LOGI(gp_tag, "esport-fi32 starting. Build: " __DATE__ " " __TIME__);
 
-    /* Step 4: Start Wi-Fi — AP+STA mode; reward AP always-on from init. */
+    /* Step 4: Start Wi-Fi - AP+STA mode; reward AP always-on from init. */
     ESP_ERROR_CHECK(wifi_mngr_init());
 
     /* Step 5: HTTP server reachable via reward AP (192.168.5.1) and STA IP. */

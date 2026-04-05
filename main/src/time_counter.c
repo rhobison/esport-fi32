@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief Time counter and reward AP state machine — full implementation.
+ * \brief Time counter and reward AP state machine - full implementation.
  *
  * \date 2026-03-14
  */
@@ -103,7 +103,7 @@ static void time_ctr_tick_cb(void * p_arg);
 // Public Functions
 //==================================================================================================
 
-/** Load (or reload) cached config values; call within or outside spinlock — all are plain reads. */
+/** Load (or reload) cached config values; call within or outside spinlock - all are plain reads. */
 static void time_ctr_config_cache_refresh(void)
 {
     g_cfg_seconds_per_pulse = config_mngr_seconds_per_pulse_get();
@@ -197,7 +197,7 @@ esp_err_t time_ctr_init(void)
         }
     }
 
-    /* Start the tick timer permanently — runs for the lifetime of the firmware. */
+    /* Start the tick timer permanently - runs for the lifetime of the firmware. */
     ret = esp_timer_start_periodic(gp_tick_timer, TIME_CTR_TICK_PERIOD_US);
     if (ESP_OK != ret)
     {
@@ -205,7 +205,7 @@ esp_err_t time_ctr_init(void)
         return ret;
     }
 
-    ESP_LOGI(gp_tag, "init complete — tick timer started permanently");
+    ESP_LOGI(gp_tag, "init complete - tick timer started permanently");
     return ESP_OK;
 }
 
@@ -285,7 +285,7 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
     (void)event_id;
     (void)p_event_data;
 
-    /* Speed gate (outside spinlock — single-source read from pulse_input). */
+    /* Speed gate (outside spinlock - single-source read from pulse_input). */
     uint32_t speed_x10 = pulse_in_speed_kmh_x10_get();
 
     portENTER_CRITICAL(&g_spinlock);
@@ -355,7 +355,7 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
 
     if (!b_start)
     {
-        return; /* Already in SESSION or EARNING — ignore. */
+        return; /* Already in SESSION or EARNING - ignore. */
     }
 
     uint32_t threshold    = config_mngr_soft_ap_start_threshold_s_get();
@@ -481,7 +481,7 @@ static void time_ctr_threshold_cb(void * p_arg)
 
     if (!b_activate)
     {
-        return; /* State changed before timer fired — session likely closed. */
+        return; /* State changed before timer fired - session likely closed. */
     }
 
     /* Flush accumulated session credits to the current rider's counter. */

@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief Device registry — per-device internet access control and NVS persistence.
+ * \brief Device registry - per-device internet access control and NVS persistence.
  *
  * Manages a list of up to #DEVICE_REG_MAX_ENTRIES registered devices.
  * Each entry stores the device MAC address, a human-readable nickname,

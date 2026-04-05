@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief NVS-backed session ring-buffer log — full implementation.
+ * \brief NVS-backed session ring-buffer log - full implementation.
  *
  * Stores up to #SESSION_LOG_MAX_ENTRIES completed session records in NVS
  * namespace \c esport_log as a circular (ring) buffer.  Old entries are
@@ -130,7 +130,7 @@ esp_err_t session_log_init(void)
 
     if (!b_valid)
     {
-        ESP_LOGW(gp_tag, "invalid NVS metadata — erasing log namespace");
+        ESP_LOGW(gp_tag, "invalid NVS metadata - erasing log namespace");
         ret = nvs_erase_all(handle);
         if (ESP_OK != ret)
         {
@@ -170,7 +170,7 @@ esp_err_t session_log_init(void)
         return ret;
     }
 
-    ESP_LOGI(gp_tag, "init complete — next_write_slot=%u entry_count=%u",
+    ESP_LOGI(gp_tag, "init complete - next_write_slot=%u entry_count=%u",
         (unsigned int)g_next_write_slot, (unsigned int)g_entry_count);
     return ESP_OK;
 }
@@ -293,7 +293,7 @@ uint16_t session_log_read(session_trk_record_t * p_out, uint16_t max_count)
         esp_err_t rd_ret = nvs_get_blob(handle, key, &p_out[copied], &len);
         if (ESP_OK != rd_ret)
         {
-            ESP_LOGW(gp_tag, "nvs_get_blob(%s) failed: %s — skipping slot", key,
+            ESP_LOGW(gp_tag, "nvs_get_blob(%s) failed: %s - skipping slot", key,
                 esp_err_to_name(rd_ret));
             continue;
         }

@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief HTTP server shared utility helpers — constants and helper function declarations.
+ * \brief HTTP server shared utility helpers - constants and helper function declarations.
  *
  * Internal header shared by all http_server_*.c translation units.
  * Do NOT include this from public application code.

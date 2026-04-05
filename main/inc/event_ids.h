@@ -47,7 +47,7 @@ typedef enum
      *
      * No payload (NULL). The ISR inline payload is limited to 4 bytes; an
      * int64_t µs timestamp does not fit. Handlers derive timing by calling
-     * esp_timer_get_time() directly — the sub-ms handler latency is negligible
+     * esp_timer_get_time() directly - the sub-ms handler latency is negligible
      * for all second-resolution consumers.
      */
     ESPORT_EVENT_PULSE = 0,

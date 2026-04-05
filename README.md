@@ -118,13 +118,15 @@ idf.py -p PORT flash monitor
 
 ### First-time configuration
 
-1. On first boot (or when home Wi-Fi credentials are not yet configured) the device creates a fallback AP:
-   - **SSID:** `esport-fi32_config`
-   - **Password:** `esport-fi32_config`
-2. Connect to that network and open **http://192.168.4.1/config** in a browser.
+The **Reward AP** is always active from boot — no separate config AP exists.
+
+1. On first boot, connect to the Reward AP:
+   - **SSID:** `esport-fi32`
+   - **Password:** `esport-fi32`
+2. Open **http://192.168.5.1/config** in a browser.
 3. Enter your home Wi-Fi credentials, the Reward AP name/password, and any other settings.
-4. Save and reboot. The device will connect to your home network.
-5. The configuration page remains accessible via the home network IP from that point on.
+4. Save. The device connects to your home network in the background (no reboot required).
+5. The configuration page remains accessible at all times via the Reward AP (`192.168.5.1`) or via the home network IP.
 
 ---
 

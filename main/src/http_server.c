@@ -1,6 +1,6 @@
 /**
  * \file
- * \brief HTTP server facade — starts the server and registers all URI handlers.
+ * \brief HTTP server facade - starts the server and registers all URI handlers.
  *
  * \date 2026-03-15
  */
