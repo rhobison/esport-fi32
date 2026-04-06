@@ -333,7 +333,8 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         /* Row open + nickname input. */
         static char row_open[256];
         snprintf(row_open, sizeof(row_open),
-            "<tr><td><input type=\"text\" name=\"dev_%u_nickname\" maxlength=\"15\" value=\"",
+            "<tr><td><input type=\"text\" name=\"dev_%u_nickname\" maxlength=\"15\"  "
+            "style=\"width:150px\" value=\"",
             (unsigned)dev_i);
         (void)httpd_resp_sendstr_chunk(p_req, row_open);
         http_srv_html_attr_encode(entry.nickname, enc, sizeof(enc));
@@ -355,7 +356,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         (void)httpd_resp_sendstr_chunk(p_req, ctr_open);
         (void)httpd_resp_sendstr_chunk(p_req, ctr_str);
         (void)httpd_resp_sendstr_chunk(p_req,
-            "\" maxlength=\"8\""
+            "\" maxlength=\"8\" style=\"width:150px\""
             " oninput=\"var d=this.value.replace(/\\D/g,'').slice(0,6);"
             "if(d.length>4)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4);"
             "else if(d.length>2)this.value=d.slice(0,2)+':'+d.slice(2);"
@@ -474,6 +475,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "<input type=\"submit\" value=\"Save Configuration\">"
         "</div>"
         "</form>"
+        "<div class=\"sta-status\"></div>"
         "<form method=\"POST\" action=\"/config/reset\""
         " onsubmit=\"return confirm('Reset ALL settings to factory defaults?\\nThis cannot be "
         "undone.')\""
