@@ -84,7 +84,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     static char ap_ssid[33];
     static char ap_pwd[65];
     uint16_t    seconds_per_pulse            = config_mngr_seconds_per_pulse_get();
-    uint32_t    ap_start_threshold_s         = config_mngr_soft_ap_start_threshold_s_get();
+    uint32_t    inet_gate_threshold_s         = config_mngr_internet_gate_threshold_s_get();
     uint32_t    centimeters_per_pulse        = config_mngr_centimeters_per_pulse_get();
     uint16_t    idle_session_interval_s      = config_mngr_idle_session_interval_s_get();
     uint16_t    start_session_interval_s     = config_mngr_start_session_interval_s_get();
@@ -207,11 +207,11 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"1\" max=\"60\"></p>");
 
-    /* soft_ap_start_threshold_s */
-    snprintf(num, sizeof(num), "%" PRIu32, ap_start_threshold_s);
+    /* soft_inet_gate_threshold_s */
+    snprintf(num, sizeof(num), "%" PRIu32, inet_gate_threshold_s);
     (void)httpd_resp_sendstr_chunk(p_req,
-        "<p><label>AP Start Threshold (s)</label>"
-        "<input type=\"number\" name=\"soft_ap_start_threshold_s\" value=\"");
+        "<p><label>Internet Gate Threshold (s)</label>"
+        "<input type=\"number\" name=\"soft_inet_gate_threshold_s\" value=\"");
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\"></p>");
 
@@ -650,21 +650,21 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
         }
     }
 
-    /* soft_ap_start_threshold_s (uint32) */
+    /* soft_inet_gate_threshold_s (uint32) */
     if (ESP_OK ==
-        http_srv_form_field_get(body, "soft_ap_start_threshold_s", num_str, sizeof(num_str)))
+        http_srv_form_field_get(body, "soft_inet_gate_threshold_s", num_str, sizeof(num_str)))
     {
         char *        endptr;
         unsigned long val = strtoul(num_str, &endptr, 10);
         if ('\0' != *endptr)
         {
             httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
-                "soft_ap_start_threshold_s must be a valid integer");
+                "soft_inet_gate_threshold_s must be a valid integer");
             return ESP_FAIL;
         }
-        if (ESP_OK != config_mngr_soft_ap_start_threshold_s_set((uint32_t)val))
+        if (ESP_OK != config_mngr_internet_gate_threshold_s_set((uint32_t)val))
         {
-            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Invalid soft_ap_start_threshold_s");
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Invalid soft_inet_gate_threshold_s");
             return ESP_FAIL;
         }
     }

@@ -127,7 +127,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     uint8_t ap_clients = wifi_mngr_reward_ap_client_count();
 
     uint32_t counter_s     = time_ctr_get();
-    uint32_t threshold     = config_mngr_soft_ap_start_threshold_s_get();
+    uint32_t threshold     = config_mngr_internet_gate_threshold_s_get();
     uint32_t throughput    = wifi_mngr_reward_ap_throughput_kbps();
     uint32_t speed_x10     = time_ctr_current_speed_x10_get();
     uint32_t spd_ctr_int   = speed_x10 / 10U;
@@ -254,7 +254,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
         "<p>Counter:&nbsp;<b><span id=\"ctr-seconds\">%" PRIu32 "s</span></b>"
         "&nbsp;(<span id=\"ctr-hms\">%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 "</span>)"
-        "&nbsp; Threshold:&nbsp;<b><span id=\"ctr-threshold\">%" PRIu32 "s</span></b></p>"
+        "&nbsp; Gate Threshold:&nbsp;<b><span id=\"ctr-threshold\">%" PRIu32 "s</span></b></p>"
         "<p>State:&nbsp;<b><span id=\"sess-state\">%s</span></b></p>"
         "<p>Speed:&nbsp;<span id=\"current-speed\"><b>%" PRIu32 ".%" PRIu32 "</b></span>"
         "&nbsp;km/h&nbsp; Pulse crediting:&nbsp;"
@@ -497,7 +497,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "e=document.getElementById('wifi-rew-ap-clients');if(e)e.textContent=d.reward_ap_clients;"
         "e=document.getElementById('ctr-seconds');if(e)e.textContent=d.counter_s+'s';"
         "e=document.getElementById('ctr-hms');if(e)e.textContent=fmtHms(d.counter_s);"
-        "e=document.getElementById('ctr-threshold');if(e)e.textContent=d.threshold_s+'s';"
+        "e=document.getElementById('ctr-threshold');if(e)e.textContent=d.inet_gate_threshold_s+'s';"
         "e=document.getElementById('ap-throughput');"
         "if(e)e.innerHTML='<b>'+d.reward_ap_throughput_kbps+'</b>';"
         "e=document.getElementById('current-speed');"

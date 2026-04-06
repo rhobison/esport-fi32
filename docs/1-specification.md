@@ -61,7 +61,7 @@ Key behaviour:
 - The device permanently operates in **AP+STA** (simultaneous Access Point + Station) Wi-Fi mode with NAT so that devices connected to the reward Soft AP can reach the internet through the home network.
 - The **reward Soft AP is always active from boot**, so children's devices remain connected at all times. Internet access for each registered device is gated individually: frames from a device are forwarded to the internet only while that device's per-device counter is greater than zero and the device is enabled.
 - A GPIO interrupt counts mechanical pulses from the bike sensor. Each pulse adds `seconds_per_pulse` seconds to a **time counter** while a session is in progress.
-- Once the exercise session has been active for `soft_ap_start_threshold_s` seconds (EARNING state), the accumulated pulse credits start counting down in real time. Pulses still add to the current rider's counter while EARNING is active.
+- Once the exercise session has been active for `internet_gate_threshold_s` seconds (EARNING state), the accumulated pulse credits start counting down in real time. Pulses still add to the current rider's counter while EARNING is active.
 - When the current rider's counter reaches 0, internet access is revoked for that device until more credits are earned.
 - The **Device Registry** (up to 4 entries) stores one record per child's Wi-Fi device: MAC address, nickname, internet-time counter, enabled flag, and a throughput-gated sliding-window lock identical to the former global gate.
 - A **current rider** selector on the config page binds one device slot to the exercise bike: earned credits go to that slot.
@@ -98,7 +98,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 | `soft_ap_ssid`                          | `ap_ssid`      | string | `"esport-fi32"` | —   | 32 chars    | Reward Soft AP SSID                                                                                                                                                                                                      |
 | `soft_ap_password`                      | `ap_pwd`       | string | `"esport-fi32"` | —   | 64 chars    | Reward Soft AP WPA2 password                                                                                                                                                                                             |
 | `seconds_per_pulse`                     | `spp`          | uint16 | `3`             | 1   | 60          | Seconds added to counter per valid pulse                                                                                                                                                                                 |
-| `soft_ap_start_threshold_s`             | `ap_thresh`    | uint32 | `300`           | 0   | (unlimited) | Session duration (s) required to enable reward AP                                                                                                                                                                        |
+| `internet_gate_threshold_s`             | `inet_gate_s`    | uint32 | `300`           | 0   | (unlimited) | Session duration (s) before earned credits start counting down and internet access becomes available                                                                                                                                                                        |
 | `centimeters_per_pulse`                 | `cpp`          | uint32 | `300`            | 1   | (unlimited) | Wheel travel per pulse (cm), used for speed                                                                                                                                                                              |
 | `idle_session_interval_s`               | `idle_s`       | uint16 | `30`            | 5   | 600         | Gap (s) with no pulses that closes a session                                                                                                                                                                             |
 | `start_session_interval_s`              | `start_s`      | uint16 | `10`            | 1   | 300         | Continuous pedalling (s) required to open a session                                                                                                                                                                      |
@@ -213,7 +213,7 @@ void     config_mngr_wifi_password_get(char *buf, size_t len);
 void     config_mngr_soft_ap_ssid_get(char *buf, size_t len);
 void     config_mngr_soft_ap_password_get(char *buf, size_t len);
 uint16_t config_mngr_seconds_per_pulse_get(void);
-uint32_t config_mngr_soft_ap_start_threshold_s_get(void);
+uint32_t config_mngr_internet_gate_threshold_s_get(void);
 uint32_t config_mngr_centimeters_per_pulse_get(void);
 uint16_t config_mngr_idle_session_interval_s_get(void);
 uint16_t config_mngr_start_session_interval_s_get(void);
@@ -226,7 +226,7 @@ esp_err_t config_mngr_wifi_password_set(const char *val);
 esp_err_t config_mngr_soft_ap_ssid_set(const char *val);
 esp_err_t config_mngr_soft_ap_password_set(const char *val);
 esp_err_t config_mngr_seconds_per_pulse_set(uint16_t val);
-esp_err_t config_mngr_soft_ap_start_threshold_s_set(uint32_t val);
+esp_err_t config_mngr_internet_gate_threshold_s_set(uint32_t val);
 esp_err_t config_mngr_centimeters_per_pulse_set(uint32_t val);
 esp_err_t config_mngr_idle_session_interval_s_set(uint16_t val);
 esp_err_t config_mngr_start_session_interval_s_set(uint16_t val);
@@ -247,7 +247,7 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
 | Parameter                   | Min     | Max        |
 | --------------------------- | ------- | ---------- |
 | `seconds_per_pulse`         | 1       | 60         |
-| `soft_ap_start_threshold_s` | 0       | UINT32_MAX |
+| `internet_gate_threshold_s` | 0       | UINT32_MAX |
 | `centimeters_per_pulse`     | 1       | UINT32_MAX |
 | `idle_session_interval_s`   | 5       | 600        |
 | `start_session_interval_s`  | 1       | 300        |
@@ -373,7 +373,7 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
 **Responsibilities:**
 - Maintain the **time counter** per device slot via the Device Registry (`device_reg_entry_counter_set/get`).
 - Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to `g_session_credits` (SESSION state) or directly to the current rider's device-registry counter (EARNING state). Pulses in IDLE state are ignored (pulses during the qualification window are retroactively credited when `SESSION_OPENED` is received — see below).
-- Listen for `ESPORT_EVENT_SESSION_OPENED` (payload: `uint32_t` qualifying pulse count): transition IDLE→SESSION, seed `g_session_credits` with `qualifying_pulses * seconds_per_pulse` to retroactively credit the qualification window effort, and start a one-shot timer for `soft_ap_start_threshold_s` seconds.
+- Listen for `ESPORT_EVENT_SESSION_OPENED` (payload: `uint32_t` qualifying pulse count): transition IDLE→SESSION, seed `g_session_credits` with `qualifying_pulses * seconds_per_pulse` to retroactively credit the qualification window effort, and start a one-shot timer for `internet_gate_threshold_s` seconds.
 - Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer, flush `g_session_credits` into the current rider's counter, and return to IDLE. If already EARNING, ignore the close event -- the AP stays on until the rider's counter drains.
 - Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, maintain a `g_speed_low_ticks` counter: increment it when the speed-low condition holds (`g_state` is SESSION or EARNING, `min_speed > 0`, `0 < current_speed < min_speed`); reset it to zero otherwise. Call `buzzer_speed_low_update(true)` only when the speed-low condition holds **and** `g_speed_low_ticks >= low_speed_buzzer_threshold_s`; call `buzzer_speed_low_update(false)` otherwise. Then post `ESPORT_EVENT_COUNTER_CHANGED`.
 - Post `ESPORT_EVENT_REWARD_AP_ON` when the threshold timer fires (SESSION -> EARNING transition).
@@ -402,7 +402,7 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
         |  On SESSION_CLOSED: flush credits to rider, -> IDLE  |
         +------------------+-----------------------------------+
                            |  threshold timer fires
-                           |  (soft_ap_start_threshold_s elapsed)
+                           |  (internet_gate_threshold_s elapsed)
                            v
         +------------------------------------------------------+
         |                EARNING state                         |
@@ -714,7 +714,7 @@ Serves a form pre-populated with current config values.
 | Reward AP SSID           | text       | `soft_ap_ssid`              |
 | Reward AP Password       | password   | `soft_ap_password`          |
 | Seconds per Pulse        | number     | `seconds_per_pulse`         |
-| Counter Threshold (s)    | number     | `soft_ap_start_threshold_s` |
+| Internet Gate Threshold (s) | number     | `internet_gate_threshold_s` |
 | Centimeters per Pulse    | number     | `centimeters_per_pulse`     |
 | Idle Session Timeout (s) | number     | `idle_session_interval_s`   |
 | Session Start Window (s) | number     | `start_session_interval_s`  |
@@ -789,7 +789,7 @@ Returns JSON:
   "reward_ap_ip": "192.168.5.1",
   "reward_ap_clients": 2,
   "counter_s": 147,
-  "threshold_s": 300,
+  "inet_gate_threshold_s": 300,
   "session_state": "active",
   "session_start_utc": 1741905000,
   "session_duration_s": 5400,
@@ -984,7 +984,7 @@ ESPORT_EVENT_SESSION_OPENED (posted by session_tracker on QUALIFYING->ACTIVE)
   -> time_counter: IDLE->SESSION
                    seed g_session_credits with qualifying_pulses * spp
                    start one-shot threshold timer
-                  (soft_ap_start_threshold_s seconds)
+                  (internet_gate_threshold_s seconds)
 
 threshold timer fires
   -> time_counter: SESSION->EARNING
@@ -1074,7 +1074,7 @@ so that no flash byte goes unused across the full 4 MB device.
 | `ap_ssid`      | string | Reward AP SSID                        |
 | `ap_pwd`       | string | Reward AP password                    |
 | `spp`          | uint16 | seconds_per_pulse                     |
-| `ap_thresh`    | uint32 | soft_ap_start_threshold_s             |
+| `inet_gate_s`    | uint32 | internet_gate_threshold_s             |
 | `cpp`          | uint32 | centimeters_per_pulse                 |
 | `idle_s`       | uint16 | idle_session_interval_s               |
 | `start_s`      | uint16 | start_session_interval_s              |

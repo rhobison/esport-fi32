@@ -31,7 +31,7 @@
 #define CONFIG_MNGR_KEY_AP_SSID           ("ap_ssid")
 #define CONFIG_MNGR_KEY_AP_PWD            ("ap_pwd")
 #define CONFIG_MNGR_KEY_SECONDS_PER_PULSE ("spp")
-#define CONFIG_MNGR_KEY_AP_THRESH         ("ap_thresh")
+#define CONFIG_MNGR_KEY_INET_GATE         ("inet_gate_s")
 #define CONFIG_MNGR_KEY_CM_PER_PULSE      ("cpp")
 #define CONFIG_MNGR_KEY_IDLE_SESSION_S    ("idle_s")
 #define CONFIG_MNGR_KEY_START_SESSION_S   ("start_s")
@@ -48,7 +48,7 @@
 #define CONFIG_MNGR_DEF_AP_SSID               (CONFIG_ESPORT_REWARD_AP_SSID)
 #define CONFIG_MNGR_DEF_AP_PWD                (CONFIG_ESPORT_REWARD_AP_PASSWORD)
 #define CONFIG_MNGR_DEF_SECONDS_PER_PULSE     ((uint16_t)3U)
-#define CONFIG_MNGR_DEF_AP_THRESH             ((uint32_t)300U)
+#define CONFIG_MNGR_DEF_INET_GATE             ((uint32_t)300U)
 #define CONFIG_MNGR_DEF_CM_PER_PULSE          ((uint32_t)300U)
 #define CONFIG_MNGR_DEF_IDLE_SESSION_S        ((uint16_t)30U)
 #define CONFIG_MNGR_DEF_START_SESSION_S       ((uint16_t)10U)
@@ -140,7 +140,7 @@ esp_err_t config_mngr_init(void)
     ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_SECONDS_PER_PULSE,
         CONFIG_MNGR_DEF_SECONDS_PER_PULSE);
     ret |=
-        config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_AP_THRESH, CONFIG_MNGR_DEF_AP_THRESH);
+        config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_INET_GATE, CONFIG_MNGR_DEF_INET_GATE);
     ret |= config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_CM_PER_PULSE,
         CONFIG_MNGR_DEF_CM_PER_PULSE);
     ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_IDLE_SESSION_S,
@@ -224,9 +224,9 @@ uint16_t config_mngr_seconds_per_pulse_get(void)
 
 //--------------------------------------------------------------------------------------------------
 
-uint32_t config_mngr_soft_ap_start_threshold_s_get(void)
+uint32_t config_mngr_internet_gate_threshold_s_get(void)
 {
-    return config_mngr_u32_get(CONFIG_MNGR_KEY_AP_THRESH, CONFIG_MNGR_DEF_AP_THRESH);
+    return config_mngr_u32_get(CONFIG_MNGR_KEY_INET_GATE, CONFIG_MNGR_DEF_INET_GATE);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -301,9 +301,9 @@ esp_err_t config_mngr_seconds_per_pulse_set(uint16_t val)
 
 //--------------------------------------------------------------------------------------------------
 
-esp_err_t config_mngr_soft_ap_start_threshold_s_set(uint32_t val)
+esp_err_t config_mngr_internet_gate_threshold_s_set(uint32_t val)
 {
-    return config_mngr_u32_set(CONFIG_MNGR_KEY_AP_THRESH, val, 0U, UINT32_MAX);
+    return config_mngr_u32_set(CONFIG_MNGR_KEY_INET_GATE, val, 0U, UINT32_MAX);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -493,7 +493,7 @@ esp_err_t config_mngr_reset_to_defaults(void)
     ret |= nvs_set_str(handle, CONFIG_MNGR_KEY_AP_PWD, CONFIG_MNGR_DEF_AP_PWD);
     ret |=
         nvs_set_u16(handle, CONFIG_MNGR_KEY_SECONDS_PER_PULSE, CONFIG_MNGR_DEF_SECONDS_PER_PULSE);
-    ret |= nvs_set_u32(handle, CONFIG_MNGR_KEY_AP_THRESH, CONFIG_MNGR_DEF_AP_THRESH);
+    ret |= nvs_set_u32(handle, CONFIG_MNGR_KEY_INET_GATE, CONFIG_MNGR_DEF_INET_GATE);
     ret |= nvs_set_u32(handle, CONFIG_MNGR_KEY_CM_PER_PULSE, CONFIG_MNGR_DEF_CM_PER_PULSE);
     ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_IDLE_SESSION_S, CONFIG_MNGR_DEF_IDLE_SESSION_S);
     ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_START_SESSION_S, CONFIG_MNGR_DEF_START_SESSION_S);

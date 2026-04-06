@@ -131,7 +131,7 @@ void app_main(void)
         on_reward_ap_off, NULL));
 
     ESP_LOGI(gp_tag, "Config: threshold=%" PRIu32 " spp=%" PRIu16 " cpp=%" PRIu32,
-        config_mngr_soft_ap_start_threshold_s_get(), config_mngr_seconds_per_pulse_get(),
+        config_mngr_internet_gate_threshold_s_get(), config_mngr_seconds_per_pulse_get(),
         config_mngr_centimeters_per_pulse_get());
 
     /* DEBUG: poll GPIO input level every second to verify pin state changes.

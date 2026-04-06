@@ -79,6 +79,8 @@ Lets you set all parameters without reflashing:
 
 ### Firmware Update OTA (`/ota`)
 
+![OTA update](docs/imgs/ota-1.png)
+
 The configuration page includes a **Firmware Update** link (below "Reset to Factory Defaults") that navigates to the OTA page. The OTA page is protected by HTTP Basic Auth (default credentials: `admin` / `esport-fi32`).
 
 From the OTA page you can:
@@ -177,7 +179,7 @@ All parameters are stored in NVS and can be changed at runtime via the web UI.
 | `soft_ap_ssid`                          | `"esport-fi32"` | Reward AP SSID                                                                      |
 | `soft_ap_password`                      | `"esport-fi32"` | Reward AP password                                                                  |
 | `seconds_per_pulse`                     | `3`     | Seconds of internet time earned per bike pulse                                                |
-| `soft_ap_start_threshold_s`             | `300`   | Session duration (s) before earned credits start counting down                                |
+| `internet_gate_threshold_s`             | `300`   | Session duration (s) before earned credits start counting down                                |
 | `centimeters_per_pulse`                 | `300`    | Wheel travel per pulse (cm), used for speed display                                           |
 | `idle_session_interval_s`               | `30`    | Gap (s) with no pulses that closes a session                                                  |
 | `start_session_interval_s`              | `10`    | Continuous pedalling (s) required to open a session                                           |

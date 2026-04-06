@@ -131,7 +131,7 @@ Implement `config_manager.c` fully: NVS initialisation, factory defaults, typed 
 
 3. Implement all setters: validate range (return `ESP_ERR_INVALID_ARG` on failure), open namespace `NVS_READWRITE`, write, commit, close.
 
-4. Use the NVS keys exactly as specified in spec §8 (e.g. `"wifi_ssid"`, `"spp"`, `"ap_thresh"`).
+4. Use the NVS keys exactly as specified in spec §8 (e.g. `"wifi_ssid"`, `"spp"`, `"inet_gate_s"`).
 
 ### Acceptance Criteria
 
@@ -291,7 +291,7 @@ Implement `time_counter.c`: credit accumulation, real-time decrement, and reward
 
 4. In the pulse event handler:
    - Lock spinlock, add `config_mngr_seconds_per_pulse_get()` to `s_counter`, unlock.
-   - If `s_state == TC_STATE_IDLE && s_counter >= config_mngr_soft_ap_start_threshold_s_get()`:
+   - If `s_state == TC_STATE_IDLE && s_counter >= config_mngr_internet_gate_threshold_s_get()`:
      - Set `s_state = TC_STATE_ACTIVE`.
      - Start `s_tick_timer`.
      - Call `wifi_mngr_reward_ap_set(true)`.
