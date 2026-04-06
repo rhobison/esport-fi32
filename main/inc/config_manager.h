@@ -333,6 +333,26 @@ esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
 bool      config_mngr_buzzer_enabled_get(void);
 esp_err_t config_mngr_buzzer_enabled_set(bool b_enabled);
 
+/**
+ * \brief Return the low-speed buzzer delay threshold in seconds.
+ *
+ * The speed-low beep begins only after the speed has been continuously
+ * below the minimum threshold for this many consecutive seconds.  A value
+ * of \c 0 triggers the beep immediately on the first below-threshold tick.
+ *
+ * \return Threshold in seconds (range 0–65535; default 3).
+ */
+uint16_t config_mngr_low_speed_buzzer_threshold_s_get(void);
+
+/**
+ * \brief Set and persist the low-speed buzzer delay threshold.
+ *
+ * \param[in] val  Threshold in seconds (range 0–65535; 0 = immediate).
+ *
+ * \return \c ESP_OK on success, or an NVS error code on write failure.
+ */
+esp_err_t config_mngr_low_speed_buzzer_threshold_s_set(uint16_t val);
+
 esp_err_t config_mngr_reset_to_defaults(void);
 
 #ifdef __cplusplus

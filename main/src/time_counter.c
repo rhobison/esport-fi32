@@ -83,6 +83,9 @@ static esp_timer_handle_t gp_threshold_timer = NULL;
  */
 static uint16_t g_cfg_seconds_per_pulse = 1U; /**< Seconds credited per accepted pulse. */
 static uint16_t g_cfg_min_speed_kmh_x10 = 0U; /**< Minimum speed gate in km/h x10 (0 = disabled). */
+static uint16_t g_cfg_low_speed_bz_thresh_s =
+    3U; /**< Consecutive ticks below min speed before speed-low beep starts. */
+static uint16_t g_speed_low_ticks = 0U; /**< Consecutive ticks in which speed was below minimum. */
 
 //==================================================================================================
 // Internal Function Prototypes
@@ -106,8 +109,9 @@ static void time_ctr_tick_cb(void * p_arg);
 /** Load (or reload) cached config values; call within or outside spinlock - all are plain reads. */
 static void time_ctr_config_cache_refresh(void)
 {
-    g_cfg_seconds_per_pulse = config_mngr_seconds_per_pulse_get();
-    g_cfg_min_speed_kmh_x10 = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    g_cfg_seconds_per_pulse     = config_mngr_seconds_per_pulse_get();
+    g_cfg_min_speed_kmh_x10     = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    g_cfg_low_speed_bz_thresh_s = config_mngr_low_speed_buzzer_threshold_s_get();
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -544,8 +548,8 @@ static void time_ctr_tick_cb(void * p_arg)
     (void)device_reg_tick();
 
     /* Speed-low beep: fire when SESSION or EARNING, speed gate enabled,
-     * rider moving but below threshold.  The speed gate blocks credit
-     * accumulation in both states, so the audible warning must match. */
+     * rider moving but below threshold, and the speed has been continuously
+     * low for at least low_speed_buzzer_threshold_s consecutive ticks. */
     bool b_speed_low = false;
     if ((TIME_CTR_STATE_SESSION == g_state) || (TIME_CTR_STATE_EARNING == g_state))
     {
@@ -553,7 +557,20 @@ static void time_ctr_tick_cb(void * p_arg)
         uint16_t min_spd   = g_cfg_min_speed_kmh_x10;
         b_speed_low        = (min_spd > 0U) && (speed_x10 > 0U) && (speed_x10 < (uint32_t)min_spd);
     }
-    buzzer_speed_low_update(b_speed_low);
+
+    /* Accumulate consecutive below-threshold ticks; reset when not low. */
+    if (b_speed_low)
+    {
+        if (g_speed_low_ticks < UINT16_MAX)
+        {
+            g_speed_low_ticks++;
+        }
+    }
+    else
+    {
+        g_speed_low_ticks = 0U;
+    }
+    buzzer_speed_low_update(b_speed_low && (g_speed_low_ticks >= g_cfg_low_speed_bz_thresh_s));
 
     uint32_t counter_val = time_ctr_get();
     (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_val,

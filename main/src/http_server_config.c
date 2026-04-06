@@ -91,7 +91,8 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     uint16_t    debounce_ms                  = config_mngr_pulse_debounce_time_ms_get();
     uint16_t    ap_dec_threshold_kbps        = config_mngr_soft_ap_dec_threshold_kbps_get();
     uint16_t    ap_idle_throughput_timeout_s = config_mngr_soft_ap_idle_throughput_timeout_s_get();
-    uint16_t    min_speed_kmh_x10 = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    uint16_t    min_speed_kmh_x10     = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+    uint16_t    low_speed_bz_thresh_s = config_mngr_low_speed_buzzer_threshold_s_get();
     static char tz[64];
 
     config_mngr_wifi_ssid_get(wifi_ssid, sizeof(wifi_ssid));
@@ -280,6 +281,14 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         " step=\"0.1\" min=\"0\" max=\"6553.5\" value=\"");
     (void)httpd_resp_sendstr_chunk(p_req, num);
     (void)httpd_resp_sendstr_chunk(p_req, "\"></p>");
+
+    /* low_speed_buzzer_threshold_s */
+    snprintf(num, sizeof(num), "%" PRIu16, low_speed_bz_thresh_s);
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<p><label>Low-speed beep delay (s)</label>"
+        "<input type=\"number\" name=\"low_speed_buzzer_threshold_s\" value=\"");
+    (void)httpd_resp_sendstr_chunk(p_req, num);
+    (void)httpd_resp_sendstr_chunk(p_req, "\" min=\"0\" max=\"65535\"></p>");
 
     /* buzzer_enabled */
     (void)httpd_resp_sendstr_chunk(p_req,
@@ -819,6 +828,29 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
         bool b_buzzer =
             (ESP_OK == http_srv_form_field_get(body, "buzzer_enabled", bz_val, sizeof(bz_val)));
         (void)config_mngr_buzzer_enabled_set(b_buzzer);
+    }
+
+    /* low_speed_buzzer_threshold_s */
+    {
+        char thresh_str[8];
+        if (ESP_OK == http_srv_form_field_get(body, "low_speed_buzzer_threshold_s", thresh_str,
+                          sizeof(thresh_str)))
+        {
+            char *   p_end;
+            uint32_t thresh_val = (uint32_t)strtoul(thresh_str, &p_end, 10);
+            if ((p_end == thresh_str) || ('\0' != *p_end) || (thresh_val > 65535UL))
+            {
+                httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                    "low_speed_buzzer_threshold_s must be 0-65535");
+                return ESP_FAIL;
+            }
+            if (ESP_OK != config_mngr_low_speed_buzzer_threshold_s_set((uint16_t)thresh_val))
+            {
+                httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                    "Invalid low_speed_buzzer_threshold_s value");
+                return ESP_FAIL;
+            }
+        }
     }
 
     /* ---- Device Registry fields ---- */
