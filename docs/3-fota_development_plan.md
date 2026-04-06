@@ -1,6 +1,6 @@
 # esport-fi32 FOTA Development Plan
 
-**Version:** 1.0
+**Version:** 2.0
 **Date:** 2026-04-06
 **Executor:** AI coding agents
 **Spec reference:** `docs/1-specification.md`, `docs/2-development_plan.md`
@@ -56,6 +56,9 @@ layout.  This phase is analysis only; no source files change.
 | phy_init   | data | phy      | 0x00F000  | 4 KB    |
 | factory    | app  | factory  | 0x010000  | 1024 KB |
 
+> **Note:** The original feasibility analysis proposed 24 KB NVS.  The implemented design
+> uses **48 KB NVS** to allow for future feature growth (see revised proposal below).
+
 **Current firmware binary size:** ~978 KB (`build/esport-fi32.bin`).
 
 **OTA requirement:**
@@ -64,36 +67,55 @@ layout.  This phase is analysis only; no source files change.
 - The currently used `factory` partition type does **not** support rollback; the image must
   be in an `ota_0`/`ota_1` slot for rollback to work.
 
-**Proposed OTA partition layout (two-slot, no factory app):**
+**Proposed OTA partition layout (initial analysis -- 24 KB NVS, not implemented):**
 
 | Name       | Type | Sub-type | Offset    | Size    | Notes                              |
 | ---------- | ---- | -------- | --------- | ------- | ---------------------------------- |
 | nvs        | data | nvs      | 0x009000  | 24 KB   | unchanged -- NVS data is preserved |
 | otadata    | data | ota      | 0x00F000  | 8 KB    | new -- tracks active slot          |
 | phy_init   | data | phy      | 0x011000  | 4 KB    | unchanged (shifted by 8 KB)        |
-| ota_0      | app  | ota_0    | 0x012000  | 2012 KB | new -- first app slot              |
-| ota_1      | app  | ota_1    | 0x209000  | 2012 KB | new -- second app slot             |
+| ota_0      | app  | ota_0    | 0x012000  | 2012 KB | not used -- see revised layout     |
+| ota_1      | app  | ota_1    | 0x209000  | 2012 KB | not used -- see revised layout     |
+
+> **Revised OTA partition layout (implemented -- 80 KB NVS):**
+>
+> This layout was chosen to maximise NVS space while wasting zero flash bytes.  The
+> 32 KB gap that would otherwise sit unused between `phy_init` and the 64 KB-aligned
+> `ota_0` boundary (0x18000-0x1FFFF) is absorbed into the NVS partition by moving
+> `otadata` and `phy_init` forward so they sit immediately before `ota_0`.  The result
+> is 80 KB NVS with **zero unused flash** across the full 4 MB device.
+
+| Name       | Type | Sub-type | Offset    | Size    | Notes                              |
+| ---------- | ---- | -------- | --------- | ------- | ---------------------------------- |
+| nvs        | data | nvs      | 0x009000  | 80 KB   | maximised -- zero wasted flash     |
+| otadata    | data | ota      | 0x01D000  | 8 KB    | new -- tracks active slot          |
+| phy_init   | data | phy      | 0x01F000  | 4 KB    | immediately before ota_0           |
+| ota_0      | app  | ota_0    | 0x020000  | 1984 KB | new -- first app slot              |
+| ota_1      | app  | ota_1    | 0x210000  | 1984 KB | new -- second app slot             |
 
 Total flash used: exactly 4096 KB (100% utilised, every byte accounted for).
 
 **Feasibility verdict: FEASIBLE.**
 
-- Each slot is 2012 KB.  Current app binary is ~978 KB, leaving **~1034 KB (51%) headroom**
+- Each slot is 1984 KB.  Current app binary is ~1000 KB, leaving **~984 KB (50%) headroom**
   per slot for future growth.
-- NVS is preserved at the same 24 KB size and same offset -- existing config, device registry,
-  and session log data survive the partition table change without a factory reset.
-- The `phy_init` partition shifts 8 KB forward (was 0x00F000, now 0x011000).  The phy
-  calibration data is regenerated automatically on first boot after reflash; this is harmless.
+- NVS is maximised at 80 KB: the original 48 KB plus the 32 KB gap that would otherwise
+  sit idle between `phy_init` and the mandatory 64 KB alignment boundary of `ota_0`.
+- `phy_init` sits at 0x01F000, immediately before `ota_0` at 0x020000.  Phy calibration
+  is regenerated automatically on first boot after reflash; this is harmless.
+- All partition offsets are multiples of the 4 KB flash erase-sector size.
+- `ota_0` is at 0x020000, satisfying the 64 KB MMU-page alignment required by ESP32-C6.
 
 **Important note on the first FOTA flash:**
 
 The migration from the single-app to the OTA layout requires a **one-time manual reflash of
-the entire device** using `idf.py flash` (erases and reprograms the entire flash, including
-the partition table and the new firmware into `ota_0`).  After this initial flash, all
-subsequent updates can be delivered over the air.  Because the partition table changes, a
+the entire device** using `idf.py erase-flash flash` (erases and reprograms the entire flash,
+including the partition table and the new firmware into `ota_0`).  After this initial flash,
+all subsequent updates can be delivered over the air.  Because the partition table changes, a
 simple app-only OTA from the old single-app firmware to the new OTA firmware is **not**
 supported; a full flash reflash is required exactly once.  NVS data at 0x009000 is preserved
-because it stays at the same offset and size.
+because the NVS partition starts at the same offset; the phy_init partition has moved, so phy
+calibration is regenerated on first boot (harmless).
 
 ---
 
@@ -118,17 +140,19 @@ the two-OTA layout derived in Phase F0.  Enable the rollback bootloader option i
    ```
    # esport-fi32 custom partition table -- OTA layout
    # Name,     Type, SubType,  Offset,    Size,  Flags
-   nvs,        data, nvs,      0x9000,    24K,
-   otadata,    data, ota,      0xF000,    8K,
-   phy_init,   data, phy,      0x11000,   4K,
-   ota_0,      app,  ota_0,    0x12000,   2012K,
-   ota_1,      app,  ota_1,    0x209000,  2012K,
+   nvs,        data, nvs,      0x9000,    80K,
+   otadata,    data, ota,      0x1D000,   8K,
+   phy_init,   data, phy,      0x1F000,   4K,
+   ota_0,      app,  ota_0,    0x20000,   1984K,
+   ota_1,      app,  ota_1,    0x210000,  1984K,
    ```
 
    Constraints:
-   - All offsets must be multiples of the flash erase-sector size (4 KB = 0x1000).
+   - App partition offsets must be 64 KB-aligned (0x10000 boundary) on ESP32-C6.
    - `ota_0` and `ota_1` must be equal in size.
    - `otadata` must be exactly 0x2000 (8 KB) -- ESP-IDF requirement.
+   - `otadata` and `phy_init` are packed immediately before `ota_0` so the 32 KB region
+     0x18000-0x1FFFF is fully absorbed by NVS, leaving zero unused flash bytes.
 
 2. **Update `sdkconfig.defaults`** to switch to the custom partition table and enable
    rollback:
@@ -147,13 +171,14 @@ the two-OTA layout derived in Phase F0.  Enable the rollback bootloader option i
    Do **not** manually edit the `sdkconfig` file.  The `sdkconfig.defaults` entries will
    apply on the next `idf.py reconfigure` or clean build.
 
-3. **Run `idf.py reconfigure`** to regenerate `sdkconfig` with the new partition table
-   settings.  Verify that the generated partition table matches Phase F0 offsets exactly by
-   running `idf.py partition-table` and inspecting the output.
+3. **Delete `sdkconfig` and run `idf.py reconfigure`** to regenerate it from
+   `sdkconfig.defaults`.  Verify that the generated partition table matches the Phase F0
+   offsets by running `idf.py partition-table` and inspecting the output.
+   (`sdkconfig` is gitignored; deleting it is safe and necessary when its partition-table
+   keys must be overridden.)
 
-4. **Run `idf.py build`** to confirm the firmware binary still fits inside `ota_0` (size must
-   be < 2012 KB = 2060288 bytes).  The build output line `esport-fi32.bin` reports the binary
-   size.
+4. **Run `idf.py build`** to confirm the firmware binary fits inside `ota_0` (size must
+   be < 1984 KB = 2031616 bytes).  The build output reports the binary size and headroom.
 
 ### Files Changed
 
@@ -165,11 +190,15 @@ the two-OTA layout derived in Phase F0.  Enable the rollback bootloader option i
 
 ### Acceptance Criteria
 
-- [ ] `idf.py build` succeeds.
-- [ ] `idf.py partition-table` output matches the table in Phase F0 exactly (same offsets and sizes).
-- [ ] `build/esport-fi32.bin` size is less than 2060288 bytes (2012 KB).
-- [ ] `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` appears in `sdkconfig` after reconfigure.
-- [ ] `CONFIG_PARTITION_TABLE_CUSTOM=y` and `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"` appear in `sdkconfig`.
+- [x] `idf.py build` succeeds.
+- [x] `idf.py partition-table` output matches the table in Phase F0 exactly (same offsets and
+      sizes).
+- [x] `build/esport-fi32.bin` size is less than 2031616 bytes (1984 KB).
+- [x] `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` appears in `sdkconfig` after reconfigure.
+- [x] `CONFIG_PARTITION_TABLE_CUSTOM=y` and
+      `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"` appear in `sdkconfig`.
+- [x] `idf.py partition-table` shows zero unused flash bytes (4060 KB of partitions
+      + 36 KB bootloader/PT area = 4096 KB total).
 
 ---
 
@@ -374,15 +403,15 @@ return on success.
 
 ### Acceptance Criteria
 
-- [ ] `idf.py build` succeeds (file added to CMakeLists.txt in Phase F4).
-- [ ] `ota_mngr_init()` logs the running firmware version.
-- [ ] `ota_mngr_begin()` returns `ESP_ERR_NOT_SUPPORTED` when no OTA partition exists.
-- [ ] `ota_mngr_end()` transitions state to `OTA_MNGR_STATE_READY` on success.
-- [ ] `ota_mngr_abort()` is idempotent (safe to call in any state).
-- [ ] `ota_mngr_credentials_check("wrong")` returns `false`.
-- [ ] `ota_mngr_password_set("")` returns `ESP_ERR_INVALID_ARG`.
-- [ ] All functions follow `cctemplate` structure; `gp_tag` is present.
-- [ ] All symbols carry the `ota_mngr_` prefix.
+- [x] `idf.py build` succeeds.
+- [x] `ota_mngr_init()` logs the running firmware version.
+- [x] `ota_mngr_begin()` returns `ESP_ERR_NOT_SUPPORTED` when no OTA partition exists.
+- [x] `ota_mngr_end()` transitions state to `OTA_MNGR_STATE_READY` on success.
+- [x] `ota_mngr_abort()` is idempotent (safe to call in any state).
+- [x] `ota_mngr_credentials_check("wrong")` returns `false`.
+- [x] `ota_mngr_password_set("")` returns `ESP_ERR_INVALID_ARG`.
+- [x] All functions follow `cctemplate` structure; `gp_tag` is present.
+- [x] All symbols carry the `ota_mngr_` prefix.
 
 ---
 
@@ -588,16 +617,16 @@ external library; implement with a look-up table.
 
 ### Acceptance Criteria
 
-- [ ] `idf.py build` succeeds.
-- [ ] GET /ota without `Authorization` header returns HTTP 401 with
+- [x] `idf.py build` succeeds.
+- [x] GET /ota without `Authorization` header returns HTTP 401 with
   `WWW-Authenticate: Basic realm="esport-fi32 OTA"`.
-- [ ] GET /ota with correct credentials returns HTTP 200 HTML with a file-input form.
-- [ ] POST /ota with wrong credentials returns HTTP 401.
-- [ ] `http_srv_ota_base64_decode` correctly decodes `"YWRtaW46ZXNwb3J0LWZpMzI="` to
+- [x] GET /ota with correct credentials returns HTTP 200 HTML with a file-input form.
+- [x] POST /ota with wrong credentials returns HTTP 401.
+- [x] `http_srv_ota_base64_decode` correctly decodes `"YWRtaW46ZXNwb3J0LWZpMzI="` to
   `"admin:esport-fi32"`.
-- [ ] Password change: POST /ota/pwd with wrong current password returns HTTP 400.
-- [ ] Password change: POST /ota/pwd with mismatched new/confirm passwords returns HTTP 400.
-- [ ] All symbols carry the `http_srv_ota_` / `HTTP_SRV_OTA_` prefix.
+- [x] Password change: POST /ota/pwd with wrong current password returns HTTP 400.
+- [x] Password change: POST /ota/pwd with mismatched new/confirm passwords returns HTTP 400.
+- [x] All symbols carry the `http_srv_ota_` / `HTTP_SRV_OTA_` prefix.
 
 ---
 
@@ -666,14 +695,16 @@ changes to existing files -- no existing logic is removed or modified.
       (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_ota_pwd_post);
       ```
 
-3. **Update `main/src/http_server_dashboard.c`** (optional but recommended):
-   - In the "Navigation" section of the dashboard HTML (the `sc_nav` or equivalent static
-     string near the bottom of `http_srv_root_get_handler`), add a link to the OTA page:
+3. **Update `main/src/http_server_config.c`**:
+   - Below the "Reset to Factory Defaults" button, add a horizontal divider and a
+     "Firmware Update" link styled as a button that navigates to `/ota`:
      ```html
-     <a class="btn" href="/ota">Firmware Update</a>
+     <div style="margin:1.5em 0;border-top:1px solid #ccc;"></div>
+     <div class="btn-right">
+       <a href="/ota" ...>Firmware Update</a>
+     </div>
      ```
-   - This is a one-line change to a static string.  If the navigation string is defined as
-     a `static const char sc_nav[]`, split it or add a separate chunk send.
+   - This is a small addition to the existing `http_srv_config_get_handler` chunked output.
 
 ### Files Modified
 
@@ -681,12 +712,12 @@ changes to existing files -- no existing logic is removed or modified.
 | --------------------------------- | --------------- |
 | `main/CMakeLists.txt`             | add REQUIRES + SRCS entries |
 | `main/src/http_server.c`          | add include + 4 URI registrations |
-| `main/src/http_server_dashboard.c`| add /ota link (optional) |
+| `main/src/http_server_config.c`   | add /ota link below Reset button |
 
 ### Acceptance Criteria
 
-- [ ] `idf.py build` succeeds with zero errors.
-- [ ] No existing tests (from Phase 10) regress.
+- [x] `idf.py build` succeeds with zero errors.
+- [x] No existing tests (from Phase 10) regress.
 - [ ] GET /ota is reachable in a browser and returns the upload form after Basic Auth.
 - [ ] GET /ota/pwd is reachable and returns the password change form.
 
@@ -742,7 +773,7 @@ The placement guarantees that:
 
 ### Acceptance Criteria
 
-- [ ] `idf.py build` succeeds.
+- [x] `idf.py build` succeeds.
 - [ ] On boot, the log contains: `"ota_manager: running fw v<version>"`.
 - [ ] On boot, no crash or assertion related to `esp_ota_mark_app_valid_cancel_rollback`.
 - [ ] When running from `ota_0` or `ota_1`, the rollback pending flag is cleared.
@@ -900,7 +931,7 @@ The following rows must be added to the Module Prefix Table in `docs/2-developme
 | `main/src/http_server_ota.c`      | F3    | new file     |
 | `main/CMakeLists.txt`             | F4    | add 2 SRCS + 1 REQUIRES  |
 | `main/src/http_server.c`          | F4    | add include + 4 URI registrations |
-| `main/src/http_server_dashboard.c`| F4    | add /ota link (optional) |
+| `main/src/http_server_config.c`   | F4    | add /ota link below Reset button |
 | `main/src/main.c`                 | F5    | add include + 1 init call |
 | `docs/1-specification.md`         | F6    | update boot seq, routes, NVS layout |
 | `docs/2-development_plan.md`      | F6    | add module prefix rows |

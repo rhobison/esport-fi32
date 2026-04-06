@@ -14,6 +14,15 @@ CONFIG_LWIP_STATS=y
 # all of which use substantial stack via software arithmetic routines on
 # RISC-V 32-bit.  2048 bytes is insufficient and causes stack overflow,
 # which manifests as a Cache access error (MCAUSE=0x19) on ESP32-C6.
+# Partition table: custom two-OTA layout (nvs=48K, ota_0=2000K, ota_1=2000K)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# OTA rollback: if new firmware does not call
+# esp_ota_mark_app_valid_cancel_rollback(), the bootloader
+# reverts to the previous slot on the next boot.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
 # Increase ESP timer task stack from 3584-byte default.  device_reg_tick()
 # allocates wifi_sta_list_t (~124 bytes) and snapshot arrays on the stack,

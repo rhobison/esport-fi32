@@ -15,6 +15,7 @@
 #include "http_server_api.h"
 #include "http_server_export.h"
 #include "http_server_dashboard.h"
+#include "http_server_ota.h"
 
 #include <string.h>
 
@@ -55,7 +56,7 @@ esp_err_t http_srv_init(void)
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = 80U;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 9U;
+    cfg.max_uri_handlers = 13U;
 
     esp_err_t ret = httpd_start(&gp_server_handle, &cfg);
     if (ESP_OK != ret)
@@ -113,6 +114,31 @@ esp_err_t http_srv_init(void)
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_sessions);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_sessions_export);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_sessions_daily);
+
+    static const httpd_uri_t sc_uri_ota_get = {
+        .uri     = "/ota",
+        .method  = HTTP_GET,
+        .handler = http_srv_ota_get_handler,
+    };
+    static const httpd_uri_t sc_uri_ota_post = {
+        .uri     = "/ota",
+        .method  = HTTP_POST,
+        .handler = http_srv_ota_post_handler,
+    };
+    static const httpd_uri_t sc_uri_ota_pwd_get = {
+        .uri     = "/ota/pwd",
+        .method  = HTTP_GET,
+        .handler = http_srv_ota_pwd_get_handler,
+    };
+    static const httpd_uri_t sc_uri_ota_pwd_post = {
+        .uri     = "/ota/pwd",
+        .method  = HTTP_POST,
+        .handler = http_srv_ota_pwd_post_handler,
+    };
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_ota_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_ota_post);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_ota_pwd_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_ota_pwd_post);
 
     ESP_LOGI(gp_tag, "started on port %u", (unsigned)cfg.server_port);
     return ESP_OK;

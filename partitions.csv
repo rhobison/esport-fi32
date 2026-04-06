@@ -1,0 +1,7 @@
+# esport-fi32 custom partition table -- OTA layout
+# Name,     Type, SubType,  Offset,    Size,  Flags
+nvs,        data, nvs,      0x9000,    80K,
+otadata,    data, ota,      0x1D000,   8K,
+phy_init,   data, phy,      0x1F000,   4K,
+ota_0,      app,  ota_0,    0x20000,   1984K,
+ota_1,      app,  ota_1,    0x210000,  1984K,

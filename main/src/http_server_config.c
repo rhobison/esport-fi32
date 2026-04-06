@@ -483,7 +483,13 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "<div class=\"btn-right\">"
         "<button type=\"submit\" class=\"btn-reset\">Reset to Factory Defaults</button>"
         "</div>"
-        "</form>");
+        "</form>"
+        "<div style='margin:1.5em 0;border-top:1px solid #ccc;'></div>"
+        "<div class=\"btn-right\">"
+        "<a href='/ota' style='display:inline-block;background:#2a6db5;color:#fff;border:none;"
+        "padding:6px 14px;border-radius:4px;text-decoration:none;font-size:inherit;'"
+        ">Firmware Update</a>"
+        "</div>");
 
     /* ---- STA connection status ---- */
     {

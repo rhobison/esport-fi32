@@ -34,6 +34,7 @@ ESPort-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 - **Speed-gated crediting** — a configurable minimum speed (`min_speed_to_increment_time_kmh_x10`) prevents credits accumulating when pedalling too slowly. The gate is disabled when set to zero.
 - **Per-device traffic-gated countdown** — each device's countdown pauses independently when no meaningful internet traffic is detected, preventing credits from draining during idle screen time.
 - **Persistent per-device counters** — device registry data is saved to NVS every 60 seconds and on counter-reaching-zero; counters survive power cycles.
+- **Firmware Over-The-Air (FOTA) updates** — upload a new `.bin` via the browser at `/ota` (HTTP Basic Auth protected). Automatic rollback: if the device crashes before the new firmware calls `ota_mngr_init()`, the bootloader reverts to the previous slot. Password configurable via `/ota/pwd`.
 - **Buzzer feedback** — an active buzzer on a configurable GPIO provides audio cues: a beep on session start, a longer beep on session qualification, a triple-beep on session close, and a repeating short tick when pedalling too slowly (after a configurable delay to avoid false alarms from momentary speed fluctuations). Can be disabled via the config page.
 - **Fully configurable** — all parameters (SSID, password, seconds-per-pulse, thresholds, timezone, ...) are stored in NVS and can be changed at runtime via the web UI without reflashing.
 
@@ -76,6 +77,17 @@ Lets you set all parameters without reflashing:
 - **Add Device** form: MAC address input (auto-formatted), nickname
 - **Connected Unregistered Stations**: lists AP-connected devices not in the registry with a one-click Add button (handles Android MAC randomisation)
 
+### Firmware Update OTA (`/ota`)
+
+The configuration page includes a **Firmware Update** link (below "Reset to Factory Defaults") that navigates to the OTA page. The OTA page is protected by HTTP Basic Auth (default credentials: `admin` / `esport-fi32`).
+
+From the OTA page you can:
+- View the currently running firmware version
+- Upload a new `.bin` firmware image with a progress bar
+- Change the OTA password via `/ota/pwd`
+
+After a successful upload the device reboots automatically. If the new firmware crashes before completing boot, the bootloader rolls back to the previous slot.
+
 ---
 
 ## Hardware
@@ -111,10 +123,20 @@ A ready-to-use Docker-based development environment is included. It pre-installs
 
 ### Build & Flash
 
+> **Note:** The firmware uses a custom OTA partition table (`partitions.csv`). The first time
+> you flash the device, use the full-erase flash command to ensure the partition table is
+> written correctly:
+>
+> ```bash
+> idf.py erase-flash flash
+> ```
+>
+> Subsequent updates can be delivered over the air via the `/ota` web interface.
+
 ```bash
 idf.py set-target esp32c6
 idf.py build
-idf.py -p PORT flash monitor
+idf.py -p PORT erase-flash flash monitor
 ```
 
 ### First-time configuration
@@ -128,6 +150,19 @@ The **Reward AP** is always active from boot — no separate config AP exists.
 3. Enter your home Wi-Fi credentials, the Reward AP name/password, and any other settings.
 4. Save. The device connects to your home network in the background (no reboot required).
 5. The configuration page remains accessible at all times via the Reward AP (`192.168.5.1`) or via the home network IP.
+
+### Firmware updates (OTA)
+
+After the first flash, you can update the firmware over the air:
+
+1. Build the new firmware: `idf.py build`
+2. Open **http://\<device-ip\>/ota** (or **http://192.168.5.1/ota**) in a browser.
+3. Enter credentials: username `admin`, password `esport-fi32` (default).
+4. Select the new `.bin` from `build/esport-fi32.bin` and click **Flash Firmware**.
+5. The device reboots into the new firmware automatically.
+
+The previous firmware slot is kept. If the new firmware crashes before completing boot,
+the bootloader rolls back to the previous slot automatically.
 
 ---
 
@@ -165,6 +200,9 @@ All parameters are stored in NVS and can be changed at runtime via the web UI.
 | `/api/sessions`        | GET        | Session history as JSON       |
 | `/api/sessions/export` | GET        | Download CSV or JSON report   |
 | `/api/sessions/daily`  | GET        | Daily aggregates for charting |
+| `/ota`                 | GET        | Firmware update page (Basic Auth) |
+| `/ota`                 | POST       | Upload `.bin` and flash (Basic Auth) |
+| `/ota/pwd`             | GET / POST | Change OTA password (Basic Auth) |
 
 ---
 
@@ -190,9 +228,12 @@ main/
     http_server_api.c         # GET /api/status and /api/sessions handlers
     http_server_export.c      # GET /api/sessions/export handler
     http_server_dashboard.c   # GET / status dashboard handler
+    ota_manager.c             # OTA state machine; NVS credential storage; rollback cancel
+    http_server_ota.c         # GET/POST /ota and /ota/pwd handlers (Basic Auth)
 docs/
   1-specification.md          # Full firmware specification
   2-development_plan.md       # Phased development plan
+  3-fota_development_plan.md  # FOTA implementation plan
 ```
 
 ## Finished assembly
