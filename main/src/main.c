@@ -24,6 +24,7 @@
 #include "device_registry.h"
 #include "event_ids.h"
 #include "http_server.h"
+#include "ota_manager.h"
 #include "pulse_input.h"
 #include "session_log.h"
 #include "session_tracker.h"
@@ -91,6 +92,9 @@ void app_main(void)
 
     /* Step 2b: Initialise buzzer GPIO and pattern timer. */
     ESP_ERROR_CHECK(buzzer_init());
+
+    /* Step 2c: Mark firmware valid (cancel rollback); open esport_ota NVS namespace. */
+    ESP_ERROR_CHECK(ota_mngr_init());
 
     /* Step 3: Create the default event loop before any module that posts. */
     ESP_ERROR_CHECK(esp_event_loop_create_default());

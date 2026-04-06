@@ -10,6 +10,7 @@ idf_component_register(
         esp_http_server
         log
         freertos
+        app_update
     PRIV_REQUIRES
         esp_app_format
     INCLUDE_DIRS
@@ -31,6 +32,8 @@ idf_component_register(
         "src/http_server_dashboard.c"
         "src/device_registry.c"
         "src/buzzer.c"
+        "src/ota_manager.c"
+        "src/http_server_ota.c"
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)

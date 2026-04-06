@@ -1,6 +1,6 @@
 # esport-fi32 Firmware Specification
 
-**Version:** 2.1
+**Version:** 2.2
 **Date:** 2026-04-06
 **Target:** ESP32-C6 (ESP-IDF v5.x)
 
@@ -32,6 +32,7 @@
     - [6.4 JSON Sessions API — `GET /api/sessions`](#64-json-sessions-api--get-apisessions)
     - [6.5 Sessions Export API — `GET /api/sessions/export`](#65-sessions-export-api--get-apisessionsexport)
     - [6.6 Daily Aggregates API (Graphs) — `GET /api/sessions/daily`](#66-daily-aggregates-api-graphs--get-apisessionsdaily)
+    - [6.7 Firmware Update — `GET /ota` and `POST /ota`](#67-firmware-update--get-ota-and-post-ota)
   - [7. System Behaviour Sequences](#7-system-behaviour-sequences)
     - [7.1 Boot Sequence](#71-boot-sequence)
     - [7.2 STA Connection Flow](#72-sta-connection-flow)
@@ -43,6 +44,8 @@
     - [Partition](#partition)
     - [Namespace: `esport_cfg`](#namespace-esport_cfg)
     - [Namespace: `esport_log`](#namespace-esport_log)
+    - [Namespace: `esport_dev`](#namespace-esport_dev)
+    - [Namespace: `esport_ota`](#namespace-esport_ota)
   - [9. Event Bus](#9-event-bus)
   - [10. Factory Defaults \& NVS Recovery](#10-factory-defaults--nvs-recovery)
   - [11. Coding Conventions](#11-coding-conventions)
@@ -525,12 +528,21 @@ uint16_t  session_log_read(session_trk_record_t *out, uint16_t max_count);
 
 **Responsibilities:**
 - Start an `esp_http_server` instance on port 80.
-- Register the routes listed in §6.
+- Register the routes listed in §6 (including OTA routes from `http_server_ota.c/h`).
 - The server runs regardless of which network interface is active; it is reachable on all active IPs.
 - Parse and validate POST body (URL-encoded form data) for the config endpoint. Reject malformed or out-of-range values with HTTP 400 and a human-readable error message.
 - After a successful config save, post `ESPORT_EVENT_CONFIG_CHANGED`. The WiFi Manager handles any STA reconnect automatically if `wifi_ssid` or `wifi_password` changed.
 - Provide session export endpoints (CSV and JSON) with `Content-Disposition: attachment` so browsers download report files.
 - Provide a daily-aggregate JSON endpoint for chart rendering in the Web UI.
+- Provide OTA firmware update endpoints (§6.7) delegated to `http_server_ota.c/h`.
+
+**File:** `http_server_ota.c` / `http_server_ota.h`
+
+**Responsibilities:**
+- Implement the four OTA URI handlers: `GET /ota`, `POST /ota`, `GET /ota/pwd`,
+  `POST /ota/pwd`.
+- Enforce HTTP Basic Auth on all four routes (username `admin`, password stored in NVS
+  namespace `esport_ota`).
 
 **API:**
 
@@ -745,6 +757,12 @@ Resets every configuration parameter to its factory default.
 
 On redirect, `GET /config` renders a teal confirmation banner: "✓ Configuration reset to factory defaults."
 
+**Firmware Update link:**
+
+Below the reset form, a horizontal divider separates the admin actions. A "Firmware Update"
+button-styled link navigates to `/ota` (§6.7). This is the primary entry point for OTA
+updates.
+
 On NVS failure: HTTP 500 Internal Server Error.
 
 ### 6.3 JSON Status API — `GET /api/status`
@@ -870,6 +888,43 @@ Aggregation rules:
 
 ---
 
+### 6.7 Firmware Update — `GET /ota`, `POST /ota`
+
+Protected by HTTP Basic Auth on all four OTA routes.
+
+| Route           | Auth | Description                                         |
+| --------------- | ---- | --------------------------------------------------- |
+| `GET /ota`      | Yes  | HTML upload page showing running firmware version   |
+| `POST /ota`     | Yes  | Receive `.bin`, flash inactive slot, reboot         |
+| `GET /ota/pwd`  | Yes  | OTA password change form                           |
+| `POST /ota/pwd` | Yes  | Save new OTA password to NVS                       |
+
+**Credentials:**
+- Username: `"admin"` (hardcoded constant `OTA_MNGR_HTTP_USERNAME`).
+- Password: configurable via `POST /ota/pwd`, stored in NVS namespace `esport_ota` key
+  `ota_pwd`. Default: `"esport-fi32"`.
+
+**`GET /ota`** returns an HTML page showing the running firmware version and a file-input
+form for uploading a new `.bin` image. Browser-side JavaScript uploads the file via
+`XMLHttpRequest` with a progress bar.
+
+**`POST /ota`** receives an `application/octet-stream` body (the `.bin` file), writes it
+to the inactive OTA slot incrementally using `esp_ota_ops`, verifies the image header, sets
+the new boot partition, and reboots. The browser receives HTTP 200 `"OK"` just before the
+reboot.
+
+On reboot, the bootloader loads the new image. `ota_mngr_init()` marks it valid at boot
+step 2c. If the device crashes before reaching `ota_mngr_init()`, the bootloader
+automatically rolls back to the previous slot.
+
+**`GET /ota/pwd`** returns an HTML form with three password fields: current, new, and
+confirm. Accepts `?saved=1` query parameter to display a success banner.
+
+**`POST /ota/pwd`** validates the current password, checks new/confirm match, and persists
+the new password to NVS namespace `esport_ota`.
+
+---
+
 ## 7. System Behaviour Sequences
 
 ### 7.1 Boot Sequence
@@ -879,6 +934,7 @@ Aggregation rules:
 2. config_mngr_init()         <- load config, apply factory defaults
 2a. device_reg_init()         <- load device registry from NVS (esport_dev namespace)
 2b. buzzer_init()             <- configure buzzer GPIO; create pattern timer
+2c. ota_mngr_init()           <- mark firmware valid (cancel rollback); open esport_ota namespace
 3. esp_event_loop_create_default()
 4. wifi_mngr_init()           <- start AP+STA; reward AP always-on from init
    a. if wifi_ssid is empty: skip STA connection (reward AP still starts)
@@ -998,7 +1054,9 @@ POST /config/reset
 
 ### Partition
 
-Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custom partition table required unless session log storage needs to be expanded.
+Custom NVS partition (`nvs`, 0x9000, **80 KB**) defined in `partitions.csv`.
+`otadata` and `phy_init` are packed immediately before the 64 KB-aligned `ota_0` boundary
+so that no flash byte goes unused across the full 4 MB device.
 
 ### Namespace: `esport_cfg`
 
@@ -1053,6 +1111,14 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | `dev_count`      | uint8  | Number of registered devices (0-4)                          |
 | `dev_rider`      | uint8  | Current rider index; `0xFF` = no rider                      |
 | `dev_0`...`dev_3` | blob   | `device_reg_entry_t` binary (MAC + nickname + counter + enabled) |
+
+---
+
+### Namespace: `esport_ota`
+
+| Key       | Type   | Content                                              |
+| --------- | ------ | ---------------------------------------------------- |
+| `ota_pwd` | string | OTA Basic Auth password (max 63 chars, default `"esport-fi32"`) |
 
 ---
 

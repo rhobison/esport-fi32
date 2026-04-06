@@ -955,6 +955,8 @@ Every symbol (functions, types, `#define` macros, `enum` values) **must** start 
 | `http_server_export`    | `http_srv_`            | `HTTP_SRV_`         |
 | `http_server_dashboard` | `http_srv_`            | `HTTP_SRV_`         |
 | `device_registry`       | `device_reg_`          | `DEVICE_REG_`       |
+| `ota_manager`           | `ota_mngr_`            | `OTA_MNGR_`         |
+| `http_server_ota`       | `http_srv_ota_`        | `HTTP_SRV_OTA_`     |
 
 > `gp_tag` is a universal file-scope variable name and does **not** carry a module prefix (it follows the BARR-C:2018 pointer variable naming rule instead).
 
