@@ -60,18 +60,23 @@ typedef enum
     ESPORT_EVENT_COUNTER_CHANGED = 1,
 
     /**
-     * \brief The reward Soft AP was enabled (session duration reached the threshold).
+     * \brief Earning phase started (internet gate threshold reached or bypassed).
+     *
+     * Posted when the time counter transitions to EARNING state.  The reward
+     * Soft AP is always on; this event signals that session credits have been
+     * flushed to the rider's device counter and internet access is now gated
+     * only by the per-device counter.
      *
      * No payload.
      */
-    ESPORT_EVENT_REWARD_AP_ON = 2,
+    ESPORT_EVENT_EARNING_STARTED = 2,
 
     /**
-     * \brief The reward Soft AP was disabled (counter reached zero).
+     * \brief Earning phase stopped (session closed while in EARNING state).
      *
      * No payload.
      */
-    ESPORT_EVENT_REWARD_AP_OFF = 3,
+    ESPORT_EVENT_EARNING_STOPPED = 3,
 
     /**
      * \brief An exercise session is confirmed open (QUALIFYING->ACTIVE transition).

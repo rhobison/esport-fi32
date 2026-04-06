@@ -376,8 +376,8 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
     }
 
     portENTER_CRITICAL(&g_spinlock);
-    bool     b_start         = (TIME_CTR_STATE_IDLE == g_state);
-    bool     b_bypass_gate   = false;
+    bool     b_start          = (TIME_CTR_STATE_IDLE == g_state);
+    bool     b_bypass_gate    = false;
     uint32_t credits_to_flush = 0U;
     if (b_start)
     {
@@ -389,10 +389,10 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
         {
             /* Rider already has internet time -> bypass the gate, go to
              * EARNING immediately and flush all pending session credits. */
-            g_state          = TIME_CTR_STATE_EARNING;
-            credits_to_flush = g_session_credits;
+            g_state           = TIME_CTR_STATE_EARNING;
+            credits_to_flush  = g_session_credits;
             g_session_credits = 0U;
-            b_bypass_gate    = true;
+            b_bypass_gate     = true;
         }
         else
         {
@@ -414,10 +414,10 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
             (void)device_reg_entry_counter_set(rider, current_counter + credits_to_flush);
         }
 
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_EARNING_STARTED, NULL, 0U, 0U);
         ESP_LOGI(gp_tag,
-            "IDLE->EARNING: gate bypassed (counter %" PRIu32
-            "s > 0), %" PRIu32 "s session credits flushed",
+            "IDLE->EARNING: gate bypassed (counter %" PRIu32 "s > 0), %" PRIu32
+            "s session credits flushed",
             current_counter, credits_to_flush);
         return;
     }
@@ -462,7 +462,7 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
  * with an already-positive device counter (gate bypass).
  *
  * In #TIME_CTR_STATE_EARNING: transitions to IDLE and posts
- * #ESPORT_EVENT_REWARD_AP_OFF (device counters continue to drain normally via
+ * #ESPORT_EVENT_EARNING_STOPPED (device counters continue to drain normally via
  * the always-running tick timer).
  *
  * \param[in] p_handler_arg  Unused context pointer.
@@ -517,7 +517,7 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     {
         buzzer_speed_low_update(false);
 
-        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_OFF, NULL, 0U, 0U);
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_EARNING_STOPPED, NULL, 0U, 0U);
         ESP_LOGI(gp_tag, "EARNING->IDLE: session closed, device counters continue");
     }
 }
@@ -529,7 +529,7 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
  *
  * Transitions from #TIME_CTR_STATE_SESSION to #TIME_CTR_STATE_EARNING, flushes
  * the accumulated session credits to the current rider's device_reg counter,
- * and posts #ESPORT_EVENT_REWARD_AP_ON.  If the state is no longer SESSION when
+ * and posts #ESPORT_EVENT_EARNING_STARTED.  If the state is no longer SESSION when
  * the timer fires (e.g. session closed just before expiry), the callback exits
  * without awarding credits.
  *
@@ -565,7 +565,7 @@ static void time_ctr_threshold_cb(void * p_arg)
         }
     }
 
-    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_EARNING_STARTED, NULL, 0U, 0U);
     ESP_LOGI(gp_tag, "SESSION->EARNING: threshold fired, %" PRIu32 " session credits flushed",
         credits_to_add);
 }
