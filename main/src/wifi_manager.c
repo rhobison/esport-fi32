@@ -120,6 +120,12 @@ static volatile bool gb_napt_pending = false;
  * handler (event loop task).  Both accesses run in the same task, so no spinlock is needed. */
 static volatile bool gb_reconnect_immediate = false;
 
+/** True until the first successful STA IP assignment.
+ *
+ * Allows the first failed connect attempt on boot to retry immediately rather
+ * than waiting the full #WIFI_MNGR_RECONNECT_PERIOD_US backoff. */
+static volatile bool gb_first_connect_attempt = true;
+
 /** Previous RX byte count snapshot for throughput measurement. */
 static uint32_t g_prev_rx_bytes = 0U;
 
@@ -273,7 +279,7 @@ esp_err_t wifi_mngr_init(void)
 
     if ('\0' == ssid[0])
     {
-        ESP_LOGI(gp_tag, "No STA SSID configured \u2014 skipping STA connection");
+        ESP_LOGI(gp_tag, "No STA SSID configured - skipping STA connection");
     }
     else
     {
@@ -814,6 +820,13 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
                 wifi_mngr_sta_connect();
                 ESP_LOGI(gp_tag, "STA disconnected - reconnecting immediately (config changed)");
             }
+            else if (gb_first_connect_attempt)
+            {
+                /* First boot attempt failed: retry immediately, no point waiting 10 s. */
+                esp_timer_stop(gp_reconnect_timer);
+                wifi_mngr_sta_connect();
+                ESP_LOGI(gp_tag, "STA first connect failed - retrying immediately");
+            }
             else
             {
                 /* Normal path: schedule reconnect attempt in 10 s. */
@@ -831,7 +844,8 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
     {
         if (IP_EVENT_STA_GOT_IP == event_id)
         {
-            gb_sta_connected = true;
+            gb_sta_connected        = true;
+            gb_first_connect_attempt = false;
 
             /* Make STA the default netif so that the lwIP routing layer sends
              * outbound traffic (including NATted AP-client traffic) through

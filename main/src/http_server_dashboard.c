@@ -314,20 +314,49 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<div class=\"card\"><h3>Daily Average Speed (km/h)</h3>"
         "<svg viewBox=\"0 0 620 200\" xmlns=\"http://www.w3.org/2000/svg\">");
 
-    /* Y-axis and X-axis lines, Y labels */
-    snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-        "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
-        " stroke=\"#555\" stroke-width=\"1\"/>"
-        "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
-        " stroke=\"#555\" stroke-width=\"1\"/>"
-        "<text x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\""
-        " fill=\"#333\">%.1f</text>"
-        "<text x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\""
-        " fill=\"#333\">0</text>",
-        HTTP_SRV_SVG_LM, HTTP_SRV_SVG_TOP, HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM,
-        HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM + HTTP_SRV_SVG_CW, HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM - 3,
-        HTTP_SRV_SVG_TOP + 4, (float)max_speed_x10 / 10.0f, HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_BOT);
-    (void)httpd_resp_sendstr_chunk(p_req, p_buf);
+    /* Y-axis, X-axis, gridlines and Y labels */
+    {
+        int y_75 = HTTP_SRV_SVG_BOT - HTTP_SRV_SVG_CH * 3 / 4;
+        int y_50 = HTTP_SRV_SVG_BOT - HTTP_SRV_SVG_CH / 2;
+        int y_25 = HTTP_SRV_SVG_BOT - HTTP_SRV_SVG_CH / 4;
+        int x_r  = HTTP_SRV_SVG_LM + HTTP_SRV_SVG_CW;
+        snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#555\" stroke-width=\"1\"/>"
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#555\" stroke-width=\"1\"/>"
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#e0e0e0\" stroke-dasharray=\"3,3\"/>"
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#e0e0e0\" stroke-dasharray=\"3,3\"/>"
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#e0e0e0\" stroke-dasharray=\"3,3\"/>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">%.1f</text>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">%.1f</text>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">%.1f</text>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">%.1f</text>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">0</text>",
+            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_TOP, HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT,
+            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT, x_r, HTTP_SRV_SVG_BOT,
+            HTTP_SRV_SVG_LM, y_75, x_r, y_75,
+            HTTP_SRV_SVG_LM, y_50, x_r, y_50,
+            HTTP_SRV_SVG_LM, y_25, x_r, y_25,
+            HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_TOP + 4,
+            (float)max_speed_x10 / 10.0f,
+            HTTP_SRV_SVG_LM - 3, y_75 + 4,
+            (float)max_speed_x10 * 3.0f / 40.0f,
+            HTTP_SRV_SVG_LM - 3, y_50 + 4,
+            (float)max_speed_x10 / 20.0f,
+            HTTP_SRV_SVG_LM - 3, y_25 + 4,
+            (float)max_speed_x10 / 40.0f,
+            HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_BOT);
+        (void)httpd_resp_sendstr_chunk(p_req, p_buf);
+    }
 
     for (int d = 0; d < (int)HTTP_SRV_DAILY_WINDOW_DAYS; d++)
     {
@@ -339,11 +368,28 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         int      bw      = HTTP_SRV_SVG_SLOT - 2 * HTTP_SRV_SVG_BPAD;
         int      by      = HTTP_SRV_SVG_BOT - bar_h;
 
-        snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-            "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"#4a90d9\"/>"
-            "<text x=\"%d\" y=\"%d\" font-size=\"8\" text-anchor=\"middle\""
-            " fill=\"#555\">%d</text>",
-            bx, by, bw, bar_h, bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
+        if (avg_spd > 0U)
+        {
+            int lbl_y = (by > HTTP_SRV_SVG_TOP + 9) ? (by - 3) : (HTTP_SRV_SVG_TOP + 7);
+            snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
+                "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"#4a90d9\">"
+                "<title>%.1f km/h</title></rect>"
+                "<text x=\"%d\" y=\"%d\" font-size=\"7\" text-anchor=\"middle\""
+                " fill=\"#333\">%.1f</text>"
+                "<text x=\"%d\" y=\"%d\" font-size=\"8\" text-anchor=\"middle\""
+                " fill=\"#555\">%d</text>",
+                bx, by, bw, bar_h,
+                (float)avg_spd / 10.0f,
+                bx + bw / 2, lbl_y, (float)avg_spd / 10.0f,
+                bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
+        }
+        else
+        {
+            snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
+                "<text x=\"%d\" y=\"%d\" font-size=\"8\" text-anchor=\"middle\""
+                " fill=\"#555\">%d</text>",
+                bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
+        }
         (void)httpd_resp_sendstr_chunk(p_req, p_buf);
     }
 
@@ -354,19 +400,44 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<div class=\"card\"><h3>Daily Total Duration (minutes)</h3>"
         "<svg viewBox=\"0 0 620 200\" xmlns=\"http://www.w3.org/2000/svg\">");
 
-    snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-        "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
-        " stroke=\"#555\" stroke-width=\"1\"/>"
-        "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
-        " stroke=\"#555\" stroke-width=\"1\"/>"
-        "<text x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\""
-        " fill=\"#333\">%" PRIu32 "</text>"
-        "<text x=\"%d\" y=\"%d\" font-size=\"10\" text-anchor=\"end\""
-        " fill=\"#333\">0</text>",
-        HTTP_SRV_SVG_LM, HTTP_SRV_SVG_TOP, HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM,
-        HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM + HTTP_SRV_SVG_CW, HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM - 3,
-        HTTP_SRV_SVG_TOP + 4, max_dur_min, HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_BOT);
-    (void)httpd_resp_sendstr_chunk(p_req, p_buf);
+    {
+        int y_75 = HTTP_SRV_SVG_BOT - HTTP_SRV_SVG_CH * 3 / 4;
+        int y_50 = HTTP_SRV_SVG_BOT - HTTP_SRV_SVG_CH / 2;
+        int y_25 = HTTP_SRV_SVG_BOT - HTTP_SRV_SVG_CH / 4;
+        int x_r  = HTTP_SRV_SVG_LM + HTTP_SRV_SVG_CW;
+        snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#555\" stroke-width=\"1\"/>"
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#555\" stroke-width=\"1\"/>"
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#e0e0e0\" stroke-dasharray=\"3,3\"/>"
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#e0e0e0\" stroke-dasharray=\"3,3\"/>"
+            "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\""
+            " stroke=\"#e0e0e0\" stroke-dasharray=\"3,3\"/>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">%" PRIu32 "</text>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">%" PRIu32 "</text>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">%" PRIu32 "</text>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">%" PRIu32 "</text>"
+            "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
+            " fill=\"#555\">0</text>",
+            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_TOP, HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT,
+            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT, x_r, HTTP_SRV_SVG_BOT,
+            HTTP_SRV_SVG_LM, y_75, x_r, y_75,
+            HTTP_SRV_SVG_LM, y_50, x_r, y_50,
+            HTTP_SRV_SVG_LM, y_25, x_r, y_25,
+            HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_TOP + 4, max_dur_min,
+            HTTP_SRV_SVG_LM - 3, y_75 + 4, max_dur_min * 3U / 4U,
+            HTTP_SRV_SVG_LM - 3, y_50 + 4, max_dur_min / 2U,
+            HTTP_SRV_SVG_LM - 3, y_25 + 4, max_dur_min / 4U,
+            HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_BOT);
+        (void)httpd_resp_sendstr_chunk(p_req, p_buf);
+    }
 
     for (int d = 0; d < (int)HTTP_SRV_DAILY_WINDOW_DAYS; d++)
     {
@@ -376,11 +447,28 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         int      bw      = HTTP_SRV_SVG_SLOT - 2 * HTTP_SRV_SVG_BPAD;
         int      by      = HTTP_SRV_SVG_BOT - bar_h;
 
-        snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-            "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"#3aa76d\"/>"
-            "<text x=\"%d\" y=\"%d\" font-size=\"8\" text-anchor=\"middle\""
-            " fill=\"#555\">%d</text>",
-            bx, by, bw, bar_h, bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
+        if (dur_min > 0U)
+        {
+            int lbl_y = (by > HTTP_SRV_SVG_TOP + 9) ? (by - 3) : (HTTP_SRV_SVG_TOP + 7);
+            snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
+                "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"#3aa76d\">"
+                "<title>%" PRIu32 " min</title></rect>"
+                "<text x=\"%d\" y=\"%d\" font-size=\"7\" text-anchor=\"middle\""
+                " fill=\"#333\">%" PRIu32 "</text>"
+                "<text x=\"%d\" y=\"%d\" font-size=\"8\" text-anchor=\"middle\""
+                " fill=\"#555\">%d</text>",
+                bx, by, bw, bar_h,
+                dur_min,
+                bx + bw / 2, lbl_y, dur_min,
+                bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
+        }
+        else
+        {
+            snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
+                "<text x=\"%d\" y=\"%d\" font-size=\"8\" text-anchor=\"middle\""
+                " fill=\"#555\">%d</text>",
+                bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
+        }
         (void)httpd_resp_sendstr_chunk(p_req, p_buf);
     }
 
