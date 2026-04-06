@@ -2082,11 +2082,11 @@ Replace the global counter with per-device credit logic. Pulse credits go to the
    - Note: `wifi_mngr_reward_ap_throughput_kbps()` is **not** removed from `wifi_manager.c`; it is still called from `http_server_api.c` for the `"reward_ap_throughput_kbps"` total-AP diagnostic field.
 
 9. **Session-closed handler** — transitions in all states:
-   - `TIME_CTR_STATE_SESSION` + `ESPORT_EVENT_SESSION_CLOSED`: capture `g_session_credits`, reset it to `0`, cancel the threshold timer → `TIME_CTR_STATE_IDLE`, then flush the captured credits to the current rider's `device_reg` counter (same logic as the threshold callback). Credits are earned from session start; the threshold only gates when `ESPORT_EVENT_REWARD_AP_ON` is posted. Post `ESPORT_EVENT_COUNTER_CHANGED` with the updated counter value.
+   - `TIME_CTR_STATE_SESSION` + `ESPORT_EVENT_SESSION_CLOSED`: keep `g_session_credits` intact (do **not** reset or flush to device counter), cancel the threshold timer -> `TIME_CTR_STATE_IDLE`. Credits are retained as pending for the next session -- the child must exercise for at least `internet_gate_threshold_s` in a single session (or start a session with counter > 0) before credits are flushed and internet access is granted. `ESPORT_EVENT_REWARD_AP_ON` is **not** posted. Post `ESPORT_EVENT_COUNTER_CHANGED` with the updated counter value (which includes pending session credits via `time_ctr_get()`).
    - `TIME_CTR_STATE_EARNING` + `ESPORT_EVENT_SESSION_CLOSED`: transition to `TIME_CTR_STATE_IDLE`; post `ESPORT_EVENT_REWARD_AP_OFF`. (`g_paused` and `g_below_ticks` have been removed in task 8; no reset needed.)
    - Remove the old `TIME_CTR_STATE_AP_ACTIVE + SESSION_CLOSED → ignore` branch.
 
-10. **`time_ctr_get()`** — return `device_reg_entry_counter_get(current_rider) + session_credits`, where `session_credits` is `g_session_credits` read under `g_spinlock` if `g_state == TIME_CTR_STATE_SESSION`, otherwise `0`. This ensures the dashboard displays live credit accumulation during the SESSION phase (before the threshold fires). Returns `0` if no rider is selected (`DEVICE_REG_NO_RIDER`).
+10. **`time_ctr_get()`** — return `device_reg_entry_counter_get(current_rider) + g_session_credits`, where `g_session_credits` is read under `g_spinlock` unconditionally (in all states).  In EARNING and normal IDLE states the value is `0`; during SESSION or IDLE-with-pending-credits it reflects accumulated but not-yet-flushed credits.  This ensures the dashboard displays live credit accumulation during SESSION and shows banked pending credits in IDLE.  Returns `0` if no rider is selected (`DEVICE_REG_NO_RIDER`).
 
 11. **`time_ctr_counter_set(uint32_t val)`** (Feature 3 API) — update semantics: call `device_reg_entry_counter_set(rider_idx, val)` for the current rider. If no rider is selected, return `ESP_ERR_INVALID_STATE` and log `ESP_LOGW`. Remove all AP on/off logic that this function previously contained (it was calling `wifi_mngr_reward_ap_set()` — now redundant).
 
@@ -2097,15 +2097,16 @@ Replace the global counter with per-device credit logic. Pulse credits go to the
 - [ ] `idf.py build` succeeds with zero errors and warnings.
 - [ ] The 1-second tick fires continuously from `time_ctr_init()` regardless of session state.
 - [ ] Pulses during `SESSION` state accumulate in `g_session_credits` and do **not** yet appear in the rider's `device_reg` counter.
-- [ ] On `ESPORT_EVENT_SESSION_OPENED`, `g_session_credits` is seeded with `qualifying_pulses * seconds_per_pulse` (retroactive qualifying credits); subsequent pulses in SESSION state add to this accumulator.
+- [ ] On `ESPORT_EVENT_SESSION_OPENED`, qualifying credits are **accumulated** into `g_session_credits` with `+=` (preserving pending credits from previous incomplete sessions); subsequent pulses in SESSION state add to this accumulator.
+- [ ] On `ESPORT_EVENT_SESSION_OPENED`, if the current rider's `device_reg` counter is already > 0, the internet gate is bypassed: `g_session_credits` is flushed to the rider's counter, state goes directly to EARNING, and `ESPORT_EVENT_REWARD_AP_ON` is posted.
 - [ ] When the threshold timer fires, `g_session_credits` is flushed to the current rider's `device_reg` counter and the accumulator is reset to zero.
 - [ ] Pulses in `EARNING` state add directly to the current rider's `device_reg` counter.
 - [ ] `device_reg_tick()` is called unconditionally once per second from `time_ctr_tick_cb()`.
 - [ ] Per-device counters only decrement when the per-device traffic gate is not paused (gating is handled inside `device_reg_tick()`).
 - [ ] `time_ctr_is_paused()` no longer exists in `main/inc/time_counter.h`.
 - [ ] `time_ctr_get()` returns the current rider's `device_reg` counter; returns `0` when no rider is selected.
-- [ ] `time_ctr_get()` includes `g_session_credits` during SESSION state: the counter increments each pulse and is visible on the dashboard without waiting for the threshold to fire.
-- [ ] Session closed in `SESSION` state: `g_session_credits` is reset to `0` and its value is flushed to the current rider's `device_reg` counter (credits are **not** discarded). `ESPORT_EVENT_REWARD_AP_ON` is **not** posted.
+- [ ] `time_ctr_get()` includes `g_session_credits` unconditionally: the counter reflects pending credits in IDLE state (from incomplete sessions) and live accumulation during SESSION state.
+- [ ] Session closed in `SESSION` state: `g_session_credits` is **retained** (not reset, not flushed to device counter). The pending credits are visible via `time_ctr_get()` and will be flushed on the next session that reaches the gate threshold or starts with counter > 0. `ESPORT_EVENT_REWARD_AP_ON` is **not** posted.
 - [ ] Session closed in `EARNING` state: state returns to `IDLE`; device counters continue to decrement normally in subsequent ticks.
 - [ ] No call to `wifi_mngr_reward_ap_set()` remains anywhere in `time_counter.c`.
 - [ ] `time_ctr_counter_set()` returns `ESP_ERR_INVALID_STATE` when no rider is selected.
