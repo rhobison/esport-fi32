@@ -536,11 +536,35 @@ esp_err_t device_reg_tick(void)
 
     for (uint8_t i = 0U; i < count_snap; i++)
     {
-        /* Throughput computation. */
-        uint32_t delta       = g_rx_bytes[i] + g_tx_bytes[i];
+        /* Check if the device's MAC is in the AP station list. */
+        bool b_connected = false;
+        for (int j = 0; j < (int)sta_list.num; j++)
+        {
+            if (0 == memcmp(g_entries[i].mac, sta_list.sta[j].mac, DEVICE_REG_MAC_LEN))
+            {
+                b_connected = true;
+                break;
+            }
+        }
+
+        /* Drain and reset byte accumulators every tick regardless of
+         * connection status so stale bytes from background AP netif
+         * traffic (DHCP, ARP probes) do not accumulate. */
+        uint32_t delta = g_rx_bytes[i] + g_tx_bytes[i];
+        g_rx_bytes[i]  = 0U;
+        g_tx_bytes[i]  = 0U;
+
+        /* Throughput and traffic gate only apply to connected devices.
+         * Disconnected devices always read 0 kbps / paused. */
+        if (!b_connected)
+        {
+            g_throughput_kbps[i] = 0U;
+            g_below_ticks[i]     = 0U;
+            g_dev_paused[i]      = true;
+            continue;
+        }
+
         g_throughput_kbps[i] = (uint32_t)(delta * 8U / 1000U);
-        g_rx_bytes[i]        = 0U;
-        g_tx_bytes[i]        = 0U;
 
         /* Sliding-window traffic gate. */
         if (g_throughput_kbps[i] > threshold)
@@ -563,25 +587,11 @@ esp_err_t device_reg_tick(void)
         /* Decrement if eligible. */
         if (!g_dev_paused[i] && g_entries[i].b_enabled && (g_entries[i].counter_s > 0U))
         {
-            /* Check if the device's MAC is in the AP station list. */
-            bool b_connected = false;
-            for (int j = 0; j < (int)sta_list.num; j++)
+            g_entries[i].counter_s--;
+            b_changed = true;
+            if (0U == g_entries[i].counter_s)
             {
-                if (0 == memcmp(g_entries[i].mac, sta_list.sta[j].mac, DEVICE_REG_MAC_LEN))
-                {
-                    b_connected = true;
-                    break;
-                }
-            }
-
-            if (b_connected)
-            {
-                g_entries[i].counter_s--;
-                b_changed = true;
-                if (0U == g_entries[i].counter_s)
-                {
-                    b_zero[i] = true;
-                }
+                b_zero[i] = true;
             }
         }
     }

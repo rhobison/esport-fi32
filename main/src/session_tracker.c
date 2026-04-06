@@ -303,9 +303,12 @@ static void session_trk_qualify_timer_cb(TimerHandle_t p_timer)
     g_session_start_utc  = (int64_t)time_mngr_utc_get() - elapsed_s;
     gb_session_confirmed = true;
 
-    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_SESSION_OPENED, NULL, 0U, 0U);
+    uint32_t qualify_pulses = g_pulse_count;
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_SESSION_OPENED, &qualify_pulses,
+        sizeof(qualify_pulses), 0U);
 
-    ESP_LOGI(gp_tag, "QUALIFYING→ACTIVE: session open, start_utc=%" PRId64, g_session_start_utc);
+    ESP_LOGI(gp_tag, "QUALIFYING→ACTIVE: session open, start_utc=%" PRId64 " qualify_pulses=%" PRIu32,
+        g_session_start_utc, qualify_pulses);
 }
 
 //--------------------------------------------------------------------------------------------------

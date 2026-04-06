@@ -332,13 +332,15 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
  * \brief ESP event loop handler called when an exercise session is confirmed open.
  *
  * Transitions from #TIME_CTR_STATE_IDLE to #TIME_CTR_STATE_SESSION and starts
- * the one-shot threshold timer.  Events received in non-IDLE states are
+ * the one-shot threshold timer.  Seeds #g_session_credits with retroactive
+ * credits for pulses accumulated during the qualification window so that
+ * qualifying effort is not lost.  Events received in non-IDLE states are
  * silently ignored.
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
  * \param[in] event_id       Event identifier (always #ESPORT_EVENT_SESSION_OPENED).
- * \param[in] p_event_data   Unused (no payload).
+ * \param[in] p_event_data   Pointer to \c uint32_t qualification pulse count.
  */
 static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base_t base,
     int32_t event_id, void * p_event_data)
@@ -346,14 +348,24 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
     (void)p_handler_arg;
     (void)base;
     (void)event_id;
-    (void)p_event_data;
+
+    /* Retroactive credits for pulses received during the qualification window.
+     * The speed gate cannot be applied retroactively (per-pulse speeds are not
+     * stored), so all qualifying pulses are credited unconditionally.  This is
+     * acceptable because the qualification window itself proves sustained
+     * pedalling. */
+    uint32_t qualify_pulses = 0U;
+    if (NULL != p_event_data)
+    {
+        qualify_pulses = *(const uint32_t *)p_event_data;
+    }
 
     portENTER_CRITICAL(&g_spinlock);
     bool b_start = (TIME_CTR_STATE_IDLE == g_state);
     if (b_start)
     {
         g_state           = TIME_CTR_STATE_SESSION;
-        g_session_credits = 0U;
+        g_session_credits = qualify_pulses * (uint32_t)g_cfg_seconds_per_pulse;
     }
     portEXIT_CRITICAL(&g_spinlock);
 
@@ -383,7 +395,10 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
         }
     }
 
-    ESP_LOGI(gp_tag, "IDLE->SESSION: session opened, threshold %" PRIu32 "s", threshold);
+    ESP_LOGI(gp_tag,
+        "IDLE->SESSION: session opened, threshold %" PRIu32 "s, qualify_pulses=%" PRIu32
+        " -> %" PRIu32 "s retroactive credits",
+        threshold, qualify_pulses, qualify_pulses * (uint32_t)g_cfg_seconds_per_pulse);
 }
 
 //--------------------------------------------------------------------------------------------------

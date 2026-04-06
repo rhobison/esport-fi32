@@ -486,6 +486,13 @@ uint32_t wifi_mngr_reward_ap_throughput_kbps(void)
     g_prev_rx_bytes = cur_rx;
     g_prev_tx_bytes = cur_tx;
 
+    /* When no clients are associated with the AP, discard any background
+     * netif traffic (DHCP server, ARP probes) so the dashboard reads 0. */
+    if (0U == wifi_mngr_reward_ap_client_count())
+    {
+        return 0U;
+    }
+
     /* Convert bytes to kbps: multiply by 8 (bits) then divide by 1000 (kilo). */
     uint32_t kbps = delta_bytes * 8U / 1000U;
 
