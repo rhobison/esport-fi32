@@ -56,8 +56,8 @@ static const char * gp_tag = "main";
 //==================================================================================================
 
 static void on_counter_changed(void * p_arg, esp_event_base_t base, int32_t id, void * p_data);
-static void on_reward_ap_on(void * p_arg, esp_event_base_t base, int32_t id, void * p_data);
-static void on_reward_ap_off(void * p_arg, esp_event_base_t base, int32_t id, void * p_data);
+static void on_earning_started(void * p_arg, esp_event_base_t base, int32_t id, void * p_data);
+static void on_earning_stopped(void * p_arg, esp_event_base_t base, int32_t id, void * p_data);
 
 //==================================================================================================
 // Public Functions
@@ -125,10 +125,10 @@ void app_main(void)
     /* Register cross-module event handlers from main to avoid circular deps. */
     ESP_ERROR_CHECK(esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED,
         on_counter_changed, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON,
-        on_reward_ap_on, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_OFF,
-        on_reward_ap_off, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_EARNING_STARTED,
+        on_earning_started, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(ESPORT_EVENT_BASE, ESPORT_EVENT_EARNING_STOPPED,
+        on_earning_stopped, NULL));
 
     ESP_LOGI(gp_tag, "Config: threshold=%" PRIu32 " spp=%" PRIu16 " cpp=%" PRIu32,
         config_mngr_internet_gate_threshold_s_get(), config_mngr_seconds_per_pulse_get(),
@@ -180,39 +180,39 @@ static void on_counter_changed(void * p_arg, esp_event_base_t base, int32_t id, 
 //--------------------------------------------------------------------------------------------------
 
 /**
- * \brief Event handler for #ESPORT_EVENT_REWARD_AP_ON.
+ * \brief Event handler for #ESPORT_EVENT_EARNING_STARTED.
  *
  * \param[in] p_arg  Unused handler argument.
  * \param[in] base   Event base (unused).
  * \param[in] id     Event ID (unused).
  * \param[in] p_data Unused (no payload).
  */
-static void on_reward_ap_on(void * p_arg, esp_event_base_t base, int32_t id, void * p_data)
+static void on_earning_started(void * p_arg, esp_event_base_t base, int32_t id, void * p_data)
 {
     (void)p_arg;
     (void)base;
     (void)id;
     (void)p_data;
-    ESP_LOGI(gp_tag, "reward AP on");
+    ESP_LOGI(gp_tag, "earning started");
 }
 
 //--------------------------------------------------------------------------------------------------
 
 /**
- * \brief Event handler for #ESPORT_EVENT_REWARD_AP_OFF.
+ * \brief Event handler for #ESPORT_EVENT_EARNING_STOPPED.
  *
  * \param[in] p_arg  Unused handler argument.
  * \param[in] base   Event base (unused).
  * \param[in] id     Event ID (unused).
  * \param[in] p_data Unused (no payload).
  */
-static void on_reward_ap_off(void * p_arg, esp_event_base_t base, int32_t id, void * p_data)
+static void on_earning_stopped(void * p_arg, esp_event_base_t base, int32_t id, void * p_data)
 {
     (void)p_arg;
     (void)base;
     (void)id;
     (void)p_data;
-    ESP_LOGI(gp_tag, "reward AP off");
+    ESP_LOGI(gp_tag, "earning stopped");
 }
 
 //--------------------------------------------------------------------------------------------------

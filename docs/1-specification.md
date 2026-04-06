@@ -373,11 +373,11 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
 **Responsibilities:**
 - Maintain the **time counter** per device slot via the Device Registry (`device_reg_entry_counter_set/get`).
 - Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to `g_session_credits` (SESSION state) or directly to the current rider's device-registry counter (EARNING state). Pulses in IDLE state are ignored (pulses during the qualification window are retroactively credited when `SESSION_OPENED` is received — see below).
-- Listen for `ESPORT_EVENT_SESSION_OPENED` (payload: `uint32_t` qualifying pulse count): transition IDLE->SESSION or IDLE->EARNING. Accumulate `qualifying_pulses * seconds_per_pulse` into `g_session_credits` (on top of any pending credits from a previous incomplete session). If the current rider's device-registry counter is already > 0, bypass the internet gate: flush `g_session_credits` to the rider's counter, go directly to EARNING, and post `ESPORT_EVENT_REWARD_AP_ON`. Otherwise start a one-shot timer for `internet_gate_threshold_s` seconds.
-- Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer, **retain** `g_session_credits` (credits are not flushed to the device counter and not discarded — the child cannot use the internet but exercise effort is preserved for the next session), and return to IDLE. If already EARNING, transition to IDLE and post `ESPORT_EVENT_REWARD_AP_OFF`.
+- Listen for `ESPORT_EVENT_SESSION_OPENED` (payload: `uint32_t` qualifying pulse count): transition IDLE->SESSION or IDLE->EARNING. Accumulate `qualifying_pulses * seconds_per_pulse` into `g_session_credits` (on top of any pending credits from a previous incomplete session). If the current rider's device-registry counter is already > 0, bypass the internet gate: flush `g_session_credits` to the rider's counter, go directly to EARNING, and post `ESPORT_EVENT_EARNING_STARTED`. Otherwise start a one-shot timer for `internet_gate_threshold_s` seconds.
+- Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer, **retain** `g_session_credits` (credits are not flushed to the device counter and not discarded — the child cannot use the internet but exercise effort is preserved for the next session), and return to IDLE. If already EARNING, transition to IDLE and post `ESPORT_EVENT_EARNING_STOPPED`.
 - Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, maintain a `g_speed_low_ticks` counter: increment it when the speed-low condition holds (`g_state` is SESSION or EARNING, `min_speed > 0`, `0 < current_speed < min_speed`); reset it to zero otherwise. Call `buzzer_speed_low_update(true)` only when the speed-low condition holds **and** `g_speed_low_ticks >= low_speed_buzzer_threshold_s`; call `buzzer_speed_low_update(false)` otherwise. Then post `ESPORT_EVENT_COUNTER_CHANGED`.
-- Post `ESPORT_EVENT_REWARD_AP_ON` when the threshold timer fires (SESSION -> EARNING transition).
-- Post `ESPORT_EVENT_REWARD_AP_OFF` when the EARNING state exits to IDLE (session closed while earning).
+- Post `ESPORT_EVENT_EARNING_STARTED` when the threshold timer fires (SESSION -> EARNING transition).
+- Post `ESPORT_EVENT_EARNING_STOPPED` when the EARNING state exits to IDLE (session closed while earning).
 - **Legacy migration:** `time_ctr_init()` reads `config_mngr_reward_counter_s_get()` and, if the returned value is non-zero and the current rider's counter is still zero, seeds the rider's counter with that value.
 - **Runtime counter override:** `time_ctr_counter_set(val)` delegates to `device_reg_entry_counter_set(current_rider, val)`. Returns `ESP_ERR_INVALID_STATE` when no rider is selected (`DEVICE_REG_NO_RIDER`).
 
@@ -985,7 +985,7 @@ ESPORT_EVENT_SESSION_OPENED (posted by session_tracker on QUALIFYING->ACTIVE)
                    if rider device_reg counter > 0:
                      IDLE->EARNING (gate bypass)
                      flush g_session_credits to rider counter
-                     post ESPORT_EVENT_REWARD_AP_ON
+                     post ESPORT_EVENT_EARNING_STARTED
                    else:
                      IDLE->SESSION
                      start one-shot threshold timer
@@ -994,7 +994,7 @@ ESPORT_EVENT_SESSION_OPENED (posted by session_tracker on QUALIFYING->ACTIVE)
 threshold timer fires
   -> time_counter: SESSION->EARNING
                    flush g_session_credits to current rider counter
-                   post ESPORT_EVENT_REWARD_AP_ON
+                   post ESPORT_EVENT_EARNING_STARTED
 
 SESSION_CLOSED while in SESSION state:
   -> time_counter: SESSION->IDLE
@@ -1011,7 +1011,7 @@ SESSION_CLOSED while in SESSION state:
   -> post ESPORT_EVENT_COUNTER_CHANGED
 
 On EARNING->IDLE (SESSION_CLOSED while in EARNING state):
-  -> post ESPORT_EVENT_REWARD_AP_OFF
+  -> post ESPORT_EVENT_EARNING_STOPPED
   -> state = IDLE
 ```
 
@@ -1149,8 +1149,8 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 | ------------------------------- | ---------------------- | -------------------- | --------------------------------- |
 | `ESPORT_EVENT_PULSE`            | none (NULL)            | `pulse_input`        | `time_counter`, `session_tracker` |
 | `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s) | `time_counter`       | `http_server` (status cache)      |
-| `ESPORT_EVENT_REWARD_AP_ON`     | —                      | `time_counter`       | (logging, status)                 |
-| `ESPORT_EVENT_REWARD_AP_OFF`    | —                      | `time_counter`       | (logging, status)                 |
+| `ESPORT_EVENT_EARNING_STARTED`  | —                      | `time_counter`       | (logging, status)                 |
+| `ESPORT_EVENT_EARNING_STOPPED`  | —                      | `time_counter`       | (logging, status)                 |
 | `ESPORT_EVENT_SESSION_OPENED`   | `uint32_t` (qualifying pulse count) | `session_tracker`    | `time_counter`                    |
 | `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t` | `session_tracker`    | `time_counter`, `session_log`     |
 | `ESPORT_EVENT_STA_CONNECTED`    | —                      | `wifi_manager`       | `time_manager` (start SNTP)       |
