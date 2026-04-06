@@ -10,15 +10,13 @@
  *
  * While a session is open (#ESPORT_EVENT_SESSION_OPENED received), each
  * #ESPORT_EVENT_PULSE credits \c seconds_per_pulse seconds to a local
- * accumulator (#g_session_credits).  Credits are flushed to the current
- * rider's #device_registry counter when the threshold fires.  If the session
- * closes (#ESPORT_EVENT_SESSION_CLOSED) before the threshold timer fires, the
- * threshold timer is cancelled but #g_session_credits are **retained** so that
- * exercise effort is preserved.  The credits remain pending and will be
- * flushed when a subsequent session reaches the gate threshold, or when a new
- * session starts while the rider's device counter is already positive (gate
- * bypass).  Pulses in EARNING state add directly to the rider's
- * #device_registry counter.
+ * accumulator (#g_session_credits).  Credits are written directly to the
+ * rider's #device_registry counter (NVS-persisted) on every pulse in both
+ * SESSION and EARNING states.  If the session closes before the threshold timer
+ * fires, all credits are already safely stored in NVS.  The internet gate lock
+ * (a RAM-only flag in #device_registry) keeps internet access blocked until the
+ * threshold fires; the lock resets to \c false on every boot so a reboot always
+ * restores internet access if the counter is positive.
  *
  * The 1-second tick timer runs permanently from #time_ctr_init() and calls
  * #device_reg_tick() unconditionally once per second.  Per-device counter

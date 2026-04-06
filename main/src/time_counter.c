@@ -40,10 +40,9 @@ typedef enum time_ctr_state_tag
 {
     /** No active session; threshold timer not running. */
     TIME_CTR_STATE_IDLE    = 0,
-    /** Session confirmed open; threshold timer running; credits accumulating in g_session_credits.
-     */
+    /** Session confirmed open; internet gate timer running; gate lock active for this rider. */
     TIME_CTR_STATE_SESSION = 1,
-    /** Session active past threshold; pulses add directly to rider's device_reg counter. */
+    /** Session active past threshold; gate lock cleared; internet access open. */
     TIME_CTR_STATE_EARNING = 2,
 } time_ctr_state_t;
 
@@ -54,25 +53,11 @@ typedef enum time_ctr_state_tag
 /** Module log tag. */
 static const char * gp_tag = "time_counter";
 
-/** Spinlock protecting #g_state and #g_session_credits against concurrent task access. */
+/** Spinlock protecting #g_state against concurrent task access. */
 static portMUX_TYPE g_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 /** Current state machine state; protected by #g_spinlock. */
 static time_ctr_state_t g_state = TIME_CTR_STATE_IDLE;
-
-/**
- * \brief Session credit accumulator; accumulates pulse credits during TIME_CTR_STATE_SESSION.
- *
- * Flushed to the current rider's device_reg counter when the threshold fires
- * or when a session opens with the rider's counter already > 0 (gate bypass).
- * If the session closes before the threshold fires and the rider's counter was
- * zero at session start, the credits are **retained** here across sessions so
- * that exercise effort is never lost.  The child cannot use the internet until
- * the credits are flushed (i.e. the gate threshold is reached in a single
- * session or a new session starts with counter > 0).
- * Protected by #g_spinlock.
- */
-static volatile uint32_t g_session_credits = 0U;
 
 /** Handle for the 1-second periodic tick timer (created in #time_ctr_init, runs permanently). */
 static esp_timer_handle_t gp_tick_timer = NULL;
@@ -227,15 +212,7 @@ uint32_t time_ctr_get(void)
     {
         return 0U;
     }
-
-    /* Always include pending session credits so the dashboard shows live
-     * accumulation during SESSION state and banked (gate-pending) credits in
-     * IDLE state.  In EARNING state g_session_credits is already zero. */
-    portENTER_CRITICAL(&g_spinlock);
-    uint32_t session_credits = g_session_credits;
-    portEXIT_CRITICAL(&g_spinlock);
-
-    return device_reg_entry_counter_get(rider) + session_credits;
+    return device_reg_entry_counter_get(rider);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -274,12 +251,12 @@ esp_err_t time_ctr_counter_set(uint32_t val)
 /**
  * \brief ESP event loop handler called for each accepted debounced pulse.
  *
- * In #TIME_CTR_STATE_SESSION: accumulates credits in #g_session_credits.
- * In #TIME_CTR_STATE_EARNING: adds credits directly to the current rider's
- * device_reg counter.  Pulses in #TIME_CTR_STATE_IDLE are ignored.
+ * In both #TIME_CTR_STATE_SESSION and #TIME_CTR_STATE_EARNING: adds
+ * \c seconds_per_pulse credits directly to the current rider's device_reg
+ * counter (NVS-persisted).  Pulses in #TIME_CTR_STATE_IDLE are ignored.
  *
  * The speed gate (#config_mngr_min_speed_to_increment_time_kmh_x10_get) is
- * applied in both earning states.
+ * applied in both active states.
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
@@ -304,19 +281,10 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
     {
         b_credit = false;
     }
-
-    time_ctr_state_t state_snap = g_state;
-    uint16_t         spp        = g_cfg_seconds_per_pulse;
-
-    if (b_credit && (TIME_CTR_STATE_SESSION == state_snap))
-    {
-        g_session_credits += (uint32_t)spp;
-    }
-
-    /* Read rider index under spinlock so we can call device_reg outside. */
+    uint16_t spp = g_cfg_seconds_per_pulse;
     portEXIT_CRITICAL(&g_spinlock);
 
-    if (b_credit && (TIME_CTR_STATE_EARNING == state_snap))
+    if (b_credit)
     {
         uint8_t rider = device_reg_current_rider_get();
         if (DEVICE_REG_NO_RIDER != rider)
@@ -336,11 +304,19 @@ static void time_ctr_pulse_handler(void * p_handler_arg, esp_event_base_t base, 
 /**
  * \brief ESP event loop handler called when an exercise session is confirmed open.
  *
- * Transitions from #TIME_CTR_STATE_IDLE to #TIME_CTR_STATE_SESSION and starts
- * the one-shot threshold timer.  Seeds #g_session_credits with retroactive
- * credits for pulses accumulated during the qualification window so that
- * qualifying effort is not lost.  Events received in non-IDLE states are
- * silently ignored.
+ * Reads the current rider's device-registry counter and the internet gate lock
+ * flag to decide the transition:
+ *
+ * - counter == 0, or (counter > 0 and gate lock set): engage internet gate.
+ *   Set the per-device gate lock, transition IDLE->SESSION and start the
+ *   one-shot \c internet_gate_threshold_s timer.  Qualifying pulses are
+ *   credited directly to the device-registry counter.
+ *
+ * - counter > 0 and gate lock not set: the rider already has earned internet
+ *   access.  Bypass the gate, transition IDLE->EARNING and post
+ *   #ESPORT_EVENT_EARNING_STARTED.
+ *
+ * Events received in non-IDLE states are silently ignored.
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
@@ -354,51 +330,8 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
     (void)base;
     (void)event_id;
 
-    /* Retroactive credits for pulses received during the qualification window.
-     * The speed gate cannot be applied retroactively (per-pulse speeds are not
-     * stored), so all qualifying pulses are credited unconditionally.  This is
-     * acceptable because the qualification window itself proves sustained
-     * pedalling. */
-    uint32_t qualify_pulses = 0U;
-    if (NULL != p_event_data)
-    {
-        qualify_pulses = *(const uint32_t *)p_event_data;
-    }
-
-    /* Check whether the current rider already has internet time banked in the
-     * device registry.  If so, the internet gate is bypassed: credits are
-     * flushed immediately and the state jumps straight to EARNING. */
-    uint8_t  rider           = device_reg_current_rider_get();
-    uint32_t current_counter = 0U;
-    if (DEVICE_REG_NO_RIDER != rider)
-    {
-        current_counter = device_reg_entry_counter_get(rider);
-    }
-
     portENTER_CRITICAL(&g_spinlock);
-    bool     b_start          = (TIME_CTR_STATE_IDLE == g_state);
-    bool     b_bypass_gate    = false;
-    uint32_t credits_to_flush = 0U;
-    if (b_start)
-    {
-        /* Accumulate qualifying credits on top of any pending credits from a
-         * previous session that ended before the gate threshold fired. */
-        g_session_credits += qualify_pulses * (uint32_t)g_cfg_seconds_per_pulse;
-
-        if (current_counter > 0U)
-        {
-            /* Rider already has internet time -> bypass the gate, go to
-             * EARNING immediately and flush all pending session credits. */
-            g_state           = TIME_CTR_STATE_EARNING;
-            credits_to_flush  = g_session_credits;
-            g_session_credits = 0U;
-            b_bypass_gate     = true;
-        }
-        else
-        {
-            g_state = TIME_CTR_STATE_SESSION;
-        }
-    }
+    bool b_start = (TIME_CTR_STATE_IDLE == g_state);
     portEXIT_CRITICAL(&g_spinlock);
 
     if (!b_start)
@@ -406,21 +339,49 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
         return; /* Already in SESSION or EARNING - ignore. */
     }
 
+    uint32_t qualify_pulses = 0U;
+    if (NULL != p_event_data)
+    {
+        qualify_pulses = *(const uint32_t *)p_event_data;
+    }
+
+    uint8_t  rider = device_reg_current_rider_get();
+    uint32_t current_counter =
+        (DEVICE_REG_NO_RIDER != rider) ? device_reg_entry_counter_get(rider) : 0U;
+    bool gate_locked = device_reg_entry_inet_gate_lock_get(rider);
+
+    /* Credit qualifying pulses directly to the device-registry counter (persisted). */
+    if ((qualify_pulses > 0U) && (DEVICE_REG_NO_RIDER != rider))
+    {
+        uint16_t spp = config_mngr_seconds_per_pulse_get();
+        (void)device_reg_entry_counter_set(rider, current_counter + qualify_pulses * (uint32_t)spp);
+    }
+
+    /* Bypass the gate only when the rider already has internet time AND the
+     * gate has not been locked in a previous incomplete session. */
+    bool b_bypass_gate = (current_counter > 0U) && !gate_locked;
+
     if (b_bypass_gate)
     {
-        /* Flush accumulated session credits to the rider's counter. */
-        if ((credits_to_flush > 0U) && (DEVICE_REG_NO_RIDER != rider))
-        {
-            (void)device_reg_entry_counter_set(rider, current_counter + credits_to_flush);
-        }
+        portENTER_CRITICAL(&g_spinlock);
+        g_state = TIME_CTR_STATE_EARNING;
+        portEXIT_CRITICAL(&g_spinlock);
 
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_EARNING_STARTED, NULL, 0U, 0U);
-        ESP_LOGI(gp_tag,
-            "IDLE->EARNING: gate bypassed (counter %" PRIu32 "s > 0), %" PRIu32
-            "s session credits flushed",
-            current_counter, credits_to_flush);
+        ESP_LOGI(gp_tag, "IDLE->EARNING: gate bypassed (counter %" PRIu32 "s, lock=false)",
+            current_counter);
         return;
     }
+
+    /* Engage the internet gate lock for this rider. */
+    if (DEVICE_REG_NO_RIDER != rider)
+    {
+        (void)device_reg_entry_inet_gate_lock_set(rider, true);
+    }
+
+    portENTER_CRITICAL(&g_spinlock);
+    g_state = TIME_CTR_STATE_SESSION;
+    portEXIT_CRITICAL(&g_spinlock);
 
     uint32_t threshold    = config_mngr_internet_gate_threshold_s_get();
     uint64_t threshold_us = (uint64_t)threshold * 1000000ULL;
@@ -436,17 +397,20 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
         if (ESP_OK != ret)
         {
             ESP_LOGE(gp_tag, "esp_timer_start_once failed: %s", esp_err_to_name(ret));
+            if (DEVICE_REG_NO_RIDER != rider)
+            {
+                (void)device_reg_entry_inet_gate_lock_set(rider, false);
+            }
             portENTER_CRITICAL(&g_spinlock);
-            g_state           = TIME_CTR_STATE_IDLE;
-            g_session_credits = 0U;
+            g_state = TIME_CTR_STATE_IDLE;
             portEXIT_CRITICAL(&g_spinlock);
         }
     }
 
     ESP_LOGI(gp_tag,
-        "IDLE->SESSION: session opened, threshold %" PRIu32 "s, qualify_pulses=%" PRIu32
-        ", session_credits=%" PRIu32 "s (includes pending)",
-        threshold, qualify_pulses, g_session_credits);
+        "IDLE->SESSION: gate locked, threshold %" PRIu32 "s, qualify_pulses=%" PRIu32
+        ", counter=%" PRIu32 "s",
+        threshold, qualify_pulses, device_reg_entry_counter_get(rider));
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -454,16 +418,15 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
 /**
  * \brief ESP event loop handler called when an exercise session closes.
  *
- * In #TIME_CTR_STATE_SESSION: cancels the threshold timer and returns to
- * #TIME_CTR_STATE_IDLE.  Credits in #g_session_credits are **retained** (not
- * flushed to the device counter and not discarded) so that exercise effort is
- * preserved across sessions.  The child cannot use the internet until the
- * gate threshold is reached in a subsequent session or the next session starts
- * with an already-positive device counter (gate bypass).
+ * In #TIME_CTR_STATE_SESSION: cancels the gate timer and returns to
+ * #TIME_CTR_STATE_IDLE.  The per-device gate lock remains set so internet
+ * access is still blocked.  All credits earned this session are already
+ * persisted in the device-registry counter; they will be accessible (internet
+ * unblocked) when the gate timer completes in a future session or on the next
+ * boot (gate lock is RAM-only and resets to \c false).
  *
- * In #TIME_CTR_STATE_EARNING: transitions to IDLE and posts
- * #ESPORT_EVENT_EARNING_STOPPED (device counters continue to drain normally via
- * the always-running tick timer).
+ * In #TIME_CTR_STATE_EARNING: clears the per-device gate lock, transitions to
+ * IDLE and posts #ESPORT_EVENT_EARNING_STOPPED.
  *
  * \param[in] p_handler_arg  Unused context pointer.
  * \param[in] base           Event base (always #ESPORT_EVENT_BASE).
@@ -479,46 +442,43 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     (void)p_event_data;
 
     portENTER_CRITICAL(&g_spinlock);
-    time_ctr_state_t prev_state      = g_state;
-    uint32_t         pending_credits = g_session_credits;
+    time_ctr_state_t prev_state = g_state;
     if ((TIME_CTR_STATE_SESSION == prev_state) || (TIME_CTR_STATE_EARNING == prev_state))
     {
         g_state = TIME_CTR_STATE_IDLE;
-        if (TIME_CTR_STATE_EARNING == prev_state)
-        {
-            g_session_credits = 0U; /* already flushed in threshold_cb */
-        }
-        /* SESSION: keep g_session_credits so credits survive for next session */
     }
     portEXIT_CRITICAL(&g_spinlock);
 
     if (TIME_CTR_STATE_SESSION == prev_state)
     {
         (void)esp_timer_stop(gp_inet_gate_timer);
-
         buzzer_speed_low_update(false);
 
-        /* Credits are retained in g_session_credits (not flushed to the
-         * device counter).  The child's device_reg counter stays at its
-         * previous value so internet access is not granted prematurely.
-         * The pending credits will be flushed when a subsequent session
-         * reaches the gate threshold or when a session starts while the
-         * rider already has internet time (counter > 0). */
-
+        /* Gate lock stays true: internet remains blocked until the gate threshold
+         * is completed in a future session.  Credits are already in the device-
+         * registry counter (NVS-persisted).  They will be accessible after the
+         * next successful gate completion or after a device reboot. */
         uint32_t counter_val = time_ctr_get();
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_val,
             sizeof(counter_val), 0U);
         ESP_LOGI(gp_tag,
-            "SESSION->IDLE: session closed before threshold, %" PRIu32
-            "s credits retained as pending",
-            pending_credits);
+            "SESSION->IDLE: closed before threshold, gate lock retained,"
+            " counter=%" PRIu32 "s",
+            counter_val);
     }
     else if (TIME_CTR_STATE_EARNING == prev_state)
     {
         buzzer_speed_low_update(false);
 
+        /* Clear the gate lock: the rider completed the gate this session. */
+        uint8_t rider = device_reg_current_rider_get();
+        if (DEVICE_REG_NO_RIDER != rider)
+        {
+            (void)device_reg_entry_inet_gate_lock_set(rider, false);
+        }
+
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_EARNING_STOPPED, NULL, 0U, 0U);
-        ESP_LOGI(gp_tag, "EARNING->IDLE: session closed, device counters continue");
+        ESP_LOGI(gp_tag, "EARNING->IDLE: session closed, gate lock cleared");
     }
 }
 
@@ -527,11 +487,11 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
 /**
  * \brief One-shot timer callback that fires after #internet_gate_threshold_s seconds.
  *
- * Transitions from #TIME_CTR_STATE_SESSION to #TIME_CTR_STATE_EARNING, flushes
- * the accumulated session credits to the current rider's device_reg counter,
- * and posts #ESPORT_EVENT_EARNING_STARTED.  If the state is no longer SESSION when
+ * Transitions from #TIME_CTR_STATE_SESSION to #TIME_CTR_STATE_EARNING, clears
+ * the per-device internet gate lock so internet access becomes available, and
+ * posts #ESPORT_EVENT_EARNING_STARTED.  If the state is no longer SESSION when
  * the timer fires (e.g. session closed just before expiry), the callback exits
- * without awarding credits.
+ * without any side effects.
  *
  * \param[in] p_arg  Unused context pointer passed by the timer subsystem.
  */
@@ -540,12 +500,10 @@ static void time_ctr_threshold_cb(void * p_arg)
     (void)p_arg;
 
     portENTER_CRITICAL(&g_spinlock);
-    bool     b_activate     = (TIME_CTR_STATE_SESSION == g_state);
-    uint32_t credits_to_add = g_session_credits;
+    bool b_activate = (TIME_CTR_STATE_SESSION == g_state);
     if (b_activate)
     {
-        g_state           = TIME_CTR_STATE_EARNING;
-        g_session_credits = 0U;
+        g_state = TIME_CTR_STATE_EARNING;
     }
     portEXIT_CRITICAL(&g_spinlock);
 
@@ -554,20 +512,15 @@ static void time_ctr_threshold_cb(void * p_arg)
         return; /* State changed before timer fired - session likely closed. */
     }
 
-    /* Flush accumulated session credits to the current rider's counter. */
-    if (credits_to_add > 0U)
+    /* Clear the gate lock so internet access opens for this rider. */
+    uint8_t rider = device_reg_current_rider_get();
+    if (DEVICE_REG_NO_RIDER != rider)
     {
-        uint8_t rider = device_reg_current_rider_get();
-        if (DEVICE_REG_NO_RIDER != rider)
-        {
-            uint32_t current = device_reg_entry_counter_get(rider);
-            (void)device_reg_entry_counter_set(rider, current + credits_to_add);
-        }
+        (void)device_reg_entry_inet_gate_lock_set(rider, false);
     }
 
     (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_EARNING_STARTED, NULL, 0U, 0U);
-    ESP_LOGI(gp_tag, "SESSION->EARNING: threshold fired, %" PRIu32 " session credits flushed",
-        credits_to_add);
+    ESP_LOGI(gp_tag, "SESSION->EARNING: gate threshold reached, internet unlocked");
 }
 
 //--------------------------------------------------------------------------------------------------
