@@ -1,7 +1,7 @@
 # esport-fi32 Development Plan
 
-**Version:** 1.0
-**Date:** 2026-03-14
+**Version:** 1.1
+**Date:** 2026-04-06
 **Executor:** AI coding agents
 **Spec reference:** `docs/1-specification.md`
 
@@ -382,7 +382,12 @@ Implement `session_tracker.c`: two-phase session detection (qualification + acti
    uint16_t speed = (dur_s > 0) ? (uint16_t)(total_cm * 36 / ((uint64_t)dur_s * 1000)) : 0;
    ```
 
-8. Duration must be capped at `UINT16_MAX` (65535 s ≈ 18 h 12 min) to fit in `uint16_t`.
+8. Duration must be capped at `UINT16_MAX` (65535 s ~ 18 h 12 min) to fit in `uint16_t`.
+
+9. Compute `internet_earned_s` at session close:
+   - Cache `seconds_per_pulse` from `config_mngr_seconds_per_pulse_get()` when the IDLE->QUALIFYING transition occurs (alongside the other config cache reads).
+   - At session close: `internet_earned_s = g_pulse_count * g_seconds_per_pulse`.
+   - Store in `session_trk_record_t.internet_earned_s` (uint32_t).
 
 ### Acceptance Criteria
 
@@ -393,6 +398,7 @@ Implement `session_tracker.c`: two-phase session detection (qualification + acti
 - [ ] `session.start_time` equals the UTC time of the first qualifying pulse (not the confirmation time).
 - [ ] `session.duration_s` equals `last_pulse_time - first_pulse_time` (not including idle gap).
 - [ ] `avg_speed_kmh_x10` is calculated correctly (regression test with known pulse count, interval, CPP).
+- [ ] `internet_earned_s` equals `pulse_count * seconds_per_pulse` (value of `seconds_per_pulse` at session start).
 - [ ] `ESPORT_EVENT_SESSION_CLOSED` is posted exactly once per session.
 
 ---
@@ -737,8 +743,8 @@ Move `GET /api/sessions/export` and its two internal send helpers to a dedicated
 ### Acceptance Criteria
 
 - [ ] `idf.py build` succeeds.
-- [ ] `GET /api/sessions/export?format=csv` returns downloadable CSV with the correct header row.
-- [ ] `GET /api/sessions/export?format=json` returns downloadable JSON with attachment header.
+- [ ] `GET /api/sessions/export?format=csv` returns downloadable CSV with the correct header row (including `internet_earned_s` column).
+- [ ] `GET /api/sessions/export?format=json` returns downloadable JSON with `internet_earned_s` field and attachment header.
 - [ ] `GET /api/sessions/export?format=xml` returns HTTP 400 with JSON error body.
 
 ---
@@ -769,6 +775,8 @@ Move the `GET /` status dashboard handler to a dedicated file. Eliminate code du
    - Replace the inline 31-day bin population loop with a call to `http_srv_daily_bins_build(p_bins, p_graph, graph_count)`.
    - Define `HTTP_SRV_SVG_*` constants locally in this file (they are only needed here).
    - Remove `static` from `http_srv_root_get_handler()`.
+   - **Dashboard page title** must include the firmware version: `"ESPort-fi32 vX.Y.Z -- Status Dashboard"`. Read the version string at runtime via `esp_app_get_description()->version` (`esp_app_desc.h`; add `esp_app_format` to `PRIV_REQUIRES` in `main/CMakeLists.txt`).
+   - **Session History table** must include an "Internet Earned" column (h:mm:ss) sourced from `session_trk_record_t.internet_earned_s`.
    - Include `http_server_dashboard.h`, `http_server_api.h`, `http_server_utils.h`, and all required module headers.
    - Follow `cctemplate` structure with `gp_tag`.
 
@@ -782,6 +790,8 @@ Move the `GET /` status dashboard handler to a dedicated file. Eliminate code du
 
 - [ ] `idf.py build` succeeds.
 - [ ] `GET /` returns HTTP 200 with valid HTML containing all sections from spec §6.1.
+- [ ] Dashboard page title includes the firmware version string (e.g. `"ESPort-fi32 v2.0.0 -- Status Dashboard"`).
+- [ ] Session History table contains the "Internet Earned" column formatted as h:mm:ss.
 - [ ] Both SVG bar charts (daily avg speed and daily total duration) render correctly with day-of-month X-axis labels.
 - [ ] No `HTTP_SRV_SVG_*` constants remain in `http_server.c`.
 - [ ] `http_server_dashboard.c` calls `http_srv_daily_bins_build()` — it does not contain a copy of the bin-building loop.

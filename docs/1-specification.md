@@ -1,7 +1,7 @@
 # esport-fi32 Firmware Specification
 
-**Version:** 2.0
-**Date:** 2026-06-01
+**Version:** 2.1
+**Date:** 2026-04-06
 **Target:** ESP32-C6 (ESP-IDF v5.x)
 
 ---
@@ -66,6 +66,7 @@ Key behaviour:
 - Date/time is synchronised via SNTP at boot; a POSIX timezone string converts stored UTC timestamps to local time for display.
 - A **configuration web portal** is always reachable via the home network (station IP) when connected, or via the reward AP (`192.168.5.1`) at all times.
 - A **status dashboard** shows live state (per-device counters, AP status, session info, connected clients, NTP status) and session history.
+- The firmware uses **semantic versioning** (`MAJOR.MINOR.PATCH`, e.g. `2.0.0`). The version string is set via `PROJECT_VER` in `CMakeLists.txt` and embedded in the firmware image via ESP-IDF's `esp_app_desc_t`. It is displayed in the status dashboard title as `ESPort-fi32 vX.Y.Z -- Status Dashboard`.
 
 ---
 
@@ -477,11 +478,12 @@ esp_err_t time_ctr_counter_set(uint32_t val);        /* delegates to device_reg;
 esp_err_t session_trk_init(void);
 
 typedef struct {
-    int64_t  start_time_utc;   /* Unix timestamp, 0 if unsynced */
-    bool     time_synced;      /* true if system clock was synced at session start */
+    int64_t  start_time_utc;       /* Unix timestamp, 0 if unsynced */
+    bool     time_synced;          /* true if system clock was synced at session start */
     uint32_t duration_s;
     uint32_t pulse_count;
-    uint16_t avg_speed_kmh_x10; /* km/h * 10 to avoid float, e.g. 123 = 12.3 km/h */
+    uint16_t avg_speed_kmh_x10;    /* km/h * 10 to avoid float, e.g. 123 = 12.3 km/h */
+    uint32_t internet_earned_s;    /* pulse_count * seconds_per_pulse (cached at session start) */
 } session_trk_record_t;
 ```
 
@@ -658,6 +660,8 @@ void      buzzer_speed_low_update(bool b_active);
 
 Serves a self-contained HTML page (generated as chunked C string literals). All live fields are updated in-place every 2 seconds by a JavaScript `fetch('/api/status')` polling loop (`setInterval`, 2 000 ms), which fires once immediately on page load. There is no `<meta http-equiv="refresh">` full-page reload; the session history table and SVG graphs are static until the user manually refreshes the page.
 
+**Page title:** `ESPort-fi32 vX.Y.Z -- Status Dashboard`, where `vX.Y.Z` is read at runtime from `esp_app_get_description()->version` (set by `PROJECT_VER` in `CMakeLists.txt`).
+
 **Displayed information:**
 
 | Section          | Fields                                                                                                                                                                                                                                                                        |
@@ -665,7 +669,7 @@ Serves a self-contained HTML page (generated as chunked C string literals). All 
 | System           | Current local time, NTP sync status, uptime                                                                                                                                                                                                                                   |
 | Wi-Fi            | STA status, home SSID, station IP, reward AP status, reward AP SSID, reward AP IP (dashboard access URL from the reward AP network), connected clients count, reward AP traffic (kbps)                                                                      |
 | Current Session  | Current rider's counter (s + h:mm:ss), threshold, status (idle / qualifying / active), current speed (km/h, one decimal place), pulse-crediting status (Crediting / Gated (speed too low)), session duration                                                 |
-| Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count                                                                                                                                                                              |
+| Session History  | Table of last 20 sessions: start (local time), duration (h:mm:ss), avg speed (km/h), pulse count, internet earned (h:mm:ss) |
 | Session Graphs   | Bar charts with day-of-month on X axis: average speed and total session duration per day                                                                                                                                                                                      |
 
 Dashboard requirements for reports:
@@ -748,6 +752,7 @@ Returns JSON:
 
 ```json
 {
+  "fw_version": "2.0.0",
   "time_utc": 1741910400,
   "time_local": "2026-03-14T10:00:00",
   "time_synced": true,
@@ -799,7 +804,8 @@ Returns JSON array (max 50 entries, newest first):
     "time_synced": true,
     "duration_s": 5400,
     "pulse_count": 1800,
-    "avg_speed_kmh_x10": 123
+    "avg_speed_kmh_x10": 123,
+    "internet_earned_s": 5400
   }
 ]
 ```
@@ -826,12 +832,13 @@ Exports session reports as downloadable files.
 
 **CSV columns (header row):**
 
-`start_utc,start_local,time_synced,duration_s,pulse_count,avg_speed_kmh,distance_m`
+`start_utc,start_local,time_synced,duration_s,pulse_count,avg_speed_kmh,distance_m,internet_earned_s`
 
 Where:
 
 - `avg_speed_kmh` is decimal (`avg_speed_kmh_x10 / 10.0`)
 - `distance_m = (pulse_count * centimeters_per_pulse) / 100.0`
+- `internet_earned_s` is the pre-computed internet time earned this session
 
 ### 6.6 Daily Aggregates API (Graphs) — `GET /api/sessions/daily`
 
@@ -1021,7 +1028,7 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | `slog_count`         | uint16 | Number of valid entries (0–50) |
 | `slog_0` … `slog_49` | blob   | `session_trk_record_t` binary  |
 
-`session_trk_record_t` binary layout (16 bytes):
+`session_trk_record_t` binary layout (20 bytes):
 
 | Field               | Offset | Type       | Notes                                   |
 | ------------------- | ------ | ---------- | --------------------------------------- |
@@ -1030,9 +1037,10 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | `_pad`              | 9      | uint8_t[1] | reserved                                |
 | `duration_s`        | 10     | uint16_t   | session duration in seconds (max ~18 h) |
 | `pulse_count`       | 12     | uint16_t   | total pulses (max 65535)                |
-| `avg_speed_kmh_x10` | 14     | uint16_t   | km/h × 10 (e.g. 123 = 12.3 km/h)        |
+| `avg_speed_kmh_x10` | 14     | uint16_t   | km/h x 10 (e.g. 123 = 12.3 km/h)       |
+| `internet_earned_s` | 16     | uint32_t   | pulse_count * seconds_per_pulse         |
 
-> Total: 16 bytes x 50 entries = 800 bytes plus ~50 bytes for metadata keys.
+> Total: 20 bytes x 50 entries = 1000 bytes plus ~50 bytes for metadata keys.
 
 ---
 

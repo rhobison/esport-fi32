@@ -95,6 +95,9 @@ static uint16_t g_idle_interval_s = 0U;
 /** Cached centimeters_per_pulse; re-read from config at each session start. */
 static uint32_t g_centimeters_per_pulse = 0U;
 
+/** Cached seconds_per_pulse; re-read from config at each session start. */
+static uint16_t g_seconds_per_pulse = 0U;
+
 //==================================================================================================
 // Internal Function Prototypes
 //==================================================================================================
@@ -204,6 +207,7 @@ static void session_trk_state_reset(void)
     g_prev_pulse_ms      = 0;
     g_session_start_utc  = 0;
     gb_session_confirmed = false;
+    g_seconds_per_pulse  = 0U;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -246,6 +250,7 @@ static void session_trk_pulse_handler(void * p_handler_arg, esp_event_base_t bas
         g_start_interval_s      = config_mngr_start_session_interval_s_get();
         g_idle_interval_s       = config_mngr_idle_session_interval_s_get();
         g_centimeters_per_pulse = config_mngr_centimeters_per_pulse_get();
+        g_seconds_per_pulse     = config_mngr_seconds_per_pulse_get();
 
         g_potential_start_ms = timestamp_ms;
         g_pulse_count        = 1U;
@@ -337,17 +342,21 @@ static void session_trk_idle_timer_cb(TimerHandle_t p_timer)
         uint16_t avg_speed_kmh_x10 =
             (0U < duration_s) ? (uint16_t)(total_cm * 36ULL / ((uint64_t)duration_s * 100ULL)) : 0U;
 
+        uint32_t internet_earned_s = (uint32_t)g_pulse_count * (uint32_t)g_seconds_per_pulse;
+
         session_trk_record_t record = {
             .start_time_utc    = g_session_start_utc,
             .b_time_synced     = time_mngr_is_synced(),
             .duration_s        = duration_s,
             .pulse_count       = g_pulse_count,
             .avg_speed_kmh_x10 = avg_speed_kmh_x10,
+            .internet_earned_s = internet_earned_s,
         };
 
         ESP_LOGI(gp_tag,
-            "session closed: duration=%" PRIu32 "s pulses=%" PRIu32 " speed=%" PRIu16 " (x10 km/h)",
-            duration_s, g_pulse_count, avg_speed_kmh_x10);
+            "session closed: duration=%" PRIu32 "s pulses=%" PRIu32 " speed=%" PRIu16
+            " (x10 km/h) earned=%" PRIu32 "s",
+            duration_s, g_pulse_count, avg_speed_kmh_x10, internet_earned_s);
 
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_SESSION_CLOSED, &record,
             sizeof(record), 0U);

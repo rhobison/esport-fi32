@@ -20,6 +20,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -159,6 +160,7 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
 
     int n = snprintf(p_buf, HTTP_SRV_JSON_BUF_LEN,
         "{\n"
+        "  \"fw_version\": \"%s\",\n"
         "  \"time_utc\": %" PRId64 ",\n"
         "  \"time_local\": \"%s\",\n"
         "  \"time_synced\": %s,\n"
@@ -182,11 +184,12 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         "  \"speed_gate_active\": %s,\n"
         "  \"current_rider_idx\": %" PRIu8 ",\n"
         "  \"devices\": [",
-        (int64_t)now_utc, time_local_str, b_synced ? "true" : "false", uptime_s,
-        b_sta ? "true" : "false", sta_ssid, sta_ip, b_rew_ap ? "true" : "false", rew_ap_ssid,
-        rew_ap_ip, ap_clients, counter_s, threshold, session.p_state_name, session.start_utc,
-        session.duration_s, session.pulse_count, session.live_speed_kmh_x10, throughput, speed_x10,
-        b_speed_gated ? "true" : "false", rider_idx);
+        esp_app_get_description()->version, (int64_t)now_utc, time_local_str,
+        b_synced ? "true" : "false", uptime_s, b_sta ? "true" : "false", sta_ssid, sta_ip,
+        b_rew_ap ? "true" : "false", rew_ap_ssid, rew_ap_ip, ap_clients, counter_s, threshold,
+        session.p_state_name, session.start_utc, session.duration_s, session.pulse_count,
+        session.live_speed_kmh_x10, throughput, speed_x10, b_speed_gated ? "true" : "false",
+        rider_idx);
 
     if (n >= (int)HTTP_SRV_JSON_BUF_LEN)
     {
@@ -329,10 +332,11 @@ esp_err_t http_srv_api_sessions_handler(httpd_req_t * p_req)
               "\"time_synced\":%s,"
               "\"duration_s\":%" PRIu32 ","
               "\"pulse_count\":%" PRIu32 ","
-              "\"avg_speed_kmh_x10\":%" PRIu16 "}",
+              "\"avg_speed_kmh_x10\":%" PRIu16 ","
+              "\"internet_earned_s\":%" PRIu32 "}",
             (0 == i) ? "" : ",", (int64_t)p_rec->start_time_utc, local_str,
             p_rec->b_time_synced ? "true" : "false", p_rec->duration_s, p_rec->pulse_count,
-             p_rec->avg_speed_kmh_x10);
+             p_rec->avg_speed_kmh_x10, p_rec->internet_earned_s);
 
         if ((n > 0) && ((pos + n + 2) < (int)HTTP_SRV_JSON_BUF_LEN))
         {

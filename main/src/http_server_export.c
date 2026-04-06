@@ -79,7 +79,7 @@ static esp_err_t http_srv_export_csv_send(httpd_req_t * p_req,
         p_date_str);
 
     static const char sc_csv_header[] = "start_utc,start_local,time_synced,duration_s,pulse_count,"
-                                        "avg_speed_kmh,distance_m\r\n";
+                                        "avg_speed_kmh,distance_m,internet_earned_s\r\n";
 
     int pos = snprintf(p_buf, HTTP_SRV_JSON_BUF_LEN, "%s", sc_csv_header);
 
@@ -102,9 +102,10 @@ static esp_err_t http_srv_export_csv_send(httpd_req_t * p_req,
         char row[HTTP_SRV_ENTRY_BUF_LEN];
         int  n = snprintf(row, sizeof(row),
              "%" PRId64 ",%s,%s,%" PRIu32 ",%" PRIu32 ",%" PRIu16 ".%" PRIu16 ",%" PRIu32
-             ".%02" PRIu32 "\r\n",
+             ".%02" PRIu32 ",%" PRIu32 "\r\n",
              (int64_t)p_rec->start_time_utc, local_str, p_rec->b_time_synced ? "true" : "false",
-             p_rec->duration_s, p_rec->pulse_count, spd_int, spd_dec, dist_m_i, dist_m_d);
+             p_rec->duration_s, p_rec->pulse_count, spd_int, spd_dec, dist_m_i, dist_m_d,
+             p_rec->internet_earned_s);
 
         if ((n > 0) && ((pos + n + 1) < (int)HTTP_SRV_JSON_BUF_LEN))
         {
@@ -176,10 +177,11 @@ static esp_err_t http_srv_export_json_send(httpd_req_t * p_req,
               "\"time_synced\":%s,"
               "\"duration_s\":%" PRIu32 ","
               "\"pulse_count\":%" PRIu32 ","
-              "\"avg_speed_kmh_x10\":%" PRIu16 "}",
+              "\"avg_speed_kmh_x10\":%" PRIu16 ","
+              "\"internet_earned_s\":%" PRIu32 "}",
             (0 == i) ? "" : ",", (int64_t)p_rec->start_time_utc, local_str,
             p_rec->b_time_synced ? "true" : "false", p_rec->duration_s, p_rec->pulse_count,
-             p_rec->avg_speed_kmh_x10);
+             p_rec->avg_speed_kmh_x10, p_rec->internet_earned_s);
 
         if ((n > 0) && ((pos + n + 2) < (int)HTTP_SRV_JSON_BUF_LEN))
         {
