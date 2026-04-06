@@ -844,7 +844,7 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
     {
         if (IP_EVENT_STA_GOT_IP == event_id)
         {
-            gb_sta_connected        = true;
+            gb_sta_connected         = true;
             gb_first_connect_attempt = false;
 
             /* Make STA the default netif so that the lwIP routing layer sends
