@@ -80,6 +80,19 @@ static uint16_t g_below_ticks[DEVICE_REG_MAX_ENTRIES];
 /** Current traffic-gate pause state per device. */
 static bool g_dev_paused[DEVICE_REG_MAX_ENTRIES];
 
+/**
+ * \brief Internet gate lock flag per device (RAM only, not persisted).
+ *
+ * When \c true for a device slot, that device cannot access the internet
+ * (\c device_reg_mac_internet_allowed() returns \c false) and its counter is
+ * not decremented by \c device_reg_tick().  Defaults to \c false on every
+ * boot: if a counter survived in NVS the child may use internet immediately
+ * after a reboot.  Set to \c true by \c time_counter when a session opens
+ * and the rider's counter is zero; cleared when the internet gate threshold
+ * fires.
+ */
+static bool g_inet_gate_locked[DEVICE_REG_MAX_ENTRIES];
+
 //==================================================================================================
 // Internal Function Prototypes
 //==================================================================================================
@@ -100,6 +113,7 @@ esp_err_t device_reg_init(void)
     memset(g_throughput_kbps, 0, sizeof(g_throughput_kbps));
     memset(g_below_ticks, 0, sizeof(g_below_ticks));
     memset(g_dev_paused, 0, sizeof(g_dev_paused));
+    memset(g_inet_gate_locked, 0, sizeof(g_inet_gate_locked));
     memset(g_entries, 0, sizeof(g_entries));
     g_count      = 0U;
     g_rider      = DEVICE_REG_NO_RIDER;
@@ -260,23 +274,25 @@ esp_err_t device_reg_entry_remove(uint8_t idx)
     /* Compact the array: shift entries [idx+1 … g_count-1] left by one. */
     for (uint8_t i = idx; i < (g_count - 1U); i++)
     {
-        g_entries[i]         = g_entries[i + 1U];
-        g_throughput_kbps[i] = g_throughput_kbps[i + 1U];
-        g_below_ticks[i]     = g_below_ticks[i + 1U];
-        g_dev_paused[i]      = g_dev_paused[i + 1U];
-        g_rx_bytes[i]        = g_rx_bytes[i + 1U];
-        g_tx_bytes[i]        = g_tx_bytes[i + 1U];
+        g_entries[i]          = g_entries[i + 1U];
+        g_throughput_kbps[i]  = g_throughput_kbps[i + 1U];
+        g_below_ticks[i]      = g_below_ticks[i + 1U];
+        g_dev_paused[i]       = g_dev_paused[i + 1U];
+        g_inet_gate_locked[i] = g_inet_gate_locked[i + 1U];
+        g_rx_bytes[i]         = g_rx_bytes[i + 1U];
+        g_tx_bytes[i]         = g_tx_bytes[i + 1U];
     }
 
     /* Zero the now-unused last slot. */
     uint8_t old_count = g_count;
     g_count--;
     memset(&g_entries[g_count], 0, sizeof(g_entries[g_count]));
-    g_throughput_kbps[g_count] = 0U;
-    g_below_ticks[g_count]     = 0U;
-    g_dev_paused[g_count]      = false;
-    g_rx_bytes[g_count]        = 0U;
-    g_tx_bytes[g_count]        = 0U;
+    g_throughput_kbps[g_count]  = 0U;
+    g_below_ticks[g_count]      = 0U;
+    g_dev_paused[g_count]       = false;
+    g_inet_gate_locked[g_count] = false;
+    g_rx_bytes[g_count]         = 0U;
+    g_tx_bytes[g_count]         = 0U;
 
     /* Adjust rider index. */
     if (DEVICE_REG_NO_RIDER != g_rider)
@@ -433,6 +449,33 @@ uint32_t device_reg_entry_counter_get(uint8_t idx)
 
 //--------------------------------------------------------------------------------------------------
 
+esp_err_t device_reg_entry_inet_gate_lock_set(uint8_t idx, bool b_locked)
+{
+    portENTER_CRITICAL(&g_dev_mux);
+
+    if (idx >= g_count)
+    {
+        portEXIT_CRITICAL(&g_dev_mux);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    g_inet_gate_locked[idx] = b_locked;
+    portEXIT_CRITICAL(&g_dev_mux);
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+bool device_reg_entry_inet_gate_lock_get(uint8_t idx)
+{
+    portENTER_CRITICAL(&g_dev_mux);
+    bool b = (idx < g_count) && g_inet_gate_locked[idx];
+    portEXIT_CRITICAL(&g_dev_mux);
+    return b;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 int8_t device_reg_mac_find(const uint8_t * p_mac)
 {
     if (NULL == p_mac)
@@ -472,7 +515,8 @@ bool device_reg_mac_internet_allowed(const uint8_t * p_mac)
     {
         if (0 == memcmp(g_entries[i].mac, p_mac, DEVICE_REG_MAC_LEN))
         {
-            b_allowed = (g_entries[i].b_enabled && (g_entries[i].counter_s > 0U));
+            b_allowed =
+                (g_entries[i].b_enabled && (g_entries[i].counter_s > 0U) && !g_inet_gate_locked[i]);
             break;
         }
     }
@@ -584,8 +628,9 @@ esp_err_t device_reg_tick(void)
             }
         }
 
-        /* Decrement if eligible. */
-        if (!g_dev_paused[i] && g_entries[i].b_enabled && (g_entries[i].counter_s > 0U))
+        /* Decrement if eligible: connected, enabled, has credits, gate unlocked. */
+        if (!g_dev_paused[i] && g_entries[i].b_enabled && (g_entries[i].counter_s > 0U) &&
+            !g_inet_gate_locked[i])
         {
             g_entries[i].counter_s--;
             b_changed = true;

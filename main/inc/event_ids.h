@@ -63,9 +63,9 @@ typedef enum
      * \brief Earning phase started (internet gate threshold reached or bypassed).
      *
      * Posted when the time counter transitions to EARNING state.  The reward
-     * Soft AP is always on; this event signals that session credits have been
-     * flushed to the rider's device counter and internet access is now gated
-     * only by the per-device counter.
+     * Soft AP is always on; this event signals that the per-device internet
+     * gate lock has been cleared and internet access is now controlled only
+     * by the per-device counter.
      *
      * No payload.
      */

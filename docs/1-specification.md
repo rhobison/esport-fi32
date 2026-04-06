@@ -372,9 +372,9 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
 
 **Responsibilities:**
 - Maintain the **time counter** per device slot via the Device Registry (`device_reg_entry_counter_set/get`).
-- Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to `g_session_credits` (SESSION state) or directly to the current rider's device-registry counter (EARNING state). Pulses in IDLE state are ignored (pulses during the qualification window are retroactively credited when `SESSION_OPENED` is received — see below).
-- Listen for `ESPORT_EVENT_SESSION_OPENED` (payload: `uint32_t` qualifying pulse count): transition IDLE->SESSION or IDLE->EARNING. Accumulate `qualifying_pulses * seconds_per_pulse` into `g_session_credits` (on top of any pending credits from a previous incomplete session). If the current rider's device-registry counter is already > 0, bypass the internet gate: flush `g_session_credits` to the rider's counter, go directly to EARNING, and post `ESPORT_EVENT_EARNING_STARTED`. Otherwise start a one-shot timer for `internet_gate_threshold_s` seconds.
-- Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer, **retain** `g_session_credits` (credits are not flushed to the device counter and not discarded — the child cannot use the internet but exercise effort is preserved for the next session), and return to IDLE. If already EARNING, transition to IDLE and post `ESPORT_EVENT_EARNING_STOPPED`.
+- Listen for `ESPORT_EVENT_PULSE` events: add `seconds_per_pulse` credits directly to the current rider's device-registry counter (NVS-persisted) in both SESSION and EARNING states. Pulses in IDLE state are ignored. Qualifying pulses are credited on `SESSION_OPENED` — see below.
+- Listen for `ESPORT_EVENT_SESSION_OPENED` (payload: `uint32_t` qualifying pulse count): credit qualifying pulses directly to the device-registry counter. If `counter > 0` **and** the per-device internet gate lock is `false`, bypass the gate (IDLE->EARNING, post `ESPORT_EVENT_EARNING_STARTED`). Otherwise engage the gate lock, go IDLE->SESSION and start a one-shot `internet_gate_threshold_s` timer.
+- Listen for `ESPORT_EVENT_SESSION_CLOSED`: if in SESSION state, cancel the timer, go to IDLE — gate lock remains set (internet blocked) but all credits are already in the device-registry counter (persisted). If in EARNING state, clear the gate lock, go to IDLE and post `ESPORT_EVENT_EARNING_STOPPED`.
 - Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, maintain a `g_speed_low_ticks` counter: increment it when the speed-low condition holds (`g_state` is SESSION or EARNING, `min_speed > 0`, `0 < current_speed < min_speed`); reset it to zero otherwise. Call `buzzer_speed_low_update(true)` only when the speed-low condition holds **and** `g_speed_low_ticks >= low_speed_buzzer_threshold_s`; call `buzzer_speed_low_update(false)` otherwise. Then post `ESPORT_EVENT_COUNTER_CHANGED`.
 - Post `ESPORT_EVENT_EARNING_STARTED` when the threshold timer fires (SESSION -> EARNING transition).
 - Post `ESPORT_EVENT_EARNING_STOPPED` when the EARNING state exits to IDLE (session closed while earning).
@@ -388,29 +388,30 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
         |                   IDLE state                         |
         |  current rider counter may be non-zero (paused)      |
         |                                                      |
-        |  On SESSION_OPENED: seed g_session_credits with   |
-        |    qualifying pulses, start threshold timer ->       |
+        |  On SESSION_OPENED: check counter & gate lock ->   |
+        |    bypass if (counter>0 && lock=false)              |
         +------------------+-----------------------------------+
                            |  ESPORT_EVENT_SESSION_OPENED
                            v
         +------------------------------------------------------+
         |                SESSION state                         |
-        |  g_session_credits accumulating from pulses          |
+        |  Gate lock = true for this rider                    |
         |                                                      |
-        |  On pulse:        g_session_credits += spp           |
-        |  time_ctr_get() = stored_counter + g_session_credits |
-        |  On SESSION_CLOSED: retain credits as pending, -> IDLE|
+        |  On pulse:   rider counter += spp (NVS-persisted)   |
+        |  time_ctr_get() = device_reg counter                |
+        |  On SESSION_CLOSED: cancel timer, -> IDLE            |
+        |    (lock stays true; credits already in NVS)         |
         +------------------+-----------------------------------+
                            |  threshold timer fires
                            |  (internet_gate_threshold_s elapsed)
                            v
         +------------------------------------------------------+
         |                EARNING state                         |
-        |  Internet access gated per-device by device_reg      |
+        |  Gate lock = false; internet open per-device         |
         |                                                      |
-        |  On pulse:  rider counter += spp                     |
+        |  On pulse:  rider counter += spp (NVS-persisted)    |
         |  On tick:   device_reg_tick() decrements all enabled |
-        |             devices with internet access             |
+        |             unlocked devices with internet access    |
         +------------------+-----------------------------------+
                            |  SESSION_CLOSED
                            v
@@ -976,41 +977,42 @@ Bike sensor -> falling edge on GPIO 10
             -> if valid: post ESPORT_EVENT_PULSE
 
 ESPORT_EVENT_PULSE
-  -> time_counter: if state == SESSION: g_session_credits += spp
-                   if state == EARNING: current rider counter += spp
+  -> time_counter: if state == SESSION or EARNING: rider counter += spp (NVS-persisted)
   -> session_tracker: update pulse count, last_pulse_time, manage timers
 
 ESPORT_EVENT_SESSION_OPENED (posted by session_tracker on QUALIFYING->ACTIVE)
-  -> time_counter: accumulate qualifying_pulses * spp into g_session_credits
-                   if rider device_reg counter > 0:
+  -> time_counter: credit qualifying_pulses * spp to rider counter
+                   if rider counter > 0 AND gate lock == false:
                      IDLE->EARNING (gate bypass)
-                     flush g_session_credits to rider counter
                      post ESPORT_EVENT_EARNING_STARTED
                    else:
+                     set gate lock = true for this rider
                      IDLE->SESSION
                      start one-shot threshold timer
                     (internet_gate_threshold_s seconds)
 
 threshold timer fires
   -> time_counter: SESSION->EARNING
-                   flush g_session_credits to current rider counter
+                   clear gate lock for this rider
                    post ESPORT_EVENT_EARNING_STARTED
 
 SESSION_CLOSED while in SESSION state:
   -> time_counter: SESSION->IDLE
                    cancel threshold timer
-                   retain g_session_credits (pending for next session)
+                   gate lock stays true (cleared on boot or next gate completion)
 ```
 
-### 7.4 Counter Decrement & AP Shutdown
+### 7.4 Counter Decrement & Internet Gate
 
 ```
 1-second periodic tick (permanent; runs in all states)
   -> device_reg_tick(): for each connected+enabled device with counter_s > 0
+       AND gate lock == false:
        compute throughput; apply sliding-window gate; decrement if not paused
   -> post ESPORT_EVENT_COUNTER_CHANGED
 
 On EARNING->IDLE (SESSION_CLOSED while in EARNING state):
+  -> clear gate lock for this rider
   -> post ESPORT_EVENT_EARNING_STOPPED
   -> state = IDLE
 ```

@@ -2057,61 +2057,52 @@ Replace the global counter with per-device credit logic. Pulse credits go to the
 
 5. **Boot restore** — in `time_ctr_init()`, remove the restore of `config_mngr_reward_counter_s_get()`. Per-device counters are already restored by `device_reg_init()` (called before `time_ctr_init()` in `main.c`). **Migration:** if `config_mngr_reward_counter_s_get()` returns a value `> 0` and `device_reg_current_rider_get() != DEVICE_REG_NO_RIDER` and the current rider's `device_reg_entry_counter_get()` returns `0`, set the current rider's counter to the migrated value via `device_reg_entry_counter_set()`, then call `config_mngr_reward_counter_s_set(0U)` to clear the old key. Log the migration at `ESP_LOGI` level. This one-time migration prevents loss of earned time when upgrading from Feature 3.
 
-6. **Pulse handler (`time_ctr_pulse_event_handler`)** — update credit logic:
-   - Speed gate check (Feature 2): unchanged — `b_credit` flag is still computed before entering the spinlock.
-   - In `TIME_CTR_STATE_SESSION` (under spinlock): if `b_credit`, increment `g_session_credits` by `config_mngr_seconds_per_pulse_get()`.
-   - In `TIME_CTR_STATE_EARNING` (under spinlock): if `b_credit` and `device_reg_current_rider_get() != DEVICE_REG_NO_RIDER`, call `device_reg_entry_counter_set(rider_idx, device_reg_entry_counter_get(rider_idx) + spp)` outside the spinlock (after reading `rider_idx` under spinlock).
-   - Post `ESPORT_EVENT_COUNTER_CHANGED` with payload `time_ctr_get()` after every pulse (unchanged call site, updated return value — see task 9).
+6. **Pulse handler (`time_ctr_pulse_event_handler`)** — simplified credit logic:
+   - Speed gate check (Feature 2): unchanged.
+   - In both `TIME_CTR_STATE_SESSION` and `TIME_CTR_STATE_EARNING` (outside spinlock): if `b_credit` and rider != `DEVICE_REG_NO_RIDER`, call `device_reg_entry_counter_set(rider_idx, device_reg_entry_counter_get(rider_idx) + spp)`. Credits go directly to the NVS-persisted device-registry counter in both active states.
+   - Post `ESPORT_EVENT_COUNTER_CHANGED` with payload `time_ctr_get()` after every pulse.
 
 7. **Threshold timer callback** — on firing (transition `SESSION → EARNING`):
-   - Remove `wifi_mngr_reward_ap_set(true)`.
-   - If `g_session_credits > 0` and `device_reg_current_rider_get() != DEVICE_REG_NO_RIDER`: call `device_reg_entry_counter_set(rider_idx, device_reg_entry_counter_get(rider_idx) + g_session_credits)`.
-   - Reset `g_session_credits = 0`.
-   - Post `ESPORT_EVENT_EARNING_STARTED` (keep for dashboard compatibility; semantics change to "earning started").
-   - Do **not** start the tick timer here (it is already running permanently).
+   - Call `device_reg_entry_inet_gate_lock_set(rider, false)` to clear the gate lock.
+   - Post `ESPORT_EVENT_EARNING_STARTED`.
+   - No credit flushing needed (credits are already in the device-registry counter).
 
-8. **Tick callback (`time_ctr_tick_cb`)** — simplify to unconditional delegation:
-   - **Remove** the entire Feature 1 traffic gate block: delete the call to `wifi_mngr_reward_ap_throughput_kbps()` and all reads/writes of `g_paused` and `g_below_ticks`. The gate is now applied per device inside `device_reg_tick()`.
-   - Remove the `g_paused` and `g_below_ticks` file-scope variables entirely from `time_counter.c`.
-   - Remove `time_ctr_is_paused()` from `main/inc/time_counter.h` and its implementation from `main/src/time_counter.c`. Per-device pause state is exposed by `device_reg_entry_is_paused()` instead.
-   - Remove the `"countdown_paused"` field from the `/api/status` JSON in `main/src/http_server_api.c` (the call to `time_ctr_is_paused()` that was added in Feature 1.5). The per-device `"paused"` fields in the `"devices"` array (Phase 4.5) serve this role.
-   - Also remove the HTML `<span id="pause-indicator">` element and its associated JavaScript update from `main/src/http_server_dashboard.c` (added in Feature 1.5), as the global pause indicator has no backing data after `g_paused` is removed.
-   - Replace the `if !g_paused: g_counter_s--` block with an unconditional call to `device_reg_tick()`.
-   - Remove the `counter == 0` → AP-disable → IDLE transition block entirely. The state machine no longer transitions based on a counter reaching zero.
-   - Post `ESPORT_EVENT_COUNTER_CHANGED` with payload `time_ctr_get()` (unchanged call site).
-   - Note: `wifi_mngr_reward_ap_throughput_kbps()` is **not** removed from `wifi_manager.c`; it is still called from `http_server_api.c` for the `"reward_ap_throughput_kbps"` total-AP diagnostic field.
+8. **Tick callback (`time_ctr_tick_cb`)** — unconditional delegation (unchanged from prior refactor).
 
 9. **Session-closed handler** — transitions in all states:
-   - `TIME_CTR_STATE_SESSION` + `ESPORT_EVENT_SESSION_CLOSED`: keep `g_session_credits` intact (do **not** reset or flush to device counter), cancel the threshold timer -> `TIME_CTR_STATE_IDLE`. Credits are retained as pending for the next session -- the child must exercise for at least `internet_gate_threshold_s` in a single session (or start a session with counter > 0) before credits are flushed and internet access is granted. `ESPORT_EVENT_EARNING_STARTED` is **not** posted. Post `ESPORT_EVENT_COUNTER_CHANGED` with the updated counter value (which includes pending session credits via `time_ctr_get()`).
-   - `TIME_CTR_STATE_EARNING` + `ESPORT_EVENT_SESSION_CLOSED`: transition to `TIME_CTR_STATE_IDLE`; post `ESPORT_EVENT_EARNING_STOPPED`. (`g_paused` and `g_below_ticks` have been removed in task 8; no reset needed.)
-   - Remove the old `TIME_CTR_STATE_AP_ACTIVE + SESSION_CLOSED → ignore` branch.
+   - `TIME_CTR_STATE_SESSION` + `ESPORT_EVENT_SESSION_CLOSED`: cancel the threshold timer, go to `TIME_CTR_STATE_IDLE`. Gate lock **remains set** (internet blocked until gate is completed in a future session or on reboot). Credits are already persisted in the device-registry counter. Post `ESPORT_EVENT_COUNTER_CHANGED`.
+   - `TIME_CTR_STATE_EARNING` + `ESPORT_EVENT_SESSION_CLOSED`: call `device_reg_entry_inet_gate_lock_set(rider, false)` to clear the gate lock, transition to `TIME_CTR_STATE_IDLE`, post `ESPORT_EVENT_EARNING_STOPPED`.
 
-10. **`time_ctr_get()`** — return `device_reg_entry_counter_get(current_rider) + g_session_credits`, where `g_session_credits` is read under `g_spinlock` unconditionally (in all states).  In EARNING and normal IDLE states the value is `0`; during SESSION or IDLE-with-pending-credits it reflects accumulated but not-yet-flushed credits.  This ensures the dashboard displays live credit accumulation during SESSION and shows banked pending credits in IDLE.  Returns `0` if no rider is selected (`DEVICE_REG_NO_RIDER`).
+10. **`time_ctr_get()`** — return `device_reg_entry_counter_get(current_rider)` directly. No `g_session_credits` accumulator. Returns `0` if no rider is selected (`DEVICE_REG_NO_RIDER`).
 
-11. **`time_ctr_counter_set(uint32_t val)`** (Feature 3 API) — update semantics: call `device_reg_entry_counter_set(rider_idx, val)` for the current rider. If no rider is selected, return `ESP_ERR_INVALID_STATE` and log `ESP_LOGW`. Remove all AP on/off logic that this function previously contained (it was calling `wifi_mngr_reward_ap_set()` — now redundant).
+11. **`time_ctr_counter_set(uint32_t val)`** (Feature 3 API) — update semantics: call `device_reg_entry_counter_set(rider_idx, val)` for the current rider. If no rider is selected, return `ESP_ERR_INVALID_STATE` and log `ESP_LOGW`.
 
-12. **Update Doxygen** for `time_ctr_get()` and `time_ctr_counter_set()` in `main/inc/time_counter.h` to reflect the new semantics.
+12. **`device_registry` additions** — internet gate lock:
+    - Add RAM-only `g_inet_gate_locked[DEVICE_REG_MAX_ENTRIES]` array (zero-initialised on boot).
+    - `device_reg_entry_inet_gate_lock_set(idx, b_locked)` and `device_reg_entry_inet_gate_lock_get(idx)` public functions.
+    - `device_reg_mac_internet_allowed()`: also check `!g_inet_gate_locked[i]`.
+    - `device_reg_tick()` decrement: skip if `g_inet_gate_locked[i]`.
+    - `device_reg_entry_remove()`: compact `g_inet_gate_locked` in the same loop.
+    - `device_reg_init()`: zero-initialise `g_inet_gate_locked`.
 
 #### Acceptance Criteria
 
 - [ ] `idf.py build` succeeds with zero errors and warnings.
 - [ ] The 1-second tick fires continuously from `time_ctr_init()` regardless of session state.
-- [ ] Pulses during `SESSION` state accumulate in `g_session_credits` and do **not** yet appear in the rider's `device_reg` counter.
-- [ ] On `ESPORT_EVENT_SESSION_OPENED`, qualifying credits are **accumulated** into `g_session_credits` with `+=` (preserving pending credits from previous incomplete sessions); subsequent pulses in SESSION state add to this accumulator.
-- [ ] On `ESPORT_EVENT_SESSION_OPENED`, if the current rider's `device_reg` counter is already > 0, the internet gate is bypassed: `g_session_credits` is flushed to the rider's counter, state goes directly to EARNING, and `ESPORT_EVENT_EARNING_STARTED` is posted.
-- [ ] When the threshold timer fires, `g_session_credits` is flushed to the current rider's `device_reg` counter and the accumulator is reset to zero.
-- [ ] Pulses in `EARNING` state add directly to the current rider's `device_reg` counter.
-- [ ] `device_reg_tick()` is called unconditionally once per second from `time_ctr_tick_cb()`.
-- [ ] Per-device counters only decrement when the per-device traffic gate is not paused (gating is handled inside `device_reg_tick()`).
-- [ ] `time_ctr_is_paused()` no longer exists in `main/inc/time_counter.h`.
-- [ ] `time_ctr_get()` returns the current rider's `device_reg` counter; returns `0` when no rider is selected.
-- [ ] `time_ctr_get()` includes `g_session_credits` unconditionally: the counter reflects pending credits in IDLE state (from incomplete sessions) and live accumulation during SESSION state.
-- [ ] Session closed in `SESSION` state: `g_session_credits` is **retained** (not reset, not flushed to device counter). The pending credits are visible via `time_ctr_get()` and will be flushed on the next session that reaches the gate threshold or starts with counter > 0. `ESPORT_EVENT_EARNING_STARTED` is **not** posted.
-- [ ] Session closed in `EARNING` state: state returns to `IDLE`; device counters continue to decrement normally in subsequent ticks.
-- [ ] No call to `wifi_mngr_reward_ap_set()` remains anywhere in `time_counter.c`.
+- [ ] Pulses in both `SESSION` and `EARNING` states are credited directly to the rider's `device_reg` counter (NVS-persisted) immediately.
+- [ ] On `ESPORT_EVENT_SESSION_OPENED`, qualifying credits are credited directly to the device-registry counter.
+- [ ] On `ESPORT_EVENT_SESSION_OPENED`, if the current rider's `device_reg` counter is > 0 AND `device_reg_entry_inet_gate_lock_get(rider) == false`, the internet gate is bypassed: state goes directly to EARNING and `ESPORT_EVENT_EARNING_STARTED` is posted.
+- [ ] On `ESPORT_EVENT_SESSION_OPENED`, if counter == 0 OR gate lock is already set: `device_reg_entry_inet_gate_lock_set(rider, true)` is called, state goes to SESSION, gate timer starts.
+- [ ] When the threshold timer fires: `device_reg_entry_inet_gate_lock_set(rider, false)`, state -> EARNING, `ESPORT_EVENT_EARNING_STARTED` posted. No credit flushing.
+- [ ] `device_reg_tick()` is called unconditionally once per second.
+- [ ] Per-device counters only decrement when the gate lock is false AND the per-device traffic gate is not paused.
+- [ ] `device_reg_mac_internet_allowed()` returns `false` when gate lock is true, even if counter > 0.
+- [ ] `time_ctr_get()` returns `device_reg_entry_counter_get(current_rider)` directly; no in-RAM accumulator; returns `0` when no rider selected.
+- [ ] Session closed in `SESSION` state: timer cancelled, state -> IDLE. Gate lock **remains true**. Counter value visible via `time_ctr_get()` (already in NVS). `ESPORT_EVENT_EARNING_STARTED` is **not** posted.
+- [ ] Session closed in `EARNING` state: `device_reg_entry_inet_gate_lock_set(rider, false)`, state -> IDLE, `ESPORT_EVENT_EARNING_STOPPED` posted.
+- [ ] `g_inet_gate_locked` defaults to `false` on every boot: if counter > 0 in NVS, internet access is immediately available after reboot.
 - [ ] `time_ctr_counter_set()` returns `ESP_ERR_INVALID_STATE` when no rider is selected.
-- [ ] Migration: a non-zero `config_mngr_reward_counter_s_get()` value is transferred to the current rider's counter on first boot; `config_mngr_reward_counter_s_get()` reads `0` thereafter.
-- [ ] No race conditions under rapid pulse injection interleaved with tick (counter never negative).
+- [ ] Migration: a non-zero `config_mngr_reward_counter_s_get()` value is transferred to the current rider's counter on first boot.
 
 ---
 

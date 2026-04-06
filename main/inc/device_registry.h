@@ -169,6 +169,34 @@ esp_err_t device_reg_entry_counter_set(uint8_t idx, uint32_t counter_s);
 uint32_t device_reg_entry_counter_get(uint8_t idx);
 
 /**
+ * \brief Set the internet gate lock flag for the entry at \p idx.
+ *
+ * When locked, \c device_reg_mac_internet_allowed() returns \c false for that
+ * device and \c device_reg_tick() does not decrement its counter.  This flag
+ * is RAM-only and is not persisted to NVS; it defaults to \c false on every
+ * boot.  Called by \c time_counter when a session opens with the rider's
+ * counter at zero (lock = \c true) and when the gate threshold fires
+ * (lock = \c false).
+ *
+ * \param[in] idx       Entry index (0 to count-1).
+ * \param[in] b_locked  \c true to engage the gate lock, \c false to clear it.
+ *
+ * \return \c ESP_OK on success.
+ * \return \c ESP_ERR_INVALID_ARG when \p idx >= current count.
+ */
+esp_err_t device_reg_entry_inet_gate_lock_set(uint8_t idx, bool b_locked);
+
+/**
+ * \brief Return the internet gate lock state for the entry at \p idx.
+ *
+ * \param[in] idx  Entry index.
+ *
+ * \return \c true if the gate lock is engaged, \c false otherwise or when
+ *         \p idx is out of range.
+ */
+bool device_reg_entry_inet_gate_lock_get(uint8_t idx);
+
+/**
  * \brief Search the registry for a matching MAC address.
  *
  * \param[in] p_mac  Pointer to a 6-byte MAC address to search for.
@@ -180,9 +208,10 @@ int8_t device_reg_mac_find(const uint8_t * p_mac);
 /**
  * \brief Return whether \p p_mac is allowed to route traffic to the internet.
  *
- * Returns \c true iff the MAC is registered, \c b_enabled == true, and
- * \c counter_s > 0.  Executes an O(4) spinlock-guarded scan with no NVS
- * access; safe to call from the lwIP input path.
+ * Returns \c true iff the MAC is registered, \c b_enabled == true,
+ * \c counter_s > 0, and the internet gate lock is not set.  Executes an O(4)
+ * spinlock-guarded scan with no NVS access; safe to call from the lwIP input
+ * path.
  *
  * \param[in] p_mac  Pointer to a 6-byte MAC address.
  *
