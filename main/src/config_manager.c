@@ -43,23 +43,25 @@
 #define CONFIG_MNGR_KEY_REWARD_COUNTER_S  ("reward_ctr_s")
 
 /* Factory defaults (spec §3). */
-#define CONFIG_MNGR_DEF_WIFI_SSID         (CONFIG_ESPORT_WIFI_SSID)
-#define CONFIG_MNGR_DEF_WIFI_PWD          (CONFIG_ESPORT_WIFI_PASSWORD)
-#define CONFIG_MNGR_DEF_AP_SSID           (CONFIG_ESPORT_REWARD_AP_SSID)
-#define CONFIG_MNGR_DEF_AP_PWD            (CONFIG_ESPORT_REWARD_AP_PASSWORD)
-#define CONFIG_MNGR_DEF_SECONDS_PER_PULSE ((uint16_t)3U)
-#define CONFIG_MNGR_DEF_AP_THRESH         ((uint32_t)300U)
-#define CONFIG_MNGR_DEF_CM_PER_PULSE      ((uint32_t)300U)
-#define CONFIG_MNGR_DEF_IDLE_SESSION_S    ((uint16_t)30U)
-#define CONFIG_MNGR_DEF_START_SESSION_S   ((uint16_t)10U)
-#define CONFIG_MNGR_DEF_DEBOUNCE_MS       ((uint16_t)10U)
-#define CONFIG_MNGR_DEF_TZ                ("CET-1CEST,M3.5.0,M10.5.0/3")
-#define CONFIG_MNGR_DEF_AP_THR_KBPS       ((uint16_t)CONFIG_ESPORT_AP_THRESHOLD_KBPS)
-#define CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S ((uint16_t)CONFIG_ESPORT_AP_IDLE_TIMEOUT_S)
-#define CONFIG_MNGR_DEF_MIN_SPEED_X10     ((uint16_t)CONFIG_ESPORT_MIN_SPEED_KMH_X10)
-#define CONFIG_MNGR_DEF_REWARD_COUNTER_S  ((uint32_t)0U)
-#define CONFIG_MNGR_KEY_BUZZER_ENABLED    ("buzzer_en")
-#define CONFIG_MNGR_DEF_BUZZER_ENABLED    ((uint8_t)1U)
+#define CONFIG_MNGR_DEF_WIFI_SSID             (CONFIG_ESPORT_WIFI_SSID)
+#define CONFIG_MNGR_DEF_WIFI_PWD              (CONFIG_ESPORT_WIFI_PASSWORD)
+#define CONFIG_MNGR_DEF_AP_SSID               (CONFIG_ESPORT_REWARD_AP_SSID)
+#define CONFIG_MNGR_DEF_AP_PWD                (CONFIG_ESPORT_REWARD_AP_PASSWORD)
+#define CONFIG_MNGR_DEF_SECONDS_PER_PULSE     ((uint16_t)3U)
+#define CONFIG_MNGR_DEF_AP_THRESH             ((uint32_t)300U)
+#define CONFIG_MNGR_DEF_CM_PER_PULSE          ((uint32_t)300U)
+#define CONFIG_MNGR_DEF_IDLE_SESSION_S        ((uint16_t)30U)
+#define CONFIG_MNGR_DEF_START_SESSION_S       ((uint16_t)10U)
+#define CONFIG_MNGR_DEF_DEBOUNCE_MS           ((uint16_t)10U)
+#define CONFIG_MNGR_DEF_TZ                    ("CET-1CEST,M3.5.0,M10.5.0/3")
+#define CONFIG_MNGR_DEF_AP_THR_KBPS           ((uint16_t)CONFIG_ESPORT_AP_THRESHOLD_KBPS)
+#define CONFIG_MNGR_DEF_AP_IDLE_TIMEOUT_S     ((uint16_t)CONFIG_ESPORT_AP_IDLE_TIMEOUT_S)
+#define CONFIG_MNGR_DEF_MIN_SPEED_X10         ((uint16_t)CONFIG_ESPORT_MIN_SPEED_KMH_X10)
+#define CONFIG_MNGR_DEF_REWARD_COUNTER_S      ((uint32_t)0U)
+#define CONFIG_MNGR_KEY_BUZZER_ENABLED        ("buzzer_en")
+#define CONFIG_MNGR_DEF_BUZZER_ENABLED        ((uint8_t)1U)
+#define CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S ("bz_spd_thr_s")
+#define CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S ((uint16_t)3U)
 
 /* String size limits (spec §5.1). */
 #define CONFIG_MNGR_MAX_SSID_LEN (32U) /* max 32 chars + NUL */
@@ -156,6 +158,8 @@ esp_err_t config_mngr_init(void)
         CONFIG_MNGR_DEF_MIN_SPEED_X10);
     ret |= config_mngr_default_u32_write(handle, CONFIG_MNGR_KEY_REWARD_COUNTER_S,
         CONFIG_MNGR_DEF_REWARD_COUNTER_S);
+    ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S,
+        CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S);
 
     /* buzzer_enabled (uint8: 0=false, 1=true) */
     {
@@ -447,6 +451,22 @@ esp_err_t config_mngr_buzzer_enabled_set(bool b_enabled)
 
 //--------------------------------------------------------------------------------------------------
 
+uint16_t config_mngr_low_speed_buzzer_threshold_s_get(void)
+{
+    return config_mngr_u16_get(CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S,
+        CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t config_mngr_low_speed_buzzer_threshold_s_set(uint16_t val)
+{
+    /* Full uint16_t range 0-65535 is valid (0 = immediate feedback). */
+    return config_mngr_u16_set(CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S, val, 0U, UINT16_MAX);
+}
+
+//--------------------------------------------------------------------------------------------------
+
 esp_err_t config_mngr_reset_to_defaults(void)
 {
     nvs_handle_t handle;
@@ -485,6 +505,8 @@ esp_err_t config_mngr_reset_to_defaults(void)
     ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_MIN_SPEED_X10, CONFIG_MNGR_DEF_MIN_SPEED_X10);
     ret |= nvs_set_u32(handle, CONFIG_MNGR_KEY_REWARD_COUNTER_S, CONFIG_MNGR_DEF_REWARD_COUNTER_S);
     ret |= nvs_set_u8(handle, CONFIG_MNGR_KEY_BUZZER_ENABLED, CONFIG_MNGR_DEF_BUZZER_ENABLED);
+    ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S,
+        CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S);
 
     if (ESP_OK == ret)
     {

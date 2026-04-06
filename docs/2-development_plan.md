@@ -2378,6 +2378,7 @@ Audio feedback can be disabled at runtime via an NVS-backed boolean exposed on t
 | Parameter | Type | NVS key | Default | Valid range |
 | --------- | ---- | ------- | ------- | ----------- |
 | `buzzer_enabled` | `bool` (stored as `uint8`) | `"buzzer_en"` | `true` | true / false |
+| `low_speed_buzzer_threshold_s` | `uint16_t` | `"bz_spd_thr_s"` | `3` | 0–65535 |
 
 ### Beep Patterns
 
@@ -2388,7 +2389,7 @@ One beep unit = `BUZZER_UNIT_MS` = 50 ms.
 | `BUZZER_PATTERN_SESSION_QUALIFYING` | ST_IDLE → ST_QUALIFYING | 5 units ON (`BUZZER_PATTERN_QUALIFYING_UNITS`) |
 | `BUZZER_PATTERN_SESSION_QUALIFIED` | ST_QUALIFYING → ST_ACTIVE | 10 units ON (`BUZZER_PATTERN_QUALIFIED_UNITS`) |
 | `BUZZER_PATTERN_SESSION_CLOSED` | ST_ACTIVE → ST_IDLE (idle timeout) | 2 ON, 1 OFF, 2 ON, 1 OFF, 2 ON (`BUZZER_PATTERN_CLOSED_BEEP_UNITS`, `BUZZER_PATTERN_CLOSED_GAP_UNITS`, `BUZZER_PATTERN_CLOSED_BEEP_COUNT`) |
-| `BUZZER_PATTERN_SPEED_LOW` | Per tick: EARNING state, 0 < speed < min\_speed | 2 units ON (`BUZZER_PATTERN_SPEED_LOW_UNITS`) |
+| `BUZZER_PATTERN_SPEED_LOW` | Per tick: SESSION or EARNING, speed below min for ≥ `low_speed_buzzer_threshold_s` consecutive ticks | 2 units ON (`BUZZER_PATTERN_SPEED_LOW_UNITS`) |
 
 ### Interruption Rule
 
@@ -2396,12 +2397,18 @@ A new call to `buzzer_pattern_play()` while a pattern is playing **immediately i
 
 ### Speed-Low Beep Firing Condition
 
-Called from `time_ctr_tick_cb()` once per second.  `buzzer_speed_low_update(true)` is passed when **all** of the following hold; `buzzer_speed_low_update(false)` otherwise:
+Called from `time_ctr_tick_cb()` once per second.  A `g_speed_low_ticks` counter (uint16_t, file-scope in `time_counter.c`) is maintained alongside the beep logic:
 
-1. `g_state == TIME_CTR_STATE_SESSION` or `g_state == TIME_CTR_STATE_EARNING` (session open)
-2. `config_mngr_min_speed_to_increment_time_kmh_x10_get() > 0` (speed gate is enabled)
-3. `time_ctr_current_speed_x10_get() > 0` (rider is moving — not stopped)
-4. `time_ctr_current_speed_x10_get() < min_speed_to_increment_time_kmh_x10` (speed below threshold)
+- **Increment** `g_speed_low_ticks` when **all** of the following hold:
+  1. `g_state == TIME_CTR_STATE_SESSION` or `g_state == TIME_CTR_STATE_EARNING` (session open)
+  2. `config_mngr_min_speed_to_increment_time_kmh_x10_get() > 0` (speed gate is enabled)
+  3. `time_ctr_current_speed_x10_get() > 0` (rider is moving — not stopped)
+  4. `time_ctr_current_speed_x10_get() < min_speed_to_increment_time_kmh_x10` (speed below threshold)
+- **Reset** `g_speed_low_ticks = 0` when any of the above conditions is false.
+- Call `buzzer_speed_low_update(true)` only when the speed-low condition holds **and** `g_speed_low_ticks >= low_speed_buzzer_threshold_s`; call `buzzer_speed_low_update(false)` otherwise.
+- `g_cfg_low_speed_bz_thresh_s` is a cached copy of `config_mngr_low_speed_buzzer_threshold_s_get()` refreshed by `time_ctr_config_cache_refresh()` on `ESPORT_EVENT_CONFIG_CHANGED`.
+
+When `low_speed_buzzer_threshold_s = 0`, the condition `g_speed_low_ticks >= 0` is always true for a uint16_t, so the beep fires immediately on the first below-threshold tick (original behaviour).
 
 The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE when no session was confirmed) does **not** play `BUZZER_PATTERN_SESSION_CLOSED` — only a confirmed session that closes plays that pattern.
 
@@ -2560,7 +2567,7 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 
 ### Phase 5.2 — Config Manager: Buzzer Enable Parameter
 
-**Goal:** Add getter and setter for `buzzer_enabled` to the configuration manager.
+**Goal:** Add getters and setters for `buzzer_enabled` and `low_speed_buzzer_threshold_s` to the configuration manager.
 
 **Inputs**
 - `main/inc/config_manager.h`, `main/src/config_manager.c` (existing)
@@ -2570,17 +2577,24 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 1. **`main/src/config_manager.c`** — add:
    - `#define CONFIG_MNGR_KEY_BUZZER_ENABLED  ("buzzer_en")`
    - `#define CONFIG_MNGR_DEF_BUZZER_ENABLED  ((uint8_t)1U)`
+   - `#define CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S  ("bz_spd_thr_s")`
+   - `#define CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S  ((uint16_t)3U)`
    - In `config_mngr_init()`: read `"buzzer_en"`; if `ESP_ERR_NVS_NOT_FOUND`, write the default `1`.
+   - In `config_mngr_init()`: call `config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S, 3U)` to init the new key.
 
 2. **`main/inc/config_manager.h`** — declare (with complete Doxygen, following existing style):
    ```c
    bool      config_mngr_buzzer_enabled_get(void);
    esp_err_t config_mngr_buzzer_enabled_set(bool b_enabled);
+   uint16_t  config_mngr_low_speed_buzzer_threshold_s_get(void);
+   esp_err_t config_mngr_low_speed_buzzer_threshold_s_set(uint16_t val);
    ```
 
 3. **`main/src/config_manager.c`** — implement:
    - `config_mngr_buzzer_enabled_get()`: read NVS key `"buzzer_en"` as `uint8_t`; return `(val != 0U)`; on any NVS error return `true` (fail-safe: buzzer on by default).
    - `config_mngr_buzzer_enabled_set(b_enabled)`: write `(uint8_t)(b_enabled ? 1U : 0U)` to NVS key `"buzzer_en"`; commit; return `ESP_OK` or the NVS error code.
+   - `config_mngr_low_speed_buzzer_threshold_s_get()`: `config_mngr_u16_get(CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S, 3U)`.
+   - `config_mngr_low_speed_buzzer_threshold_s_set(val)`: `config_mngr_u16_set(CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S, val, 0U, UINT16_MAX)` (full range valid; 0 = immediate).
 
 **Acceptance Criteria**
 
@@ -2589,6 +2603,10 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 - [ ] `config_mngr_buzzer_enabled_set(true)` returns `ESP_OK`; subsequent `config_mngr_buzzer_enabled_get()` returns `true`.
 - [ ] Value survives `config_mngr_init()` reinit (simulated reboot).
 - [ ] Factory default `true` applied when NVS key is absent.
+- [ ] `config_mngr_low_speed_buzzer_threshold_s_set(0)` returns `ESP_OK`.
+- [ ] `config_mngr_low_speed_buzzer_threshold_s_set(65535)` returns `ESP_OK`.
+- [ ] Factory default `3` applied when the `bz_spd_thr_s` NVS key is absent.
+- [ ] Value survives `config_mngr_init()` reinit.
 
 ---
 
@@ -2638,7 +2656,7 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 
 ### Phase 5.4 — Time Counter: Speed-Low Beep Integration
 
-**Goal:** Call `buzzer_speed_low_update()` from the time counter 1-second tick callback, gated on `TIME_CTR_STATE_SESSION` or `TIME_CTR_STATE_EARNING` state and the speed-to-threshold comparison.
+**Goal:** Call `buzzer_speed_low_update()` from the time counter 1-second tick callback, with a configurable delay so the beep only fires after the speed has been below the threshold for `low_speed_buzzer_threshold_s` consecutive seconds.
 
 **Inputs**
 - `main/src/time_counter.c` (existing, Feature 4.3 output)
@@ -2649,20 +2667,46 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 
 1. **`main/src/time_counter.c`** — add `#include "buzzer.h"`.
 
-2. In `time_ctr_tick_cb()`, after the unconditional `device_reg_tick()` call, add the speed-low beep computation:
+2. Add two file-scope variables near the cached config variables:
+   ```c
+   static uint16_t g_cfg_low_speed_bz_thresh_s = 3U;  /* cached from config */
+   static uint16_t g_speed_low_ticks           = 0U;  /* consecutive below-threshold ticks */
+   ```
+   Refresh `g_cfg_low_speed_bz_thresh_s` in `time_ctr_config_cache_refresh()` by calling `config_mngr_low_speed_buzzer_threshold_s_get()`.
+
+3. In `time_ctr_tick_cb()`, after the unconditional `device_reg_tick()` call, add the speed-low beep computation:
    ```c
    bool b_speed_low = false;
    if ((g_state == TIME_CTR_STATE_SESSION) || (g_state == TIME_CTR_STATE_EARNING))
    {
        uint32_t speed_x10 = time_ctr_current_speed_x10_get();
-       uint16_t min_spd   = config_mngr_min_speed_to_increment_time_kmh_x10_get();
+       uint16_t min_spd   = g_cfg_min_speed_kmh_x10;
        b_speed_low = (min_spd > 0U) && (speed_x10 > 0U) && (speed_x10 < (uint32_t)min_spd);
    }
-   buzzer_speed_low_update(b_speed_low);
+   /* Accumulate consecutive below-threshold ticks; reset when not low. */
+   if (b_speed_low)
+   {
+       if (g_speed_low_ticks < UINT16_MAX)
+       {
+           g_speed_low_ticks++;
+       }
+   }
+   else
+   {
+       g_speed_low_ticks = 0U;
+   }
+   buzzer_speed_low_update(b_speed_low && (g_speed_low_ticks >= g_cfg_low_speed_bz_thresh_s));
    ```
-   When `g_state` is `TIME_CTR_STATE_IDLE`, `b_speed_low` remains `false` and `buzzer_speed_low_update(false)` is called, which cleanly stops any residual speed-low beep.
+   When `g_state` is `TIME_CTR_STATE_IDLE`, `b_speed_low` remains `false`, `g_speed_low_ticks` is reset to zero, and `buzzer_speed_low_update(false)` is called, which cleanly stops any residual speed-low beep.
 
-3. In the `ESPORT_EVENT_SESSION_CLOSED` handler inside `time_counter.c` (where the state returns to `TIME_CTR_STATE_IDLE`), add an explicit `buzzer_speed_low_update(false)` call to stop the speed-low beep immediately without waiting for the next tick.
+   When `g_cfg_low_speed_bz_thresh_s == 0`: `g_speed_low_ticks` increments to 1 on the first below-threshold tick and `1 >= 0` is always true, so the beep fires immediately (original behaviour preserved).
+
+4. In the `ESPORT_EVENT_SESSION_CLOSED` handler inside `time_counter.c` (where the state returns to `TIME_CTR_STATE_IDLE`), add:
+   ```c
+   g_speed_low_ticks = 0U;
+   buzzer_speed_low_update(false);
+   ```
+   to stop the speed-low beep immediately and reset the counter without waiting for the next tick.
 
 **Notes**
 
@@ -2673,12 +2717,16 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 **Acceptance Criteria**
 
 - [ ] `idf.py build` succeeds with zero errors and warnings.
-- [ ] In `TIME_CTR_STATE_SESSION` or `TIME_CTR_STATE_EARNING` with `min_speed > 0`, `0 < speed < min_speed`: `buzzer_speed_low_update(true)` is called each tick; GPIO pulses HIGH for 100 ms once per second.
+- [ ] In `TIME_CTR_STATE_SESSION` or `TIME_CTR_STATE_EARNING` with `min_speed > 0`, `0 < speed < min_speed`: `buzzer_speed_low_update(true)` is **not** called until the speed has been low for `low_speed_buzzer_threshold_s` consecutive ticks.
+- [ ] After `low_speed_buzzer_threshold_s` consecutive below-threshold ticks: `buzzer_speed_low_update(true)` is called; GPIO pulses HIGH for 100 ms once per second.
+- [ ] If speed returns above the threshold before the delay expires: `g_speed_low_ticks` resets to 0 and no beep fires.
 - [ ] Speed reaches 0: `buzzer_speed_low_update(false)` is called; active speed-low beep stops immediately.
 - [ ] Speed reaches or exceeds `min_speed`: `buzzer_speed_low_update(false)` is called; no more speed-low beeps.
 - [ ] `min_speed == 0` (gate disabled): `buzzer_speed_low_update(false)` is called every tick; no speed-low beep is ever produced.
-- [ ] State is `TIME_CTR_STATE_IDLE`: `buzzer_speed_low_update(false)` is called; no speed-low beep produced.
-- [ ] `ESPORT_EVENT_SESSION_CLOSED` received: `buzzer_speed_low_update(false)` is called immediately; speed-low beep stops without waiting for the next tick.
+- [ ] `low_speed_buzzer_threshold_s == 0` (immediate): beep fires from the first below-threshold tick (identical to original behaviour).
+- [ ] State is `TIME_CTR_STATE_IDLE`: `buzzer_speed_low_update(false)` is called and `g_speed_low_ticks` is reset; no speed-low beep produced.
+- [ ] `ESPORT_EVENT_SESSION_CLOSED` received: `g_speed_low_ticks` is reset to 0 and `buzzer_speed_low_update(false)` is called immediately; speed-low beep stops without waiting for the next tick.
+- [ ] Config change (`ESPORT_EVENT_CONFIG_CHANGED`): `g_cfg_low_speed_bz_thresh_s` is refreshed from NVS; the new threshold takes effect on the next tick.
 - [ ] With `buzzer_enabled == false`: no GPIO toggle occurs regardless of speed or state.
 
 ---

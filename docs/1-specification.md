@@ -106,6 +106,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 | `min_speed_to_increment_time_kmh_x10`   | `min_spd_x10`  | uint16 | `30`            | 0   | 65535       | Minimum instantaneous speed in km/h × 10 required for a pulse to earn time credits.  Set to `0` to disable the gate.                                                                                                     |
 | `reward_counter_s`                      | `reward_ctr_s` | uint32 | `0`             | 0   | (unlimited) | **Legacy / migration only.** Read once at boot by `time_ctr_init()` to seed the current rider's device-registry counter when that slot is still zero. No longer written by the firmware after Feature 4. |
 | `buzzer_enabled`                        | `buzzer_en`    | uint8  | `1` (true)      | 0   | 1           | Enable/disable all buzzer audio feedback.  When `0` (false), all `buzzer_*` calls are no-ops and the GPIO stays LOW. |
+| `low_speed_buzzer_threshold_s`          | `bz_spd_thr_s` | uint16 | `3`             | 0   | 65535       | Number of consecutive seconds the speed must remain below the minimum before the speed-low buzzer beep begins.  Set to `0` for immediate feedback on the first below-threshold tick. |
 
 ---
 
@@ -130,11 +131,11 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 │  │  Manager    │           │       (ring buffer)              │   │
 │  └─────────────┘           └──────────────────────────────────┘   │
 │                                                                   │
-│  ┌─────────────────────────┐  ┌──────────────────────────────┐   │
-│  │     Device Registry     │  │        WiFi Manager          │   │
-│  │  (per-device counter,   │◀─▶│  STA + Always-On SoftAP(s)  │   │
-│  │   MAC filter, NVS)      │  │  NAT + per-MAC frame gate    │   │
-│  └─────────────────────────┘  └──────────────────────────────┘   │
+│  ┌─────────────────────────┐  ┌──────────────────────────────┐    │
+│  │     Device Registry     │  │        WiFi Manager          │    │
+│  │  (per-device counter,   │◀─▶│  STA + Always-On SoftAP(s)  │    │
+│  │   MAC filter, NVS)      │  │  NAT + per-MAC frame gate    │    │
+│  └─────────────────────────┘  └──────────────────────────────┘    │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  │                       HTTP Server                            │ │
@@ -371,7 +372,7 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
 - Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to `g_session_credits` (SESSION state) or directly to the current rider's device-registry counter (EARNING state). Pulses in IDLE state are ignored.
 - Listen for `ESPORT_EVENT_SESSION_OPENED` and start a one-shot timer for `soft_ap_start_threshold_s` seconds.
 - Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer, flush `g_session_credits` into the current rider's counter, and return to IDLE. If already EARNING, ignore the close event -- the AP stays on until the rider's counter drains.
-- Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, call `buzzer_speed_low_update(b_speed_low)` where `b_speed_low` is `true` when `g_state` is `TIME_CTR_STATE_SESSION` or `TIME_CTR_STATE_EARNING`, `min_speed > 0`, and `0 < current_speed < min_speed`. Then post `ESPORT_EVENT_COUNTER_CHANGED`.
+- Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, maintain a `g_speed_low_ticks` counter: increment it when the speed-low condition holds (`g_state` is SESSION or EARNING, `min_speed > 0`, `0 < current_speed < min_speed`); reset it to zero otherwise. Call `buzzer_speed_low_update(true)` only when the speed-low condition holds **and** `g_speed_low_ticks >= low_speed_buzzer_threshold_s`; call `buzzer_speed_low_update(false)` otherwise. Then post `ESPORT_EVENT_COUNTER_CHANGED`.
 - Post `ESPORT_EVENT_REWARD_AP_ON` when the threshold timer fires (SESSION -> EARNING transition).
 - Post `ESPORT_EVENT_REWARD_AP_OFF` when the EARNING state exits to IDLE (session closed while earning).
 - **Legacy migration:** `time_ctr_init()` reads `config_mngr_reward_counter_s_get()` and, if the returned value is non-zero and the current rider's counter is still zero, seeds the rider's counter with that value.
@@ -636,7 +637,7 @@ bool      device_reg_entry_is_connected(uint8_t idx);
 | `BUZZER_PATTERN_SESSION_QUALIFYING` | ST_IDLE → ST_QUALIFYING              | 5 units ON (250 ms)                               |
 | `BUZZER_PATTERN_SESSION_QUALIFIED`  | ST_QUALIFYING → ST_ACTIVE            | 10 units ON (500 ms)                              |
 | `BUZZER_PATTERN_SESSION_CLOSED`     | ST_ACTIVE → ST_IDLE (idle timeout)   | 2 ON, 1 OFF, 2 ON, 1 OFF, 2 ON (3 beeps)        |
-| `BUZZER_PATTERN_SPEED_LOW`          | Per tick: EARNING, 0 < speed < min   | 2 units ON (100 ms)                               |
+| `BUZZER_PATTERN_SPEED_LOW`          | Per tick: SESSION or EARNING, speed below min for ≥ `low_speed_buzzer_threshold_s` consecutive ticks   | 2 units ON (100 ms)                               |
 
 - **Interruption rule:** a new `buzzer_pattern_play()` call immediately interrupts the current pattern and starts the new one.  `buzzer_speed_low_update(false)` only stops a `SPEED_LOW` pattern; it does not interrupt other patterns.
 - Runtime enable/disable via `config_mngr_buzzer_enabled_get()`.  When disabled, all API calls are no-ops and the GPIO stays LOW.
@@ -1019,6 +1020,7 @@ Use the default NVS partition (`nvs`, 0x9000, 0x6000 from `sdkconfig`). No custo
 | `min_spd_x10`  | uint16 | min_speed_to_increment_time_kmh_x10   |
 | `reward_ctr_s` | uint32 | reward_counter_s (persisted counter)  |
 | `buzzer_en`    | uint8  | buzzer_enabled (0 = false, 1 = true)  |
+| `bz_spd_thr_s` | uint16 | low_speed_buzzer_threshold_s          |
 
 ### Namespace: `esport_log`
 
