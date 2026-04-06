@@ -307,7 +307,8 @@ static void session_trk_qualify_timer_cb(TimerHandle_t p_timer)
     (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_SESSION_OPENED, &qualify_pulses,
         sizeof(qualify_pulses), 0U);
 
-    ESP_LOGI(gp_tag, "QUALIFYING→ACTIVE: session open, start_utc=%" PRId64 " qualify_pulses=%" PRIu32,
+    ESP_LOGI(gp_tag,
+        "QUALIFYING→ACTIVE: session open, start_utc=%" PRId64 " qualify_pulses=%" PRIu32,
         g_session_start_utc, qualify_pulses);
 }
 

@@ -72,8 +72,8 @@ static volatile uint32_t g_session_credits = 0U;
 /** Handle for the 1-second periodic tick timer (created in #time_ctr_init, runs permanently). */
 static esp_timer_handle_t gp_tick_timer = NULL;
 
-/** Handle for the one-shot threshold timer that fires after #soft_ap_start_threshold_s seconds. */
-static esp_timer_handle_t gp_threshold_timer = NULL;
+/** Handle for the one-shot threshold timer that fires after #internet_gate_threshold_s seconds. */
+static esp_timer_handle_t gp_inet_gate_timer = NULL;
 
 /**
  * \brief Cached runtime configuration values; loaded at #time_ctr_init() and
@@ -141,7 +141,7 @@ esp_err_t time_ctr_init(void)
         .name            = "time_ctr_thresh",
     };
 
-    ret = esp_timer_create(&threshold_args, &gp_threshold_timer);
+    ret = esp_timer_create(&threshold_args, &gp_inet_gate_timer);
     if (ESP_OK != ret)
     {
         ESP_LOGE(gp_tag, "esp_timer_create (threshold) failed: %s", esp_err_to_name(ret));
@@ -374,7 +374,7 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
         return; /* Already in SESSION or EARNING - ignore. */
     }
 
-    uint32_t threshold    = config_mngr_soft_ap_start_threshold_s_get();
+    uint32_t threshold    = config_mngr_internet_gate_threshold_s_get();
     uint64_t threshold_us = (uint64_t)threshold * 1000000ULL;
 
     if (0U == threshold)
@@ -384,7 +384,7 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
     }
     else
     {
-        esp_err_t ret = esp_timer_start_once(gp_threshold_timer, threshold_us);
+        esp_err_t ret = esp_timer_start_once(gp_inet_gate_timer, threshold_us);
         if (ESP_OK != ret)
         {
             ESP_LOGE(gp_tag, "esp_timer_start_once failed: %s", esp_err_to_name(ret));
@@ -438,7 +438,7 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
 
     if (TIME_CTR_STATE_SESSION == prev_state)
     {
-        (void)esp_timer_stop(gp_threshold_timer);
+        (void)esp_timer_stop(gp_inet_gate_timer);
 
         buzzer_speed_low_update(false);
 
@@ -474,7 +474,7 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
 //--------------------------------------------------------------------------------------------------
 
 /**
- * \brief One-shot timer callback that fires after #soft_ap_start_threshold_s seconds.
+ * \brief One-shot timer callback that fires after #internet_gate_threshold_s seconds.
  *
  * Transitions from #TIME_CTR_STATE_SESSION to #TIME_CTR_STATE_EARNING, flushes
  * the accumulated session credits to the current rider's device_reg counter,

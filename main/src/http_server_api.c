@@ -134,7 +134,7 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
     bool     b_rew_ap      = wifi_mngr_reward_ap_is_active();
     uint8_t  ap_clients    = wifi_mngr_reward_ap_client_count();
     uint32_t counter_s     = time_ctr_get();
-    uint32_t threshold     = config_mngr_soft_ap_start_threshold_s_get();
+    uint32_t threshold     = config_mngr_internet_gate_threshold_s_get();
     uint32_t throughput    = wifi_mngr_reward_ap_throughput_kbps();
     uint32_t speed_x10     = time_ctr_current_speed_x10_get();
     uint16_t min_spd_cfg   = config_mngr_min_speed_to_increment_time_kmh_x10_get();
@@ -173,7 +173,7 @@ esp_err_t http_srv_api_status_handler(httpd_req_t * p_req)
         "  \"reward_ap_ip\": \"%s\",\n"
         "  \"reward_ap_clients\": %" PRIu8 ",\n"
         "  \"counter_s\": %" PRIu32 ",\n"
-        "  \"threshold_s\": %" PRIu32 ",\n"
+        "  \"inet_gate_threshold_s\": %" PRIu32 ",\n"
         "  \"session_state\": \"%s\",\n"
         "  \"session_start_utc\": %" PRId64 ",\n"
         "  \"session_duration_s\": %" PRIu32 ",\n"

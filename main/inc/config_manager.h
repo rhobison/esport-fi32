@@ -90,12 +90,14 @@ void config_mngr_soft_ap_password_get(char * p_buf, size_t len);
 uint16_t config_mngr_seconds_per_pulse_get(void);
 
 /**
- * \brief Return the counter threshold (seconds) at which the reward AP is
- * enabled.
+ * \brief Return the internet gate threshold in seconds.
+ *
+ * Session duration before earned credits start counting down and internet
+ * access becomes available.
  *
  * \return Threshold in seconds.
  */
-uint32_t config_mngr_soft_ap_start_threshold_s_get(void);
+uint32_t config_mngr_internet_gate_threshold_s_get(void);
 
 /**
  * \brief Return the wheel travel distance in centimetres per pulse.
@@ -184,13 +186,16 @@ esp_err_t config_mngr_soft_ap_password_set(const char * p_val);
 esp_err_t config_mngr_seconds_per_pulse_set(uint16_t val);
 
 /**
- * \brief Set and persist the reward AP enable threshold.
+ * \brief Set and persist the internet gate threshold.
  *
- * \param[in] val  Counter threshold in seconds (range: 0–UINT32_MAX).
+ * Session duration in seconds before earned credits start counting down
+ * and internet access becomes available.
+ *
+ * \param[in] val  Gate threshold in seconds (range: 0–UINT32_MAX).
  *
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */
-esp_err_t config_mngr_soft_ap_start_threshold_s_set(uint32_t val);
+esp_err_t config_mngr_internet_gate_threshold_s_set(uint32_t val);
 
 /**
  * \brief Set and persist the wheel travel distance per pulse.

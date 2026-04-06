@@ -4,7 +4,7 @@
  *
  * Maintains the exercise credit state machine.  Listens for
  * #ESPORT_EVENT_SESSION_OPENED and starts a one-shot timer for
- * \c soft_ap_start_threshold_s seconds.  When the timer fires the state
+ * \c internet_gate_threshold_s seconds.  When the timer fires the state
  * transitions to EARNING and accumulated session credits are flushed to the
  * current rider's #device_registry counter.
  *
@@ -27,7 +27,7 @@
  *   - \b SESSION: session confirmed open; threshold timer running; pulses
  *     accumulate in #g_session_credits.  Transitions to EARNING when the
  *     timer fires, or back to IDLE when the session closes (accumulator reset).
- *   - \b EARNING: session has been active for \c soft_ap_start_threshold_s;
+ *   - \b EARNING: session has been active for \c internet_gate_threshold_s;
  *     pulses add directly to the current rider's counter; device counters
  *     decrement via #device_reg_tick() in tick callback.
  *
