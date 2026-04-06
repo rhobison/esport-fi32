@@ -582,6 +582,7 @@ esp_err_t http_srv_init(void);
     ```
   - Trigger a NVS save when `counter_s` reaches 0 or every `DEVICE_REG_SAVE_INTERVAL_S` (60) seconds.
   - Post `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` after each tick.
+- `device_reg_entry_counter_set()` updates the counter **in RAM only**; it does not write to NVS. Persistence is deferred to the `device_reg_tick()` save policy above to avoid FLASH wear.
 - Persist entries as NVS blobs (`dev_0` ... `dev_3`), count as `dev_count` uint8, and rider index as `dev_rider` uint8 in namespace `esport_dev`.
 
 **Data model:**
