@@ -10,6 +10,8 @@ idf_component_register(
         esp_http_server
         log
         freertos
+    PRIV_REQUIRES
+        esp_app_format
     INCLUDE_DIRS
         "inc"
     SRCS

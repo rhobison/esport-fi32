@@ -21,6 +21,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -185,7 +186,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     httpd_resp_set_type(p_req, "text/html");
 
     /* Static HTML header */
-    static const char sc_page_hdr[] =
+    static const char sc_page_hdr_pre[] =
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         "<title>ESPort-fi32 Dashboard</title>"
@@ -203,8 +204,11 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "border-radius:3px;text-decoration:none;margin-right:.5em}"
         "svg{display:block;width:100%;height:auto}"
         "</style></head><body>"
-        "<h2>ESPort-fi32 &mdash; Status Dashboard</h2>";
-    (void)httpd_resp_sendstr_chunk(p_req, sc_page_hdr);
+        "<h2>ESPort-fi32 v";
+    (void)httpd_resp_sendstr_chunk(p_req, sc_page_hdr_pre);
+    (void)httpd_resp_sendstr_chunk(p_req, esp_app_get_description()->version);
+    static const char sc_page_hdr_post[] = " &mdash; Status Dashboard</h2>";
+    (void)httpd_resp_sendstr_chunk(p_req, sc_page_hdr_post);
 
     /* System section */
     (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>System</h3>");
@@ -267,7 +271,8 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     /* Session History table */
     (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>Session History (last 20)</h3>"
                                           "<table><tr><th>Start (local)</th><th>Duration</th>"
-                                          "<th>Avg Speed (km/h)</th><th>Pulses</th></tr>");
+                                          "<th>Avg Speed (km/h)</th><th>Pulses</th>"
+                                          "<th>Internet Earned</th></tr>");
 
     for (uint16_t i = 0U; i < hist_count; i++)
     {
@@ -284,14 +289,18 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         uint32_t d_s = p_rec->duration_s % 60U;
         uint16_t s_i = (uint16_t)(p_rec->avg_speed_kmh_x10 / 10U);
         uint16_t s_d = (uint16_t)(p_rec->avg_speed_kmh_x10 % 10U);
+        uint32_t e_h = p_rec->internet_earned_s / 3600U;
+        uint32_t e_m = (p_rec->internet_earned_s % 3600U) / 60U;
+        uint32_t e_s = p_rec->internet_earned_s % 60U;
 
         snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
             "<tr><td>%s%s</td>"
             "<td>%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 "</td>"
             "<td>%" PRIu16 ".%" PRIu16 "</td>"
-            "<td>%" PRIu32 "</td></tr>",
+            "<td>%" PRIu32 "</td>"
+            "<td>%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 "</td></tr>",
             local_str, p_rec->b_time_synced ? "" : " (*)", d_h, d_m, d_s, s_i, s_d,
-            p_rec->pulse_count);
+            p_rec->pulse_count, e_h, e_m, e_s);
         (void)httpd_resp_sendstr_chunk(p_req, p_buf);
     }
 

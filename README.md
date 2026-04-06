@@ -24,10 +24,11 @@ ESPort-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 - **Always-on Reward AP** — the Soft AP is active from boot; children's devices stay connected at all times. Internet access is gated per device, not by toggling the AP.
 - **Per-device internet access control** — a device registry (up to 4 entries) stores MAC, nickname, individual time counter, and enabled flag per device. An IP-layer filter enforces access: only registered, enabled devices with remaining credits can reach the internet.
 - **Current rider selection** — binds the bike sensor to one registered device; earned credits go to that device's counter.
-- **Exercise session tracking** — sessions are detected, timed, and stored in NVS as a ring buffer with start time, duration, distance, and average speed.
+- **Exercise session tracking** — sessions are detected, timed, and stored in NVS as a ring buffer with start time, duration, distance, average speed, and **internet time earned**.
 - **NTP time synchronisation** — date/time is synced at boot; a configurable POSIX timezone string converts UTC timestamps to local time.
 - **Always-available configuration portal** — a web UI is reachable via the home network IP or via the reward AP (`192.168.5.1`) at all times.
-- **Live status dashboard** — shows per-device counters and internet status, AP state, connected clients, NTP status, session history, bar charts, and export actions.
+- **Live status dashboard** — shows per-device counters and internet status, AP state, connected clients, NTP status, session history (with internet earned per session), bar charts, and export actions.
+- **Firmware versioning** — semantic version (`MAJOR.MINOR.PATCH`) set in `CMakeLists.txt` via `PROJECT_VER`, embedded in the firmware image, and displayed in the dashboard title.
 - **Device management on config page** — add, remove, rename devices; set per-device counter (h:mm:ss), toggle enabled, select current rider. Connected but unregistered stations are listed for quick registration (useful when Android MAC randomisation produces an unexpected address).
 - **REST JSON API** — for status (including per-device array), session history, CSV/JSON export, and daily activity aggregates (suitable for charts).
 - **Speed-gated crediting** — a configurable minimum speed (`min_speed_to_increment_time_kmh_x10`) prevents credits accumulating when pedalling too slowly. The gate is disabled when set to zero.

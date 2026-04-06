@@ -79,6 +79,16 @@ typedef struct
      * For example, 123 represents 12.3 km/h.  Zero if \c duration_s is zero.
      */
     uint16_t avg_speed_kmh_x10;
+
+    /**
+     * \brief Internet time earned during the session, in seconds.
+     *
+     * Computed at session close as \c pulse_count * \c seconds_per_pulse
+     * (the value of \c seconds_per_pulse cached at session start).  This is
+     * a theoretical maximum -- speed-gated pulses still contribute because
+     * counting them reflects the full physical effort.  Display in h:mm:ss.
+     */
+    uint32_t internet_earned_s;
 } session_trk_record_t;
 
 /**
