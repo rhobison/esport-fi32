@@ -304,7 +304,7 @@ bool     wifi_mngr_reward_ap_is_active(void);
 uint8_t  wifi_mngr_reward_ap_client_count(void);
 void     wifi_mngr_sta_ip_get(char *buf, size_t len);          /* dotted-decimal or "" */
 void     wifi_mngr_reward_ap_ip_get(char *buf, size_t len);    /* dotted-decimal or "" when inactive */
-uint32_t wifi_mngr_reward_ap_throughput_kbps(void);            /* combined RX+TX kbps over last 1-s interval; 0 when AP inactive */
+uint32_t wifi_mngr_reward_ap_throughput_kbps(void);            /* combined RX+TX kbps over last 1-s interval; 0 when AP inactive or 0 clients */
 ```
 
 ---
@@ -372,8 +372,8 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
 
 **Responsibilities:**
 - Maintain the **time counter** per device slot via the Device Registry (`device_reg_entry_counter_set/get`).
-- Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to `g_session_credits` (SESSION state) or directly to the current rider's device-registry counter (EARNING state). Pulses in IDLE state are ignored.
-- Listen for `ESPORT_EVENT_SESSION_OPENED` and start a one-shot timer for `soft_ap_start_threshold_s` seconds.
+- Listen for `ESPORT_EVENT_PULSE` events and add `seconds_per_pulse` to `g_session_credits` (SESSION state) or directly to the current rider's device-registry counter (EARNING state). Pulses in IDLE state are ignored (pulses during the qualification window are retroactively credited when `SESSION_OPENED` is received — see below).
+- Listen for `ESPORT_EVENT_SESSION_OPENED` (payload: `uint32_t` qualifying pulse count): transition IDLE→SESSION, seed `g_session_credits` with `qualifying_pulses * seconds_per_pulse` to retroactively credit the qualification window effort, and start a one-shot timer for `soft_ap_start_threshold_s` seconds.
 - Listen for `ESPORT_EVENT_SESSION_CLOSED`: if the session closes before the threshold timer fires (SESSION state), cancel the timer, flush `g_session_credits` into the current rider's counter, and return to IDLE. If already EARNING, ignore the close event -- the AP stays on until the rider's counter drains.
 - Run a **1-second periodic tick timer** that is started permanently in `time_ctr_init()` (never stopped). Each tick calls `device_reg_tick()` which handles per-device counter decrement, throughput gating, NVS save, and posts `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED`. After `device_reg_tick()`, maintain a `g_speed_low_ticks` counter: increment it when the speed-low condition holds (`g_state` is SESSION or EARNING, `min_speed > 0`, `0 < current_speed < min_speed`); reset it to zero otherwise. Call `buzzer_speed_low_update(true)` only when the speed-low condition holds **and** `g_speed_low_ticks >= low_speed_buzzer_threshold_s`; call `buzzer_speed_low_update(false)` otherwise. Then post `ESPORT_EVENT_COUNTER_CHANGED`.
 - Post `ESPORT_EVENT_REWARD_AP_ON` when the threshold timer fires (SESSION -> EARNING transition).
@@ -388,7 +388,8 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
         |                   IDLE state                         |
         |  current rider counter may be non-zero (paused)      |
         |                                                      |
-        |  On SESSION_OPENED: start threshold timer ->         |
+        |  On SESSION_OPENED: seed g_session_credits with   |
+        |    qualifying pulses, start threshold timer ->       |
         +------------------+-----------------------------------+
                            |  ESPORT_EVENT_SESSION_OPENED
                            v
@@ -467,6 +468,8 @@ esp_err_t time_ctr_counter_set(uint32_t val);        /* delegates to device_reg;
   - Reset state to idle.
 
 **Handling qualification pulses in session stats:** Pulses during the qualification window also count toward the confirmed session (pulse_count includes them all from potential_start).
+
+**Handling qualification pulses in time credits:** When the session is confirmed (QUALIFYING→ACTIVE), `session_tracker` posts `ESPORT_EVENT_SESSION_OPENED` with a `uint32_t` payload containing the qualifying pulse count. `time_counter` seeds `g_session_credits = qualifying_pulses * seconds_per_pulse` so that earned credits include the entire qualification effort. If the session fails qualification (idle gap before confirmation), the credits are discarded — no event is posted.
 
 **Re-read config on each session start** (re-read `start_session_interval_s`, `idle_session_interval_s`, `centimeters_per_pulse` from config_manager so changes apply to the next session without requiring a reboot).
 
@@ -561,9 +564,11 @@ esp_err_t http_srv_init(void);
 - Track a **current rider** index (`uint8_t`; `DEVICE_REG_NO_RIDER = 0xFF` when unset) persisted in NVS.
 - Expose `device_reg_mac_internet_allowed(mac)` called from the WiFi Manager input hook to gate IPv4 forwarding per source MAC. Returns `true` if the MAC matches an enabled entry with `counter_s > 0` that is not paused by the throughput gate.
 - Accept per-MAC byte counts from the WiFi Manager (`device_reg_mac_rx_bytes_add`, `device_reg_mac_tx_bytes_add`) and aggregate them into a per-second throughput figure updated on each `device_reg_tick()` call.
-- Implement `device_reg_tick()` called once per second from `time_ctr_tick_cb()`. For each connected, enabled entry with `counter_s > 0`:
-  - Compute `throughput_kbps` from accumulated RX+TX bytes since last tick.
-  - Apply the sliding-window traffic gate (same logic as the former global gate in Feature 3):
+- Implement `device_reg_tick()` called once per second from `time_ctr_tick_cb()`. For each device slot:
+  - Drain and reset the RX/TX byte accumulators (they accumulate even from background AP netif traffic such as DHCP or ARP probes, so they must be cleared every tick regardless of connection status).
+  - Check whether the device's MAC appears in the current AP station list (connection check).
+  - **Not connected:** set `throughput_kbps = 0`, reset `below_ticks` to 0, mark as paused, and skip to the next entry. This prevents background AP netif traffic from producing phantom throughput readings for devices that are not associated with the reward AP.
+  - **Connected:** compute `throughput_kbps` from the drained byte delta, then apply the sliding-window traffic gate:
     ```
     if throughput > dec_threshold:
         below_ticks[i] = 0; paused[i] = false
@@ -571,7 +576,7 @@ esp_err_t http_srv_init(void);
         below_ticks[i]++
         if timeout == 0 or below_ticks[i] >= timeout:
             paused[i] = true
-    if not paused[i]:
+    if not paused[i] and enabled and counter_s > 0:
         counter_s--
     ```
   - Trigger a NVS save when `counter_s` reaches 0 or every `DEVICE_REG_SAVE_INTERVAL_S` (60) seconds.
@@ -976,7 +981,9 @@ ESPORT_EVENT_PULSE
   -> session_tracker: update pulse count, last_pulse_time, manage timers
 
 ESPORT_EVENT_SESSION_OPENED (posted by session_tracker on QUALIFYING->ACTIVE)
-  -> time_counter: IDLE->SESSION, start one-shot threshold timer
+  -> time_counter: IDLE->SESSION
+                   seed g_session_credits with qualifying_pulses * spp
+                   start one-shot threshold timer
                   (soft_ap_start_threshold_s seconds)
 
 threshold timer fires
@@ -1134,7 +1141,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 | `ESPORT_EVENT_COUNTER_CHANGED`  | `uint32_t` (counter_s) | `time_counter`       | `http_server` (status cache)      |
 | `ESPORT_EVENT_REWARD_AP_ON`     | —                      | `time_counter`       | (logging, status)                 |
 | `ESPORT_EVENT_REWARD_AP_OFF`    | —                      | `time_counter`       | (logging, status)                 |
-| `ESPORT_EVENT_SESSION_OPENED`   | —                      | `session_tracker`    | `time_counter`                    |
+| `ESPORT_EVENT_SESSION_OPENED`   | `uint32_t` (qualifying pulse count) | `session_tracker`    | `time_counter`                    |
 | `ESPORT_EVENT_SESSION_CLOSED`   | `session_trk_record_t` | `session_tracker`    | `time_counter`, `session_log`     |
 | `ESPORT_EVENT_STA_CONNECTED`    | —                      | `wifi_manager`       | `time_manager` (start SNTP)       |
 | `ESPORT_EVENT_STA_DISCONNECTED` | —                      | `wifi_manager`       | (logging, status)                 |

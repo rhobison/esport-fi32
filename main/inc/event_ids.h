@@ -76,7 +76,10 @@ typedef enum
     /**
      * \brief An exercise session is confirmed open (QUALIFYING->ACTIVE transition).
      *
-     * No payload.  Posted by \c session_tracker once the qualification window
+     * Payload: \c uint32_t pulse count accumulated during the qualification window.
+     * The time counter seeds its session credits with these pulses so that
+     * qualifying effort is retroactively credited.
+     * Posted by \c session_tracker once the qualification window
      * (#start_session_interval_s) elapses without a disqualifying idle gap.
      */
     ESPORT_EVENT_SESSION_OPENED = 4,

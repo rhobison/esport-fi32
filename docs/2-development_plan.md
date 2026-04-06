@@ -365,6 +365,7 @@ Implement `session_tracker.c`: two-phase session detection (qualification + acti
    - `s_state = ST_ACTIVE`.
    - `s_session_start_utc = time_mngr_utc_get() - (esp_timer_get_time() - s_potential_start_us) / 1000000`.
    (Back-calculate start UTC from elapsed time since `s_potential_start_us`.)
+   - Post `ESPORT_EVENT_SESSION_OPENED` with a `uint32_t` payload = `s_pulse_count` (qualifying pulse count), so `time_counter` can retroactively credit the qualification window effort.
 
 6. `s_idle_timer` callback (fires after `idle_session_interval_s`):
    - If `s_state == ST_ACTIVE`:
@@ -1094,7 +1095,7 @@ if not g_paused:             // decrement while above threshold OR within grace 
 
 2. **§5.1 NVS Configuration Manager** — add getter/setter entries for both parameters to the public API table.
 
-3. **§5.2 WiFi Manager** — add `wifi_mngr_reward_ap_throughput_kbps()` → `uint32_t` to the public API table, with description: "Returns the combined RX+TX throughput on the reward AP in kbps over the last 1-second interval.  Returns `0` when the reward AP is inactive."
+3. **§5.2 WiFi Manager** — add `wifi_mngr_reward_ap_throughput_kbps()` → `uint32_t` to the public API table, with description: "Returns the combined RX+TX throughput on the reward AP in kbps over the last 1-second interval.  Returns `0` when the reward AP is inactive or when no clients are associated with the AP (background AP netif traffic such as DHCP and ARP probes is discarded)."
 
 4. **§5.5 Time Counter & Reward AP State Machine** — replace the unconditional decrement description with the sliding-window logic documented in the Feature 1 overview above.  Add `time_ctr_is_paused()` → `bool` to the public API.
 
@@ -1906,10 +1907,12 @@ bool      device_reg_entry_is_paused(uint8_t idx);                /* true when t
    c. **Per-device gate and decrement** — for each index `i < g_count`:
 
       Under `g_dev_mux` spinlock:
-      - Compute throughput: `delta = g_rx_bytes[i] + g_tx_bytes[i]`; set `g_throughput_kbps[i] = (uint32_t)(delta * 8U / 1000U)`; reset `g_rx_bytes[i] = 0; g_tx_bytes[i] = 0`.
+      - Drain accumulators: `delta = g_rx_bytes[i] + g_tx_bytes[i]`; reset `g_rx_bytes[i] = 0; g_tx_bytes[i] = 0`. Accumulators must always be drained to discard background AP netif traffic (DHCP, ARP probes) that may match a registered MAC.
+      - Check if `g_entries[i].mac` matches any `sta_list.sta[j].mac` (connection check).
+      - **Not connected:** set `g_throughput_kbps[i] = 0`, `g_below_ticks[i] = 0`, `g_dev_paused[i] = true`, and `continue` to the next entry. This prevents phantom throughput readings from background AP traffic for disconnected devices.
+      - **Connected:** set `g_throughput_kbps[i] = (uint32_t)(delta * 8U / 1000U)`.
       - Apply the sliding-window gate (identical logic to Feature 1 Overview pseudo-code, using `g_throughput_kbps[i]`, `threshold`, `timeout`, `g_below_ticks[i]`, `g_dev_paused[i]`).
-      - If `!g_dev_paused[i]` AND `g_entries[i].b_enabled` AND `g_entries[i].counter_s > 0`:
-        - Check if `g_entries[i].mac` matches any `sta_list.sta[j].mac`; if connected, decrement `g_entries[i].counter_s`, set `b_changed = true`, and if it just reached 0 set `b_zero[i] = true`.
+      - If `!g_dev_paused[i]` AND `g_entries[i].b_enabled` AND `g_entries[i].counter_s > 0`: decrement `g_entries[i].counter_s`, set `b_changed = true`, and if it just reached 0 set `b_zero[i] = true`.
 
       Exit spinlock.
 
@@ -2020,8 +2023,9 @@ Make the reward Soft AP start at boot and remain active permanently. Add per-dev
 - [ ] A registered device with `b_enabled == false` cannot ping an external address.
 - [ ] ARP and DHCP traffic is never blocked; unregistered devices always keep their IP lease.
 - [ ] Toggling `b_enabled` from `false` to `true` (via `device_reg_entry_enabled_set`) takes effect on the next frame (no AP restart required).
-- [ ] After a registered device sends traffic, `device_reg_entry_throughput_kbps_get()` returns a non-zero value on the following tick.
+- [ ] After a registered device sends traffic while connected to the AP, `device_reg_entry_throughput_kbps_get()` returns a non-zero value on the following tick.
 - [ ] Per-device byte counters reset to `0` each tick; `device_reg_entry_throughput_kbps_get()` returns `0` in the tick after the device goes idle.
+- [ ] `device_reg_entry_throughput_kbps_get()` returns `0` for a registered device that is not connected to the AP, even if the AP netif processes background traffic matching the device's MAC (e.g. DHCP, ARP).
 
 ---
 
@@ -2093,6 +2097,7 @@ Replace the global counter with per-device credit logic. Pulse credits go to the
 - [ ] `idf.py build` succeeds with zero errors and warnings.
 - [ ] The 1-second tick fires continuously from `time_ctr_init()` regardless of session state.
 - [ ] Pulses during `SESSION` state accumulate in `g_session_credits` and do **not** yet appear in the rider's `device_reg` counter.
+- [ ] On `ESPORT_EVENT_SESSION_OPENED`, `g_session_credits` is seeded with `qualifying_pulses * seconds_per_pulse` (retroactive qualifying credits); subsequent pulses in SESSION state add to this accumulator.
 - [ ] When the threshold timer fires, `g_session_credits` is flushed to the current rider's `device_reg` counter and the accumulator is reset to zero.
 - [ ] Pulses in `EARNING` state add directly to the current rider's `device_reg` counter.
 - [ ] `device_reg_tick()` is called unconditionally once per second from `time_ctr_tick_cb()`.
