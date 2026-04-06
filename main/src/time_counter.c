@@ -63,8 +63,13 @@ static time_ctr_state_t g_state = TIME_CTR_STATE_IDLE;
 /**
  * \brief Session credit accumulator; accumulates pulse credits during TIME_CTR_STATE_SESSION.
  *
- * Flushed to the current rider's device_reg counter when the threshold fires.
- * Reset to zero if the session closes before the threshold fires.
+ * Flushed to the current rider's device_reg counter when the threshold fires
+ * or when a session opens with the rider's counter already > 0 (gate bypass).
+ * If the session closes before the threshold fires and the rider's counter was
+ * zero at session start, the credits are **retained** here across sessions so
+ * that exercise effort is never lost.  The child cannot use the internet until
+ * the credits are flushed (i.e. the gate threshold is reached in a single
+ * session or a new session starts with counter > 0).
  * Protected by #g_spinlock.
  */
 static volatile uint32_t g_session_credits = 0U;
@@ -223,11 +228,11 @@ uint32_t time_ctr_get(void)
         return 0U;
     }
 
-    /* Include in-progress session credits so the dashboard shows live
-     * accumulation during SESSION state (before the threshold fires).
-     * Credits in EARNING state are already in the device registry counter. */
+    /* Always include pending session credits so the dashboard shows live
+     * accumulation during SESSION state and banked (gate-pending) credits in
+     * IDLE state.  In EARNING state g_session_credits is already zero. */
     portENTER_CRITICAL(&g_spinlock);
-    uint32_t session_credits = (TIME_CTR_STATE_SESSION == g_state) ? g_session_credits : 0U;
+    uint32_t session_credits = g_session_credits;
     portEXIT_CRITICAL(&g_spinlock);
 
     return device_reg_entry_counter_get(rider) + session_credits;
@@ -360,18 +365,61 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
         qualify_pulses = *(const uint32_t *)p_event_data;
     }
 
+    /* Check whether the current rider already has internet time banked in the
+     * device registry.  If so, the internet gate is bypassed: credits are
+     * flushed immediately and the state jumps straight to EARNING. */
+    uint8_t  rider           = device_reg_current_rider_get();
+    uint32_t current_counter = 0U;
+    if (DEVICE_REG_NO_RIDER != rider)
+    {
+        current_counter = device_reg_entry_counter_get(rider);
+    }
+
     portENTER_CRITICAL(&g_spinlock);
-    bool b_start = (TIME_CTR_STATE_IDLE == g_state);
+    bool     b_start         = (TIME_CTR_STATE_IDLE == g_state);
+    bool     b_bypass_gate   = false;
+    uint32_t credits_to_flush = 0U;
     if (b_start)
     {
-        g_state           = TIME_CTR_STATE_SESSION;
-        g_session_credits = qualify_pulses * (uint32_t)g_cfg_seconds_per_pulse;
+        /* Accumulate qualifying credits on top of any pending credits from a
+         * previous session that ended before the gate threshold fired. */
+        g_session_credits += qualify_pulses * (uint32_t)g_cfg_seconds_per_pulse;
+
+        if (current_counter > 0U)
+        {
+            /* Rider already has internet time -> bypass the gate, go to
+             * EARNING immediately and flush all pending session credits. */
+            g_state          = TIME_CTR_STATE_EARNING;
+            credits_to_flush = g_session_credits;
+            g_session_credits = 0U;
+            b_bypass_gate    = true;
+        }
+        else
+        {
+            g_state = TIME_CTR_STATE_SESSION;
+        }
     }
     portEXIT_CRITICAL(&g_spinlock);
 
     if (!b_start)
     {
         return; /* Already in SESSION or EARNING - ignore. */
+    }
+
+    if (b_bypass_gate)
+    {
+        /* Flush accumulated session credits to the rider's counter. */
+        if ((credits_to_flush > 0U) && (DEVICE_REG_NO_RIDER != rider))
+        {
+            (void)device_reg_entry_counter_set(rider, current_counter + credits_to_flush);
+        }
+
+        (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_REWARD_AP_ON, NULL, 0U, 0U);
+        ESP_LOGI(gp_tag,
+            "IDLE->EARNING: gate bypassed (counter %" PRIu32
+            "s > 0), %" PRIu32 "s session credits flushed",
+            current_counter, credits_to_flush);
+        return;
     }
 
     uint32_t threshold    = config_mngr_internet_gate_threshold_s_get();
@@ -397,8 +445,8 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
 
     ESP_LOGI(gp_tag,
         "IDLE->SESSION: session opened, threshold %" PRIu32 "s, qualify_pulses=%" PRIu32
-        " -> %" PRIu32 "s retroactive credits",
-        threshold, qualify_pulses, qualify_pulses * (uint32_t)g_cfg_seconds_per_pulse);
+        ", session_credits=%" PRIu32 "s (includes pending)",
+        threshold, qualify_pulses, g_session_credits);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -406,9 +454,14 @@ static void time_ctr_session_opened_handler(void * p_handler_arg, esp_event_base
 /**
  * \brief ESP event loop handler called when an exercise session closes.
  *
- * In #TIME_CTR_STATE_SESSION: cancels the threshold timer, resets
- * #g_session_credits to zero, and returns to #TIME_CTR_STATE_IDLE (no credits
- * are applied).  In #TIME_CTR_STATE_EARNING: transitions to IDLE and posts
+ * In #TIME_CTR_STATE_SESSION: cancels the threshold timer and returns to
+ * #TIME_CTR_STATE_IDLE.  Credits in #g_session_credits are **retained** (not
+ * flushed to the device counter and not discarded) so that exercise effort is
+ * preserved across sessions.  The child cannot use the internet until the
+ * gate threshold is reached in a subsequent session or the next session starts
+ * with an already-positive device counter (gate bypass).
+ *
+ * In #TIME_CTR_STATE_EARNING: transitions to IDLE and posts
  * #ESPORT_EVENT_REWARD_AP_OFF (device counters continue to drain normally via
  * the always-running tick timer).
  *
@@ -426,13 +479,16 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
     (void)p_event_data;
 
     portENTER_CRITICAL(&g_spinlock);
-    time_ctr_state_t prev_state       = g_state;
-    uint32_t         credits_to_flush = 0U;
+    time_ctr_state_t prev_state      = g_state;
+    uint32_t         pending_credits = g_session_credits;
     if ((TIME_CTR_STATE_SESSION == prev_state) || (TIME_CTR_STATE_EARNING == prev_state))
     {
-        g_state           = TIME_CTR_STATE_IDLE;
-        credits_to_flush  = g_session_credits;
-        g_session_credits = 0U;
+        g_state = TIME_CTR_STATE_IDLE;
+        if (TIME_CTR_STATE_EARNING == prev_state)
+        {
+            g_session_credits = 0U; /* already flushed in threshold_cb */
+        }
+        /* SESSION: keep g_session_credits so credits survive for next session */
     }
     portEXIT_CRITICAL(&g_spinlock);
 
@@ -442,25 +498,20 @@ static void time_ctr_session_closed_handler(void * p_handler_arg, esp_event_base
 
         buzzer_speed_low_update(false);
 
-        /* Flush accumulated session credits to the current rider's counter.
-         * Credits are earned from session start; the threshold only gates
-         * when internet access opens (ESPORT_EVENT_REWARD_AP_ON). */
-        if (credits_to_flush > 0U)
-        {
-            uint8_t rider = device_reg_current_rider_get();
-            if (DEVICE_REG_NO_RIDER != rider)
-            {
-                uint32_t current = device_reg_entry_counter_get(rider);
-                (void)device_reg_entry_counter_set(rider, current + credits_to_flush);
-            }
-        }
+        /* Credits are retained in g_session_credits (not flushed to the
+         * device counter).  The child's device_reg counter stays at its
+         * previous value so internet access is not granted prematurely.
+         * The pending credits will be flushed when a subsequent session
+         * reaches the gate threshold or when a session starts while the
+         * rider already has internet time (counter > 0). */
 
         uint32_t counter_val = time_ctr_get();
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_COUNTER_CHANGED, &counter_val,
             sizeof(counter_val), 0U);
         ESP_LOGI(gp_tag,
-            "SESSION->IDLE: session closed before threshold, %" PRIu32 " credits flushed to rider",
-            credits_to_flush);
+            "SESSION->IDLE: session closed before threshold, %" PRIu32
+            "s credits retained as pending",
+            pending_credits);
     }
     else if (TIME_CTR_STATE_EARNING == prev_state)
     {

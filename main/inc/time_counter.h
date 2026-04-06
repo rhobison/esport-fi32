@@ -13,8 +13,11 @@
  * accumulator (#g_session_credits).  Credits are flushed to the current
  * rider's #device_registry counter when the threshold fires.  If the session
  * closes (#ESPORT_EVENT_SESSION_CLOSED) before the threshold timer fires, the
- * threshold timer is cancelled and the accumulator is reset to zero with no
- * credits awarded.  Pulses in EARNING state add directly to the rider's
+ * threshold timer is cancelled but #g_session_credits are **retained** so that
+ * exercise effort is preserved.  The credits remain pending and will be
+ * flushed when a subsequent session reaches the gate threshold, or when a new
+ * session starts while the rider's device counter is already positive (gate
+ * bypass).  Pulses in EARNING state add directly to the rider's
  * #device_registry counter.
  *
  * The 1-second tick timer runs permanently from #time_ctr_init() and calls
