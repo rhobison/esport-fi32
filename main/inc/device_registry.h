@@ -149,7 +149,11 @@ esp_err_t device_reg_entry_nickname_set(uint8_t idx, const char * p_nickname);
 esp_err_t device_reg_entry_enabled_set(uint8_t idx, bool b_enabled);
 
 /**
- * \brief Set the internet time counter for the entry at \p idx and persist to NVS.
+ * \brief Set the internet time counter for the entry at \p idx (RAM only).
+ *
+ * Updates the in-RAM counter; NVS persistence is deferred to the next
+ * periodic save (every #DEVICE_REG_SAVE_INTERVAL_S seconds) or when the
+ * counter reaches zero inside #device_reg_tick().
  *
  * \param[in] idx       Entry index (0 to count-1).
  * \param[in] counter_s New counter value in seconds.

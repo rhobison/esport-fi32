@@ -425,7 +425,6 @@ esp_err_t device_reg_entry_counter_set(uint8_t idx, uint32_t counter_s)
     g_entries[idx].counter_s = counter_s;
     portEXIT_CRITICAL(&g_dev_mux);
 
-    (void)device_reg_entry_save(idx);
     (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_DEVICE_REGISTRY_CHANGED, NULL, 0U, 0U);
     return ESP_OK;
 }
