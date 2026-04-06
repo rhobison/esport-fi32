@@ -79,8 +79,8 @@ static const char * gp_tag = "http_srv_dashboard";
  * Dynamic sections are formatted with \c snprintf into the shared buffer
  * before each chunk is sent.  The page auto-refreshes every 5 seconds.
  *
- * Sections included: System (time, NTP, uptime), Wi-Fi, Exercise Counter,
- * Current Session, Session History (last 20), Session Graphs (two SVG bar
+ * Sections included: System (time, NTP, uptime), Wi-Fi, Current Session,
+ * Session History (last 20), Session Graphs (two SVG bar
  * charts over a 31-day window), Export Controls, and Navigation.
  *
  * \param[in] p_req  Incoming HTTP request.
@@ -149,8 +149,6 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     session_trk_live_status_t sess;
     session_trk_live_status_get(&sess);
 
-    uint16_t spd_int = (uint16_t)(sess.live_speed_kmh_x10 / 10U);
-    uint16_t spd_dec = (uint16_t)(sess.live_speed_kmh_x10 % 10U);
     uint32_t sess_h  = sess.duration_s / 3600U;
     uint32_t sess_m  = (sess.duration_s % 3600U) / 60U;
     uint32_t sess_sr = sess.duration_s % 60U;
@@ -228,30 +226,12 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<p>Reward AP:&nbsp;<span id=\"wifi-rew-ap\" class=\"%s\">%s</span>"
         "&nbsp; SSID:&nbsp;<b><span id=\"wifi-rew-ap-ssid\">%s</span></b>"
         "&nbsp; IP:&nbsp;<b><a id=\"wifi-rew-ap-ip\" href=\"http://%s/\">%s</a></b>"
-        "&nbsp; Clients:&nbsp;<b><span id=\"wifi-rew-ap-clients\">%" PRIu8 "</span></b></p></div>",
+        "&nbsp; Clients:&nbsp;<b><span id=\"wifi-rew-ap-clients\">%" PRIu8 "</span></b>"
+        "&nbsp; Traffic:&nbsp;<span id=\"ap-throughput\"><b>%" PRIu32
+        "</b></span>&nbsp;kbps</p></div>",
         b_sta ? "ok" : "err", b_sta ? "Connected" : "Disconnected", sta_ssid, sta_ip, sta_ip,
         b_rew_ap ? "ok" : "err", b_rew_ap ? "Active" : "Inactive", rew_ap_ssid, rew_ap_ip,
-        rew_ap_ip, ap_clients);
-    (void)httpd_resp_sendstr_chunk(p_req, p_buf);
-
-    /* Exercise Counter section */
-    (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>Exercise Counter</h3>");
-    snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
-        "<p>Counter:&nbsp;<b><span id=\"ctr-seconds\">%" PRIu32 "s</span></b>"
-        "&nbsp;(<span id=\"ctr-hms\">%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 "</span>)"
-        "&nbsp; Threshold:&nbsp;<b><span id=\"ctr-threshold\">%" PRIu32 "s</span></b></p>"
-        "<p>Reward AP:&nbsp;<span id=\"ctr-rew-ap\" class=\"%s\">%s</span></p>"
-        "<p>Traffic:&nbsp;<span id=\"ap-throughput\"><b>%" PRIu32 "</b></span>&nbsp;kbps</p>"
-        "<p>Current speed:&nbsp;<span id=\"current-speed\"><b>%" PRIu32 ".%" PRIu32
-        "</b></span>&nbsp;km/h</p>"
-        "<p>Pulse crediting:&nbsp;"
-        "<span id=\"speed-gate-indicator\" style=\"display:%s;\">&#8856; Gated (speed too "
-        "low)</span>"
-        "<span id=\"speed-credit-indicator\" style=\"display:%s;\">Crediting</span>"
-        "</p></div>",
-        counter_s, ctr_h, ctr_m, ctr_s_r, threshold, b_rew_ap ? "ok" : "err",
-        b_rew_ap ? "Active" : "Inactive", throughput, spd_ctr_int, spd_ctr_dec,
-        b_speed_gated ? "inline" : "none", b_speed_gated ? "none" : "inline");
+        rew_ap_ip, ap_clients, throughput);
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
 
     /* Devices section */
@@ -268,12 +248,20 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     /* Current Session section */
     (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\"><h3>Current Session</h3>");
     snprintf(p_buf, HTTP_SRV_HTML_BUF_LEN,
+        "<p>Counter:&nbsp;<b><span id=\"ctr-seconds\">%" PRIu32 "s</span></b>"
+        "&nbsp;(<span id=\"ctr-hms\">%" PRIu32 ":%02" PRIu32 ":%02" PRIu32 "</span>)"
+        "&nbsp; Threshold:&nbsp;<b><span id=\"ctr-threshold\">%" PRIu32 "s</span></b></p>"
         "<p>State:&nbsp;<b><span id=\"sess-state\">%s</span></b></p>"
-        "<p>Live Speed:&nbsp;<b><span id=\"sess-speed\">%" PRIu16 ".%" PRIu16
-        "&nbsp;km/h</span></b></p>"
+        "<p>Speed:&nbsp;<span id=\"current-speed\"><b>%" PRIu32 ".%" PRIu32 "</b></span>"
+        "&nbsp;km/h&nbsp; Pulse crediting:&nbsp;"
+        "<span id=\"speed-gate-indicator\" style=\"display:%s;\">&#8856; Gated (speed too"
+        " low)</span>"
+        "<span id=\"speed-credit-indicator\" style=\"display:%s;\">Crediting</span></p>"
         "<p>Duration:&nbsp;<b><span id=\"sess-duration\">%" PRIu32 ":%02" PRIu32 ":%02" PRIu32
         "</span></b></p></div>",
-        sess.p_state_name, spd_int, spd_dec, sess_h, sess_m, sess_sr);
+        counter_s, ctr_h, ctr_m, ctr_s_r, threshold, sess.p_state_name, spd_ctr_int, spd_ctr_dec,
+        b_speed_gated ? "inline" : "none", b_speed_gated ? "none" : "inline", sess_h, sess_m,
+        sess_sr);
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
 
     /* Session History table */
@@ -341,20 +329,13 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
             " fill=\"#555\">%.1f</text>"
             "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
             " fill=\"#555\">0</text>",
-            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_TOP, HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT,
-            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT, x_r, HTTP_SRV_SVG_BOT,
-            HTTP_SRV_SVG_LM, y_75, x_r, y_75,
-            HTTP_SRV_SVG_LM, y_50, x_r, y_50,
-            HTTP_SRV_SVG_LM, y_25, x_r, y_25,
-            HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_TOP + 4,
-            (float)max_speed_x10 / 10.0f,
-            HTTP_SRV_SVG_LM - 3, y_75 + 4,
-            (float)max_speed_x10 * 3.0f / 40.0f,
-            HTTP_SRV_SVG_LM - 3, y_50 + 4,
-            (float)max_speed_x10 / 20.0f,
-            HTTP_SRV_SVG_LM - 3, y_25 + 4,
-            (float)max_speed_x10 / 40.0f,
-            HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_BOT);
+            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_TOP, HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM,
+            HTTP_SRV_SVG_BOT, x_r, HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM, y_75, x_r, y_75,
+            HTTP_SRV_SVG_LM, y_50, x_r, y_50, HTTP_SRV_SVG_LM, y_25, x_r, y_25, HTTP_SRV_SVG_LM - 3,
+            HTTP_SRV_SVG_TOP + 4, (float)max_speed_x10 / 10.0f, HTTP_SRV_SVG_LM - 3, y_75 + 4,
+            (float)max_speed_x10 * 3.0f / 40.0f, HTTP_SRV_SVG_LM - 3, y_50 + 4,
+            (float)max_speed_x10 / 20.0f, HTTP_SRV_SVG_LM - 3, y_25 + 4,
+            (float)max_speed_x10 / 40.0f, HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_BOT);
         (void)httpd_resp_sendstr_chunk(p_req, p_buf);
     }
 
@@ -378,10 +359,8 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
                 " fill=\"#333\">%.1f</text>"
                 "<text x=\"%d\" y=\"%d\" font-size=\"8\" text-anchor=\"middle\""
                 " fill=\"#555\">%d</text>",
-                bx, by, bw, bar_h,
-                (float)avg_spd / 10.0f,
-                bx + bw / 2, lbl_y, (float)avg_spd / 10.0f,
-                bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
+                bx, by, bw, bar_h, (float)avg_spd / 10.0f, bx + bw / 2, lbl_y,
+                (float)avg_spd / 10.0f, bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
         }
         else
         {
@@ -426,16 +405,12 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
             " fill=\"#555\">%" PRIu32 "</text>"
             "<text x=\"%d\" y=\"%d\" font-size=\"9\" text-anchor=\"end\""
             " fill=\"#555\">0</text>",
-            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_TOP, HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT,
-            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT, x_r, HTTP_SRV_SVG_BOT,
-            HTTP_SRV_SVG_LM, y_75, x_r, y_75,
-            HTTP_SRV_SVG_LM, y_50, x_r, y_50,
-            HTTP_SRV_SVG_LM, y_25, x_r, y_25,
-            HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_TOP + 4, max_dur_min,
-            HTTP_SRV_SVG_LM - 3, y_75 + 4, max_dur_min * 3U / 4U,
-            HTTP_SRV_SVG_LM - 3, y_50 + 4, max_dur_min / 2U,
-            HTTP_SRV_SVG_LM - 3, y_25 + 4, max_dur_min / 4U,
-            HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_BOT);
+            HTTP_SRV_SVG_LM, HTTP_SRV_SVG_TOP, HTTP_SRV_SVG_LM, HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM,
+            HTTP_SRV_SVG_BOT, x_r, HTTP_SRV_SVG_BOT, HTTP_SRV_SVG_LM, y_75, x_r, y_75,
+            HTTP_SRV_SVG_LM, y_50, x_r, y_50, HTTP_SRV_SVG_LM, y_25, x_r, y_25, HTTP_SRV_SVG_LM - 3,
+            HTTP_SRV_SVG_TOP + 4, max_dur_min, HTTP_SRV_SVG_LM - 3, y_75 + 4, max_dur_min * 3U / 4U,
+            HTTP_SRV_SVG_LM - 3, y_50 + 4, max_dur_min / 2U, HTTP_SRV_SVG_LM - 3, y_25 + 4,
+            max_dur_min / 4U, HTTP_SRV_SVG_LM - 3, HTTP_SRV_SVG_BOT);
         (void)httpd_resp_sendstr_chunk(p_req, p_buf);
     }
 
@@ -457,10 +432,8 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
                 " fill=\"#333\">%" PRIu32 "</text>"
                 "<text x=\"%d\" y=\"%d\" font-size=\"8\" text-anchor=\"middle\""
                 " fill=\"#555\">%d</text>",
-                bx, by, bw, bar_h,
-                dur_min,
-                bx + bw / 2, lbl_y, dur_min,
-                bx + bw / 2, HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
+                bx, by, bw, bar_h, dur_min, bx + bw / 2, lbl_y, dur_min, bx + bw / 2,
+                HTTP_SRV_SVG_BOT + 11, p_bins[d].mday);
         }
         else
         {
@@ -516,9 +489,6 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "e=document.getElementById('ctr-seconds');if(e)e.textContent=d.counter_s+'s';"
         "e=document.getElementById('ctr-hms');if(e)e.textContent=fmtHms(d.counter_s);"
         "e=document.getElementById('ctr-threshold');if(e)e.textContent=d.threshold_s+'s';"
-        "e=document.getElementById('ctr-rew-ap');"
-        "if(e){e.textContent=d.reward_ap_active?'Active':'Inactive';e.className=d.reward_ap_active?"
-        "'ok':'err';}"
         "e=document.getElementById('ap-throughput');"
         "if(e)e.innerHTML='<b>'+d.reward_ap_throughput_kbps+'</b>';"
         "e=document.getElementById('current-speed');"
@@ -545,8 +515,6 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "tbody.innerHTML='<tr><td colspan=\"5\">No devices registered.</td></tr>';}"
         "}"
         "e=document.getElementById('sess-state');if(e)e.textContent=d.session_state;"
-        "e=document.getElementById('sess-speed');"
-        "if(e)e.innerHTML=(d.live_speed_kmh_x10/10).toFixed(1)+'&nbsp;km/h';"
         "e=document.getElementById('sess-duration');if(e)e.textContent=fmtHms(d.session_duration_s)"
         ";"
         "}).catch(function(){});"

@@ -534,10 +534,8 @@ Add the HTML status dashboard (`GET /`) to `http_server.c`.
    - Include an inline `<script>` block with a `setInterval(refresh, 2000)` loop (plus an immediate `refresh()` call on load) that fetches `/api/status` and updates every live span in-place.
    - Sections and fields as specified in §6.1:
      - **System**: current local time (formatted), NTP sync status, uptime.
-     - **Wi-Fi**: STA status + SSID + IP, reward AP status.
-     - **Reward AP**: SSID, active/inactive, connected client count.
-     - **Exercise Counter**: counter (seconds + `h:mm:ss`), threshold, AP indicator.
-     - **Current Session**: state label (Idle / Qualifying / Active), live speed.
+     - **Wi-Fi**: STA status + SSID + IP, reward AP status, SSID, connected client count, reward AP traffic (kbps).
+     - **Current Session**: counter (s + `h:mm:ss`), threshold, state label (Idle / Qualifying / Active), current speed (km/h), pulse-crediting status.
      - **Session History**: table of last 20 sessions (start local time, duration `h:mm:ss`, avg speed, pulse count).
        - **Session Graphs**: two bar charts (daily avg speed and daily total duration) using data from `/api/sessions/daily`.
        - **Export Reports**: CSV and JSON download controls linked to `/api/sessions/export`.
@@ -556,7 +554,7 @@ Add the HTML status dashboard (`GET /`) to `http_server.c`.
 - [ ] `GET /` returns HTTP 200 with valid HTML.
 - [ ] Page renders correctly in a browser (test via `curl` for structure validation).
 - [ ] All data sections from spec §6.1 are present.
-- [ ] Live fields (System, Wi-Fi, Exercise Counter, Current Session) update every 2 s via JS fetch without a full page reload.
+- [ ] Live fields (System, Wi-Fi, Current Session) update every 2 s via JS fetch without a full page reload.
 - [ ] No `<meta http-equiv="refresh">` tag is present.
 - [ ] Session history table shows up to 20 rows.
 - [ ] Unsynced sessions are marked with `(*)`.
