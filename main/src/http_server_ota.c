@@ -104,7 +104,7 @@ esp_err_t http_srv_ota_get_handler(httpd_req_t * p_req)
         "<h1>ESPort-fi32 -- Firmware Update</h1>");
 
     /* Running firmware section */
-    char buf[128];
+    static char buf[128];
     (void)snprintf(buf, sizeof(buf),
         "<div class=\"card\"><h2>Running Firmware</h2>"
         "<p>Version: <strong>%s</strong></p></div>",
@@ -199,8 +199,8 @@ esp_err_t http_srv_ota_post_handler(httpd_req_t * p_req)
         return ESP_FAIL;
     }
 
-    char buf[OTA_MNGR_RECV_BUF_SIZE];
-    int  received;
+    static char buf[OTA_MNGR_RECV_BUF_SIZE];
+    int         received;
 
     for (;;)
     {
@@ -311,7 +311,7 @@ esp_err_t http_srv_ota_pwd_get_handler(httpd_req_t * p_req)
         (void)httpd_resp_sendstr_chunk(p_req, "<p class=\"ok\">Password saved successfully.</p>");
     }
 
-    char form_buf[512];
+    static char form_buf[512];
     (void)snprintf(form_buf, sizeof(form_buf),
         "<div class=\"card\"><h2>Change OTA Password</h2>"
         "<form method=\"POST\" action=\"/ota/pwd\">"
@@ -380,10 +380,10 @@ esp_err_t http_srv_ota_pwd_post_handler(httpd_req_t * p_req)
     p_body[received] = '\0';
 
     /* Parse fields. */
-    char current_pwd[HTTP_SRV_OTA_FIELD_MAX];
-    char new_pwd[HTTP_SRV_OTA_FIELD_MAX];
-    char confirm_pwd[HTTP_SRV_OTA_FIELD_MAX];
-    char enc_val[HTTP_SRV_FORM_VALUE_ENC_MAX_LEN + 1U];
+    static char current_pwd[HTTP_SRV_OTA_FIELD_MAX];
+    static char new_pwd[HTTP_SRV_OTA_FIELD_MAX];
+    static char confirm_pwd[HTTP_SRV_OTA_FIELD_MAX];
+    static char enc_val[HTTP_SRV_FORM_VALUE_ENC_MAX_LEN + 1U];
 
     current_pwd[0] = '\0';
     new_pwd[0]     = '\0';
@@ -472,7 +472,7 @@ static bool http_srv_ota_auth_check(httpd_req_t * p_req)
         return false;
     }
 
-    char hdr_buf[HTTP_SRV_OTA_AUTH_HDR_MAX];
+    static char hdr_buf[HTTP_SRV_OTA_AUTH_HDR_MAX];
     if (ESP_OK != httpd_req_get_hdr_value_str(p_req, "Authorization", hdr_buf, sizeof(hdr_buf)))
     {
         (void)httpd_resp_set_status(p_req, "401 Unauthorized");
@@ -491,9 +491,9 @@ static bool http_srv_ota_auth_check(httpd_req_t * p_req)
     }
 
     /* Base64-decode the credential portion. */
-    char decoded[HTTP_SRV_OTA_DECODED_MAX + 1U];
-    int  dec_len = http_srv_ota_base64_decode(hdr_buf + HTTP_SRV_OTA_BASIC_PREFIX_LEN, decoded,
-         sizeof(decoded));
+    static char decoded[HTTP_SRV_OTA_DECODED_MAX + 1U];
+    int dec_len = http_srv_ota_base64_decode(hdr_buf + HTTP_SRV_OTA_BASIC_PREFIX_LEN, decoded,
+        sizeof(decoded));
 
     if (dec_len < 0)
     {

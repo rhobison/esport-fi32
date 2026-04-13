@@ -134,11 +134,11 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 │  │  Manager    │           │       (ring buffer)              │   │
 │  └─────────────┘           └──────────────────────────────────┘   │
 │                                                                   │
-│  ┌─────────────────────────┐  ┌──────────────────────────────┐    │
-│  │     Device Registry     │  │        WiFi Manager          │    │
-│  │  (per-device counter,   │◀─▶│  STA + Always-On SoftAP(s)  │    │
-│  │   MAC filter, NVS)      │  │  NAT + per-MAC frame gate    │    │
-│  └─────────────────────────┘  └──────────────────────────────┘    │
+│  ┌─────────────────────────┐   ┌──────────────────────────────┐   │
+│  │     Device Registry     │   │        WiFi Manager          │   │
+│  │  (per-device counter,   │◀─▶│  STA + Always-On SoftAP(s)   │   │
+│  │   MAC filter, NVS)      │   │  NAT + per-MAC frame gate    │   │
+│  └─────────────────────────┘   └──────────────────────────────┘   │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────────┐ │
 │  │                       HTTP Server                            │ │
@@ -388,17 +388,17 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
         |                   IDLE state                         |
         |  current rider counter may be non-zero (paused)      |
         |                                                      |
-        |  On SESSION_OPENED: check counter & gate lock ->   |
-        |    bypass if (counter>0 && lock=false)              |
+        |  On SESSION_OPENED: check counter & gate lock ->     |
+        |    bypass if (counter>0 && lock=false)               |
         +------------------+-----------------------------------+
                            |  ESPORT_EVENT_SESSION_OPENED
                            v
         +------------------------------------------------------+
         |                SESSION state                         |
-        |  Gate lock = true for this rider                    |
+        |  Gate lock = true for this rider                     |
         |                                                      |
-        |  On pulse:   rider counter += spp (NVS-persisted)   |
-        |  time_ctr_get() = device_reg counter                |
+        |  On pulse:   rider counter += spp (NVS-persisted)    |
+        |  time_ctr_get() = device_reg counter                 |
         |  On SESSION_CLOSED: cancel timer, -> IDLE            |
         |    (lock stays true; credits already in NVS)         |
         +------------------+-----------------------------------+
@@ -409,7 +409,7 @@ uint32_t  pulse_in_speed_kmh_x10_get(void);      /* cpp_cm * 360 / last_interval
         |                EARNING state                         |
         |  Gate lock = false; internet open per-device         |
         |                                                      |
-        |  On pulse:  rider counter += spp (NVS-persisted)    |
+        |  On pulse:  rider counter += spp (NVS-persisted)     |
         |  On tick:   device_reg_tick() decrements all enabled |
         |             unlocked devices with internet access    |
         +------------------+-----------------------------------+
@@ -1087,7 +1087,7 @@ so that no flash byte goes unused across the full 4 MB device.
 | `ap_ssid`      | string | Reward AP SSID                        |
 | `ap_pwd`       | string | Reward AP password                    |
 | `spp`          | uint16 | seconds_per_pulse                     |
-| `inet_gate_s`    | uint32 | internet_gate_threshold_s             |
+| `inet_gate_s`  | uint32 | internet_gate_threshold_s             |
 | `cpp`          | uint32 | centimeters_per_pulse                 |
 | `idle_s`       | uint16 | idle_session_interval_s               |
 | `start_s`      | uint16 | start_session_interval_s              |
@@ -1117,7 +1117,7 @@ so that no flash byte goes unused across the full 4 MB device.
 | `_pad`              | 9      | uint8_t[1] | reserved                                |
 | `duration_s`        | 10     | uint16_t   | session duration in seconds (max ~18 h) |
 | `pulse_count`       | 12     | uint16_t   | total pulses (max 65535)                |
-| `avg_speed_kmh_x10` | 14     | uint16_t   | km/h x 10 (e.g. 123 = 12.3 km/h)       |
+| `avg_speed_kmh_x10` | 14     | uint16_t   | km/h x 10 (e.g. 123 = 12.3 km/h)        |
 | `internet_earned_s` | 16     | uint32_t   | pulse_count * seconds_per_pulse         |
 
 > Total: 20 bytes x 50 entries = 1000 bytes plus ~50 bytes for metadata keys.
