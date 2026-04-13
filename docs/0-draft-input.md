@@ -45,3 +45,4 @@ The buzzer will be used in the following situations:
     - When a session is closed, 3 short beeps of 2 units should be issued in sequence, with 1 unit off between them: (2 units ON, 1 unit OFF, 2 units ON, 1 unit OFF, 2 units ON).
     - All beep timings should be defined as a constant (#define, for example) according to the number of beep units.
 There must be a way to disable the buzzer in the `/config` page. -- planned.
+6. Implement a password to access the config page. Before the config page is displayed, the user is asked to enter a password (similar to the OTA password, basic auth). The initial/default password is `esport-fi32`. Once in the configuration page, the user has the option to change the password. A reset method must be implemented: an option is to have the BOOT button pressed for at least 5 secs during runtime to reset the password. Both config and OTA passwords must be reset in this process. A long beep of 50 buzzer units must be issued.
