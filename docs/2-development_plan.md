@@ -1033,6 +1033,12 @@ This section tracks incremental improvements beyond the base specification.  Eac
 | 5.4   | 5       | Time Counter — speed-low beep integration      | `time_counter.c`                                                       |
 | 5.5   | 5       | HTTP Server — buzzer enable config field       | `http_server_config.c`                                                 |
 | 5.6   | 5       | Spec Update                                    | `docs/1-specification.md`                                              |
+| 6.1   | 6       | Config Manager — config password param         | `config_manager.c/h`                                                   |
+| 6.2   | 6       | HTTP Config Auth — Basic Auth guard            | `http_server_config.c/h`, `http_server_ota.c`                          |
+| 6.3   | 6       | HTTP Config Password Change Page               | `http_server_config.c/h`, `http_server.c`                              |
+| 6.4   | 6       | Button Reset Module — BOOT long-press reset    | `button_reset.c/h`, `Kconfig.projbuild`, `CMakeLists.txt`             |
+| 6.5   | 6       | Integration & Build Verification               | `main.c`, `http_server.c`                                              |
+| 6.6   | 6       | Spec & Document Update                         | `docs/1-specification.md`, `docs/2-development_plan.md`                |
 
 ---
 
@@ -2827,3 +2833,419 @@ The qualifying gap-reset path in `session_tracker.c` (ST_QUALIFYING → ST_IDLE 
 - [ ] §7.1 Boot Sequence includes `buzzer_init()` after `config_mngr_init()`.
 - [ ] §8 includes `"buzzer_en"` (`uint8`) in the `esport_cfg` key table.
 - [ ] Module Prefix Table includes `buzzer` | `buzzer_` | `BUZZER_`.
+
+---
+
+## Feature 6 — Config Page Password Protection
+
+### Overview
+
+The configuration page (`/config`) is currently accessible without authentication.  This feature
+adds HTTP Basic Auth to all configuration endpoints, mirroring the pattern already used for the
+OTA firmware update page.  A single admin password is stored in NVS, with a factory default of
+`esport-fi32`.  A dedicated password-change page (`/config/pwd`) lets the user update the password
+after authenticating.
+
+A physical password-reset mechanism uses the ESP32-C6 BOOT button (GPIO 9): holding it for 5
+seconds during runtime resets **both** the config and OTA passwords to their factory defaults and
+plays a long buzzer confirmation beep.
+
+### Design Decisions
+
+- **Authentication method:** HTTP Basic Auth, identical to OTA.  The fixed username is `"admin"`.
+- **NVS storage:** config password stored in the existing `esport_cfg` namespace under key
+  `"cfg_pwd"`.  The OTA namespace `esport_ota` is not changed.
+- **Protected endpoints:** `GET /config`, `POST /config`, `POST /config/reset`,
+  `GET /config/pwd`, `POST /config/pwd` — all require authentication.
+- **Password reset:** a new `button_reset` module monitors GPIO 9 (configurable via Kconfig)
+  using a 100 ms periodic `esp_timer`.  On detecting a 5-second continuous press it resets both
+  passwords and plays a `BUZZER_PATTERN_PASSWORD_RESET` pattern (50 buzzer units = 2.5 s beep).
+- **URI slot budget:** two new endpoints (`GET /config/pwd`, `POST /config/pwd`) require
+  increasing `cfg.max_uri_handlers` from `13U` to `15U` in `http_server.c`.
+
+### New Configuration Parameter
+
+| Parameter         | Type   | NVS namespace | NVS key     | Default          | Max length |
+| ----------------- | ------ | ------------- | ----------- | ---------------- | ---------- |
+| `config_password` | string | `esport_cfg`  | `"cfg_pwd"` | `"esport-fi32"` | 63 chars   |
+
+---
+
+### Phase 6.1 — Config Manager: Config Password Parameter
+
+**Goal:** Add getter, setter, and credential-check functions for the config page password in the
+configuration manager module.
+
+**Inputs**
+- `main/inc/config_manager.h`, `main/src/config_manager.c` (existing)
+
+**Tasks**
+
+1. **`main/inc/config_manager.h`** — declare:
+   - `#define CONFIG_MNGR_CFG_PASSWORD_MAX_LEN (63U)` — maximum password length (excluding NUL).
+   - `#define CONFIG_MNGR_CFG_PASSWORD_DEFAULT ("esport-fi32")` — factory default.
+   - `#define CONFIG_MNGR_CFG_HTTP_USERNAME ("admin")` — fixed HTTP Basic Auth username.
+   ```c
+   esp_err_t config_mngr_cfg_password_get(char * p_buf, size_t len);
+   esp_err_t config_mngr_cfg_password_set(const char * p_password);
+   bool      config_mngr_cfg_credentials_check(const char * p_password);
+   ```
+   Follow the existing Doxygen comment style (multi-line, `\brief`, parameter directions, blank
+   line before `\return`).
+
+2. **`main/src/config_manager.c`** — implement:
+   - `config_mngr_cfg_password_get()`: open `esport_cfg` read-only, read string key `"cfg_pwd"`,
+     fall back to `CONFIG_MNGR_CFG_PASSWORD_DEFAULT` if not found, close handle.
+   - `config_mngr_cfg_password_set()`: validate length (1–63), open `esport_cfg` read-write,
+     write string key `"cfg_pwd"`, commit, close handle.
+   - `config_mngr_cfg_credentials_check()`: read stored password via
+     `config_mngr_cfg_password_get()`, compare with `strcmp`.  Return `true` on match.
+   - In `config_mngr_init()`: read `"cfg_pwd"` — if `ESP_ERR_NVS_NOT_FOUND`, write factory
+     default and commit.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `config_mngr_cfg_password_set("test123")` returns `ESP_OK`.
+- [ ] `config_mngr_cfg_credentials_check("test123")` returns `true` after set.
+- [ ] `config_mngr_cfg_credentials_check("wrong")` returns `false`.
+- [ ] Factory default `"esport-fi32"` is applied when NVS key is absent.
+- [ ] Value survives `config_mngr_init()` reinit (simulated reboot).
+- [ ] Password longer than 63 chars is rejected by the setter.
+- [ ] Empty password (`""`) is rejected by the setter.
+
+---
+
+### Phase 6.2 — HTTP Config Auth: Basic Auth Guard
+
+**Goal:** Add HTTP Basic Auth to all existing config endpoints (`GET /config`, `POST /config`,
+`POST /config/reset`), using the same pattern as `http_srv_ota_auth_check()`.
+
+**Inputs**
+- `main/src/http_server_config.c`, `main/inc/http_server_config.h` (existing)
+- `main/src/http_server_ota.c` — reference for auth check and base64 decode patterns.
+- `config_manager.h` (Phase 6.1 output)
+
+**Tasks**
+
+1. **`main/inc/http_server_config.h`** — add internal constants:
+   ```c
+   #define HTTP_SRV_CFG_AUTH_HDR_MAX     (256U)
+   #define HTTP_SRV_CFG_BASIC_PREFIX_LEN (6U)
+   #define HTTP_SRV_CFG_DECODED_MAX      (192U)
+   ```
+
+2. **`main/src/http_server_config.c`** — implement:
+   - `static bool http_srv_cfg_auth_check(httpd_req_t * p_req)` — mirrors
+     `http_srv_ota_auth_check()`:
+     1. Read `"Authorization"` header; if absent → 401 +
+        `WWW-Authenticate: Basic realm="esport-fi32 Config"`.
+     2. Verify `"Basic "` prefix.
+     3. Base64-decode credentials (reuse `http_srv_base64_decode()` — see note below).
+     4. Split on `':'`, verify username == `CONFIG_MNGR_CFG_HTTP_USERNAME` and password via
+        `config_mngr_cfg_credentials_check()`.
+     5. Return `true` on success, `false` on any failure (401 already sent).
+   - All large buffers (`hdr_buf`, `decoded`) must be `static` (handlers are serialised by httpd).
+   - Add `if (!http_srv_cfg_auth_check(p_req)) { return ESP_OK; }` as the first line of:
+     - `http_srv_config_get_handler()`
+     - `http_srv_config_post_handler()`
+     - `http_srv_config_reset_handler()`
+
+3. **Base64 decode reuse** — the base64 decode function `http_srv_ota_base64_decode()` is currently
+   `static` in `http_server_ota.c`.  To share it:
+   - Move the declaration to `http_server_utils.h` as
+     `int http_srv_base64_decode(const char * p_in, char * p_out, size_t out_len)`.
+   - Move the implementation to `http_server_utils.c` (remove `static`; rename from
+     `http_srv_ota_base64_decode` to `http_srv_base64_decode`).
+   - Update `http_server_ota.c` to call `http_srv_base64_decode()` instead.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `GET /config` without credentials returns HTTP 401 with `WWW-Authenticate` header.
+- [ ] `GET /config` with valid `Authorization: Basic <base64(admin:esport-fi32)>` returns HTTP 200.
+- [ ] `POST /config` without credentials returns HTTP 401.
+- [ ] `POST /config/reset` without credentials returns HTTP 401.
+- [ ] Wrong password returns HTTP 401.
+- [ ] Wrong username returns HTTP 401.
+- [ ] OTA auth continues to work unchanged (no regression).
+- [ ] `http_srv_ota_base64_decode` no longer exists — replaced by `http_srv_base64_decode` in
+      utils.
+
+---
+
+### Phase 6.3 — HTTP Config Password Change Page
+
+**Goal:** Add a dedicated password-change page (`GET /config/pwd`, `POST /config/pwd`) for the
+config page password, following the same design as the OTA password change page (`/ota/pwd`).
+
+**Inputs**
+- `main/src/http_server_config.c`, `main/inc/http_server_config.h` (Phase 6.2 output)
+- `main/src/http_server_ota.c` — reference for `/ota/pwd` GET/POST handlers
+- `main/src/http_server.c` — URI registration
+
+**Tasks**
+
+1. **`main/inc/http_server_config.h`** — declare two new handlers:
+   ```c
+   esp_err_t http_srv_config_pwd_get_handler(httpd_req_t * p_req);
+   esp_err_t http_srv_config_pwd_post_handler(httpd_req_t * p_req);
+   ```
+
+2. **`main/src/http_server_config.c`** — implement:
+   - `http_srv_config_pwd_get_handler()`:
+     1. Call `http_srv_cfg_auth_check()` — 401 if not authenticated.
+     2. Serve an HTML form with fields: current password, new password, confirm new password.
+     3. If query string contains `saved=1`, show a success message.
+     4. Include a "Back to Configuration" navigation link.
+   - `http_srv_config_pwd_post_handler()`:
+     1. Call `http_srv_cfg_auth_check()` — 401 if not authenticated.
+     2. Read and URL-decode form fields: `current_pwd`, `new_pwd`, `confirm_pwd`.
+     3. Validate current password via `config_mngr_cfg_credentials_check()`.
+     4. Validate new password length (1–`CONFIG_MNGR_CFG_PASSWORD_MAX_LEN`).
+     5. Validate `new_pwd == confirm_pwd`.
+     6. Call `config_mngr_cfg_password_set()`.
+     7. On success: redirect to `GET /config/pwd?saved=1` (HTTP 303).
+     8. On validation failure: respond HTTP 400 with error description.
+   - Large buffers (`form_buf`, `enc_val`, password fields) must be `static`.
+
+3. **`main/src/http_server.c`** — register two new URI handlers:
+   - `{ .uri = "/config/pwd", .method = HTTP_GET,  .handler = http_srv_config_pwd_get_handler }`
+   - `{ .uri = "/config/pwd", .method = HTTP_POST, .handler = http_srv_config_pwd_post_handler }`
+   - Increase `cfg.max_uri_handlers` from `13U` to `15U`.
+
+4. **`GET /config` page** — add a link to the password change page:
+   `<a href="/config/pwd">Change config password</a>`
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `GET /config/pwd` without credentials returns HTTP 401.
+- [ ] `GET /config/pwd` with valid credentials returns HTTP 200 with password form.
+- [ ] `POST /config/pwd` with wrong current password returns HTTP 400.
+- [ ] `POST /config/pwd` with mismatching new/confirm passwords returns HTTP 400.
+- [ ] `POST /config/pwd` with valid data saves new password and redirects to `/config/pwd?saved=1`.
+- [ ] After password change, old password no longer grants access to `/config`.
+- [ ] New password grants access to all config endpoints.
+- [ ] `GET /config` page contains a link to `/config/pwd`.
+
+---
+
+### Phase 6.4 — Button Reset Module: BOOT Long-Press Reset
+
+**Goal:** Create a new `button_reset` module that monitors the ESP32-C6 BOOT button (GPIO 9) for
+a 5-second long press.  When detected, both config and OTA passwords are reset to their factory
+defaults and a long buzzer beep confirms the action.
+
+**Inputs**
+- `main/inc/config_manager.h` (Phase 6.1 output — `config_mngr_cfg_password_set()`)
+- `main/inc/ota_manager.h` (existing — `ota_mngr_password_set()`, `OTA_MNGR_PASSWORD_DEFAULT`)
+- `main/inc/buzzer.h` (existing — `buzzer_pattern_play()`)
+- `main/Kconfig.projbuild` (existing)
+
+**Tasks**
+
+1. **`main/Kconfig.projbuild`** — add inside the existing menu:
+   ```kconfig
+   config ESPORT_BOOT_BUTTON_GPIO
+       int "BOOT button GPIO number"
+       default 9
+       range 0 30
+       help
+           GPIO connected to the BOOT button.  Default is GPIO 9 (ESP32-C6 BOOT).
+
+   config ESPORT_BOOT_BUTTON_RESET_HOLD_S
+       int "BOOT button hold time for password reset (seconds)"
+       default 5
+       range 1 30
+       help
+           Duration in seconds the BOOT button must be held to trigger a password reset.
+   ```
+
+2. **`main/inc/button_reset.h`** — declare:
+   ```c
+   #define BTN_RST_POLL_INTERVAL_MS (100U)
+   #define BUZZER_PATTERN_PASSWORD_RESET (4)
+
+   esp_err_t btn_rst_init(void);
+   ```
+   - `BUZZER_PATTERN_PASSWORD_RESET` — new buzzer pattern ID (50 units ON = 2.5 s continuous
+     beep).  The value must not collide with existing pattern IDs (0–3 are taken).
+   - Doxygen: init creates the polling timer but does not start any GPIO interrupt.
+   - Guard with `BUTTON_RESET_H`; use `hhtemplate` structure.
+
+3. **`main/src/button_reset.c`** — implement:
+   - Configure `CONFIG_ESPORT_BOOT_BUTTON_GPIO` as input with internal pull-up (BOOT button
+     is active LOW).
+   - Create a 100 ms periodic `esp_timer` (`btn_rst_poll_timer`).
+   - In the timer callback:
+     1. Read GPIO level.
+     2. If LOW (pressed): increment `g_held_count`.
+     3. If HIGH (released): reset `g_held_count = 0`.
+     4. If `g_held_count >= (CONFIG_ESPORT_BOOT_BUTTON_RESET_HOLD_S * 1000 / BTN_RST_POLL_INTERVAL_MS)`:
+        - Call `config_mngr_cfg_password_set(CONFIG_MNGR_CFG_PASSWORD_DEFAULT)`.
+        - Call `ota_mngr_password_set(OTA_MNGR_PASSWORD_DEFAULT)`.
+        - Call `buzzer_pattern_play(BUZZER_PATTERN_PASSWORD_RESET)`.
+        - Log `ESP_LOGW(gp_tag, "password reset: config and OTA passwords restored to defaults")`.
+        - Reset `g_held_count = 0` (prevent re-triggering until released and held again).
+        - Set `g_reset_done = true`; do not re-trigger until button is released (`g_reset_done`
+          cleared when GPIO reads HIGH).
+   - Follow `cctemplate` structure with `gp_tag = "button_reset"`.
+
+4. **`main/inc/buzzer.h`** — add `BUZZER_PATTERN_PASSWORD_RESET = 4` to the
+   `buzzer_pattern_id_t` enum.
+
+5. **`main/src/buzzer.c`** — add the new pattern to the pattern table:
+   - Pattern: 50 units ON, 0 units OFF (single continuous beep of 2.5 s).
+
+6. **`main/CMakeLists.txt`** — add `"src/button_reset.c"` to `SRCS`.
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `btn_rst_init()` configures GPIO and starts the polling timer.
+- [ ] Holding BOOT for < 5 s does not trigger a reset.
+- [ ] Holding BOOT for >= 5 s resets both config and OTA passwords to factory defaults.
+- [ ] After reset, `config_mngr_cfg_credentials_check("esport-fi32")` returns `true`.
+- [ ] After reset, `ota_mngr_credentials_check("esport-fi32")` returns `true`.
+- [ ] Buzzer plays a 2.5 s continuous beep on reset.
+- [ ] Continuing to hold the button after a reset does not re-trigger until released and held
+      again.
+- [ ] GPIO number is configurable via `menuconfig`.
+- [ ] Hold duration is configurable via `menuconfig`.
+- [ ] Module follows `cctemplate` and `hhtemplate` structure.
+
+---
+
+### Phase 6.5 — Integration & Build Verification
+
+**Goal:** Wire the new `button_reset` module into `main.c`, verify the full build, and confirm
+end-to-end behaviour of all password-protected flows.
+
+**Inputs**
+- All Phase 6.1–6.4 outputs.
+- `main/src/main.c` (existing)
+
+**Tasks**
+
+1. **`main/src/main.c`** — add `#include "button_reset.h"` and call `btn_rst_init()` in
+   `app_main()` after `buzzer_init()` (the button reset module depends on the buzzer being
+   initialised).
+
+2. **`main/src/http_server.c`** — verify `cfg.max_uri_handlers` is `15U` and all 14 URI
+   handlers are registered correctly.
+
+3. Run `idf.py build` and fix any remaining compilation or linker errors.
+
+4. **End-to-end checklist:**
+
+   | #  | Test                                                                              | Pass/Fail |
+   | -- | --------------------------------------------------------------------------------- | --------- |
+   | 1  | `GET /config` without credentials returns HTTP 401 with `WWW-Authenticate`        |           |
+   | 2  | `GET /config` with `admin:esport-fi32` returns HTTP 200 with config form          |           |
+   | 3  | `POST /config` without credentials returns HTTP 401                               |           |
+   | 4  | `POST /config/reset` without credentials returns HTTP 401                         |           |
+   | 5  | `GET /config/pwd` with valid auth shows password change form                      |           |
+   | 6  | Change config password to `"newpass"` via `POST /config/pwd` succeeds             |           |
+   | 7  | `GET /config` with old password `"esport-fi32"` returns HTTP 401                  |           |
+   | 8  | `GET /config` with new password `"newpass"` returns HTTP 200                      |           |
+   | 9  | OTA endpoints still work with OTA password (no regression)                        |           |
+   | 10 | Hold BOOT button for 5 s → buzzer plays 2.5 s beep                               |           |
+   | 11 | After BOOT reset, `admin:esport-fi32` works for `/config`                         |           |
+   | 12 | After BOOT reset, `admin:esport-fi32` works for `/ota`                            |           |
+   | 13 | Dashboard (`GET /`) remains accessible without authentication                     |           |
+   | 14 | API endpoints (`/api/*`) remain accessible without authentication                 |           |
+   | 15 | Short BOOT press (< 5 s) does not trigger reset                                  |           |
+
+**Acceptance Criteria**
+
+- [ ] `idf.py build` succeeds with zero errors and zero warnings (`-Werror` enforced).
+- [ ] `btn_rst_init()` is called in `app_main()` after `buzzer_init()`.
+- [ ] All 15 end-to-end tests pass.
+- [ ] No assertion failures or watchdog triggers during 10-minute continuous operation with
+      password-protected config access.
+
+---
+
+### Phase 6.6 — Spec & Document Update
+
+**Goal:** Update `docs/1-specification.md` and the Module Prefix Table in
+`docs/2-development_plan.md` to reflect the new config password feature, the button reset module,
+and the new buzzer pattern.
+
+**Inputs**
+- All Phase 6.1–6.5 outputs.
+- `docs/1-specification.md` (current)
+- `docs/2-development_plan.md` (current — Module Prefix Table)
+
+**Tasks**
+
+1. **§2 Hardware table** — add a row:
+   - BOOT button GPIO: **GPIO 9** (configurable at build time via
+     `CONFIG_ESPORT_BOOT_BUTTON_GPIO`).  Internal pull-up; active LOW.
+
+2. **§3 Configuration Parameters table** — add one row:
+   - `config_password` — `string`, NVS key `"cfg_pwd"`, default `"esport-fi32"`, max 63 chars,
+     description: "Password for HTTP Basic Auth on all `/config` endpoints.  Username is always
+     `admin`."
+
+3. **§4 Component/File Layout** — add `button_reset.h` to the `inc/` listing and
+   `button_reset.c` to the `src/` listing.
+
+4. **§5.1 NVS Configuration Manager** — add getter/setter/check entries for `config_password` to
+   the public API table: `config_mngr_cfg_password_get()`, `config_mngr_cfg_password_set()`,
+   `config_mngr_cfg_credentials_check()`.
+
+5. **New §5.X — Button Reset Module** — insert after the Buzzer Module section:
+   - **File:** `button_reset.c` / `button_reset.h`
+   - **Responsibilities:** poll the BOOT button via a 100 ms periodic `esp_timer`; on a
+     5-second continuous press, reset both config and OTA passwords to factory defaults and play
+     `BUZZER_PATTERN_PASSWORD_RESET`.
+   - **Hardware:** `CONFIG_ESPORT_BOOT_BUTTON_GPIO` (default GPIO 9), active LOW, internal
+     pull-up.
+   - **Public API:** `btn_rst_init()`.
+   - **Thread safety:** timer callback is O(1); password set functions handle their own NVS
+     locking.
+
+6. **§5.8 HTTP Server** — document that `GET /config`, `POST /config`, `POST /config/reset`,
+   `GET /config/pwd`, and `POST /config/pwd` are protected by HTTP Basic Auth (realm
+   `"esport-fi32 Config"`, username `"admin"`, password from NVS key `"cfg_pwd"`).
+
+7. **§5.10 Buzzer Module** (or wherever the buzzer patterns are listed) — add
+   `BUZZER_PATTERN_PASSWORD_RESET = 4`: 50 units ON (2.5 s continuous beep), triggered by
+   BOOT button long press.
+
+8. **§6.2 Configuration Page** — note that the page requires HTTP Basic Auth.  Add a "Change
+   config password" link description.
+
+9. **§6.X (new) — Config Password Change — `GET /config/pwd` and `POST /config/pwd`** — document
+   the password change flow (current password, new password, confirm, redirect on success).
+
+10. **§7.1 Boot Sequence** — add `btn_rst_init()` to the boot sequence, called after
+    `buzzer_init()`.
+
+11. **§8 NVS Layout — namespace `esport_cfg`** — add `"cfg_pwd"` (`string`, max 63+1 chars) to
+    the key table.
+
+12. **§10 Factory Defaults & NVS Recovery** — document that holding the BOOT button for 5 s
+    resets config and OTA passwords to factory defaults.
+
+13. **Module Prefix Table** (in `docs/2-development_plan.md`) — add row:
+    `button_reset` | `btn_rst_` | `BTN_RST_`.
+
+**Acceptance Criteria**
+
+- [ ] §2 Hardware table includes the BOOT button row with GPIO default, pull mode, and active
+      level.
+- [ ] §3 includes `config_password` with correct type, NVS key, default, and description.
+- [ ] §4 file layout lists `button_reset.h` and `button_reset.c`.
+- [ ] §5.1 lists all three config password API functions.
+- [ ] New §5.X fully documents the Button Reset module.
+- [ ] §5.8 documents Basic Auth on all five config endpoints.
+- [ ] §5.10 (Buzzer) includes `BUZZER_PATTERN_PASSWORD_RESET` with pattern description.
+- [ ] §6.2 notes auth requirement and password-change link.
+- [ ] New §6.X documents the config password change page.
+- [ ] §7.1 Boot Sequence includes `btn_rst_init()` after `buzzer_init()`.
+- [ ] §8 includes `"cfg_pwd"` in the `esport_cfg` key table.
+- [ ] §10 documents the BOOT button password reset procedure.
+- [ ] Module Prefix Table includes `button_reset` | `btn_rst_` | `BTN_RST_`.
