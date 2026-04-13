@@ -859,7 +859,7 @@ the new /ota routes and boot step, and document test results.
 | F1 | After first full flash, device boots and all existing features work normally      |           |
 | F2 | GET /ota without credentials returns HTTP 401 with WWW-Authenticate header        |           |
 | F3 | GET /ota with correct credentials (admin / esport-fi32) returns HTML upload form  |           |
-| F4 | GET /ota shows the running firmware version string (e.g. "2.0.0")                |           |
+| F4 | GET /ota shows the running firmware version string (e.g. "2.0.0")                 |           |
 | F5 | Upload a valid .bin with a higher version; device reboots into the new firmware   |           |
 | F6 | After successful OTA, GET /api/status `fw_version` field shows the new version    |           |
 | F7 | After successful OTA, GET /ota shows the new version as "Running Firmware"        |           |
@@ -871,10 +871,10 @@ the new /ota routes and boot step, and document test results.
 | F12| POST /ota/pwd with mismatched passwords returns HTTP 400                          |           |
 | F13| POST /ota/pwd with valid data saves new password; new password accepted on next   |           |
 |    | GET /ota attempt; old password rejected                                           |           |
-| F14| Rollback test: build a firmware that calls esp_restart() before ota_mngr_init(); |           |
+| F14| Rollback test: build a firmware that calls esp_restart() before ota_mngr_init();  |           |
 |    | flash it via OTA; verify the bootloader rolls back to the previous slot           |           |
 | F15| NVS data (registered devices, config, session log) survives an OTA update         |           |
-| F16| OTA upload from the reward AP (192.168.5.1/ota) works without STA connection     |           |
+| F16| OTA upload from the reward AP (192.168.5.1/ota) works without STA connection      |           |
 
 ### Acceptance Criteria
 

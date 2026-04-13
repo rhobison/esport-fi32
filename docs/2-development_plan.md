@@ -923,16 +923,16 @@ Phase 0 (Skeleton)
           │                    ├── Phase 5 (Time Counter)
           │                    └── Phase 6 (Session Tracker)
           │                               └── Phase 7 (Session Log)
-          └─────────────────────────────────────────────────────────┐
-                                                                    │
-Phase 8  (HTTP Config+API)       ── requires phases 1-7 complete         │
-Phase 9  (HTTP Dashboard)        ── requires phase 8 complete            │
-Phase 9A (Refactor: Utils)       ── requires phase 9 complete            │
-Phase 9B (Refactor: Config)      ── requires phase 9A complete           │
-Phase 9C (Refactor: API)         ── requires phase 9A complete           │
-Phase 9D (Refactor: Export)      ── requires phase 9A complete           │
-Phase 9E (Refactor: Dashboard)   ── requires phases 9A + 9C complete     │
-Phase 9F (Refactor: Core+Build)  ── requires phases 9B–9E complete      │
+          └────────────────────────────────────────────────────────────┐
+                                                                       │
+Phase 8  (HTTP Config+API)       ── requires phases 1-7 complete       │
+Phase 9  (HTTP Dashboard)        ── requires phase 8 complete          │
+Phase 9A (Refactor: Utils)       ── requires phase 9 complete          │
+Phase 9B (Refactor: Config)      ── requires phase 9A complete         │
+Phase 9C (Refactor: API)         ── requires phase 9A complete         │
+Phase 9D (Refactor: Export)      ── requires phase 9A complete         │
+Phase 9E (Refactor: Dashboard)   ── requires phases 9A + 9C complete   │
+Phase 9F (Refactor: Core+Build)  ── requires phases 9B–9E complete     │
 Phase 10 (Integration)           ── requires phases 0–9F complete ─────┘
 ```
 
