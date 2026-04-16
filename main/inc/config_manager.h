@@ -32,6 +32,15 @@ extern "C"
 // Constants/Macros/Datatypes
 //==================================================================================================
 
+/** Maximum password length for the config page password (excluding NUL terminator). */
+#define CONFIG_MNGR_CFG_PASSWORD_MAX_LEN (63U)
+
+/** Factory default password for the config page HTTP Basic Auth. */
+#define CONFIG_MNGR_CFG_PASSWORD_DEFAULT ("esport-fi32")
+
+/** Fixed HTTP Basic Auth username for the config page. */
+#define CONFIG_MNGR_CFG_HTTP_USERNAME ("admin")
+
 //==================================================================================================
 // Function Prototypes
 //==================================================================================================
@@ -357,6 +366,39 @@ uint16_t config_mngr_low_speed_buzzer_threshold_s_get(void);
  * \return \c ESP_OK on success, or an NVS error code on write failure.
  */
 esp_err_t config_mngr_low_speed_buzzer_threshold_s_set(uint16_t val);
+
+/**
+ * \brief Copy the config page HTTP Basic Auth password into a caller-supplied buffer.
+ *
+ * Falls back to #CONFIG_MNGR_CFG_PASSWORD_DEFAULT if the NVS key is absent.
+ *
+ * \param[out] p_buf  Destination buffer.
+ * \param[in]  len    Size of \p p_buf in bytes (including NUL terminator).
+ *
+ * \return \c ESP_OK on success, or \c ESP_ERR_INVALID_ARG if \p p_buf or \p len are invalid.
+ */
+esp_err_t config_mngr_cfg_password_get(char * p_buf, size_t len);
+
+/**
+ * \brief Persist a new config page HTTP Basic Auth password.
+ *
+ * \param[in] p_password  New password string (1–#CONFIG_MNGR_CFG_PASSWORD_MAX_LEN chars).
+ *
+ * \return \c ESP_OK on success, \c ESP_ERR_INVALID_ARG if length is out of range,
+ *         or an NVS error code on write failure.
+ */
+esp_err_t config_mngr_cfg_password_set(const char * p_password);
+
+/**
+ * \brief Check whether \p p_password matches the stored config page password.
+ *
+ * The supplied password is never logged.
+ *
+ * \param[in] p_password  Candidate password string.
+ *
+ * \return \c true if the password matches, \c false otherwise.
+ */
+bool config_mngr_cfg_credentials_check(const char * p_password);
 
 esp_err_t config_mngr_reset_to_defaults(void);
 

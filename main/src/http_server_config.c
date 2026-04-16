@@ -11,6 +11,7 @@
 
 #include "http_server_config.h"
 #include "http_server_utils.h"
+#include "config_manager.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -22,7 +23,6 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 
-#include "config_manager.h"
 #include "device_registry.h"
 #include "esp_wifi.h"
 #include "event_ids.h"
@@ -42,6 +42,7 @@ static const char * gp_tag __attribute__((unused)) = "http_srv_config";
 //==================================================================================================
 
 static esp_err_t parse_mac_address(const char * p_str, uint8_t * p_mac_out);
+static bool      http_srv_cfg_auth_check(httpd_req_t * p_req);
 
 //==================================================================================================
 // Public Functions
@@ -60,6 +61,11 @@ static esp_err_t parse_mac_address(const char * p_str, uint8_t * p_mac_out);
  */
 esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
 {
+    if (!http_srv_cfg_auth_check(p_req))
+    {
+        return ESP_OK;
+    }
+
     /* Check for ?saved=1 or ?reset=1 query parameters. */
     bool b_saved = false;
     bool b_reset = false;
@@ -84,7 +90,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     static char ap_ssid[33];
     static char ap_pwd[65];
     uint16_t    seconds_per_pulse            = config_mngr_seconds_per_pulse_get();
-    uint32_t    inet_gate_threshold_s         = config_mngr_internet_gate_threshold_s_get();
+    uint32_t    inet_gate_threshold_s        = config_mngr_internet_gate_threshold_s_get();
     uint32_t    centimeters_per_pulse        = config_mngr_centimeters_per_pulse_get();
     uint16_t    idle_session_interval_s      = config_mngr_idle_session_interval_s_get();
     uint16_t    start_session_interval_s     = config_mngr_start_session_interval_s_get();
@@ -486,6 +492,9 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "</form>"
         "<div style='margin:1.5em 0;border-top:1px solid #ccc;'></div>"
         "<div class=\"btn-right\">"
+        "<a href='/config/pwd' style='display:inline-block;background:#555;color:#fff;"
+        "border:none;padding:6px 14px;border-radius:4px;text-decoration:none;"
+        "font-size:inherit;margin-right:0.5em;'>Change Config Password</a>"
         "<a href='/ota' style='display:inline-block;background:#2a6db5;color:#fff;border:none;"
         "padding:6px 14px;border-radius:4px;text-decoration:none;font-size:inherit;'"
         ">Firmware Update</a>"
@@ -541,6 +550,11 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
  */
 esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
 {
+    if (!http_srv_cfg_auth_check(p_req))
+    {
+        return ESP_OK;
+    }
+
     /* Read request body into a stack buffer. */
     int content_len = (int)p_req->content_len;
     if (content_len > (int)(HTTP_SRV_POST_BODY_MAX_LEN - 1U))
@@ -1131,6 +1145,11 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
  */
 esp_err_t http_srv_config_reset_handler(httpd_req_t * p_req)
 {
+    if (!http_srv_cfg_auth_check(p_req))
+    {
+        return ESP_OK;
+    }
+
     if (ESP_OK != config_mngr_reset_to_defaults())
     {
         httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR,
@@ -1153,9 +1172,284 @@ esp_err_t http_srv_config_reset_handler(httpd_req_t * p_req)
 
 //--------------------------------------------------------------------------------------------------
 
+/**
+ * \brief Handle GET /config/pwd -- serve the config password change form.
+ *
+ * \param[in] p_req  HTTP request handle.
+ *
+ * \return \c ESP_OK always.
+ */
+esp_err_t http_srv_config_pwd_get_handler(httpd_req_t * p_req)
+{
+    if (!http_srv_cfg_auth_check(p_req))
+    {
+        return ESP_OK;
+    }
+
+    /* Check for ?saved=1 query string. */
+    char qs[16]  = { 0 };
+    bool b_saved = false;
+    if (0U < httpd_req_get_url_query_len(p_req))
+    {
+        (void)httpd_req_get_url_query_str(p_req, qs, sizeof(qs));
+        char val[4] = { 0 };
+        if (ESP_OK == httpd_query_key_value(qs, "saved", val, sizeof(val)))
+        {
+            b_saved = (0 == strcmp(val, "1"));
+        }
+    }
+
+    char max_len_str[8];
+    (void)snprintf(max_len_str, sizeof(max_len_str), "%u",
+        (unsigned)CONFIG_MNGR_CFG_PASSWORD_MAX_LEN);
+
+    (void)httpd_resp_set_type(p_req, "text/html");
+
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<!DOCTYPE html><html><head>"
+        "<meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>ESPort-fi32 -- Config Password</title>"
+        "<style>"
+        "body{font-family:sans-serif;max-width:500px;margin:2em auto;padding:0 1em;}"
+        "h1{font-size:1.3em;}h2{font-size:1.1em;margin-top:1.5em;}"
+        ".card{border:1px solid #ccc;border-radius:6px;padding:1em;margin:1em 0;}"
+        "label{display:block;margin:0.4em 0 0.1em;}"
+        "input[type=password]{width:100%;box-sizing:border-box;padding:0.4em;}"
+        "button,.btn{background:#2a6db5;color:#fff;border:none;padding:0.5em 1.2em;"
+        "border-radius:4px;cursor:pointer;text-decoration:none;display:inline-block;"
+        "margin-top:0.8em;}"
+        "button:hover,.btn:hover{background:#1e5490;}"
+        ".ok{color:green;font-weight:bold;}"
+        "nav a{margin-right:1em;}"
+        "</style></head><body>"
+        "<h1>Config Password</h1>");
+
+    if (b_saved)
+    {
+        (void)httpd_resp_sendstr_chunk(p_req, "<p class=\"ok\">Password saved successfully.</p>");
+    }
+
+    static char form_buf[512];
+    (void)snprintf(form_buf, sizeof(form_buf),
+        "<div class=\"card\"><h2>Change Config Password</h2>"
+        "<form method=\"POST\" action=\"/config/pwd\">"
+        "<label>Current password</label>"
+        "<input type=\"password\" name=\"current_pwd\" required>"
+        "<label>New password (max %s chars)</label>"
+        "<input type=\"password\" name=\"new_pwd\" maxlength=\"%s\" required>"
+        "<label>Confirm new password</label>"
+        "<input type=\"password\" name=\"confirm_pwd\" maxlength=\"%s\" required>"
+        "<button type=\"submit\">Save</button>"
+        "</form></div>",
+        max_len_str, max_len_str, max_len_str);
+    (void)httpd_resp_sendstr_chunk(p_req, form_buf);
+
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<nav><a class=\"btn\" href=\"/config\">Back to Configuration</a></nav>"
+        "</body></html>");
+
+    (void)httpd_resp_sendstr_chunk(p_req, NULL);
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Handle POST /config/pwd -- save a new config page password.
+ *
+ * \param[in] p_req  HTTP request handle.
+ *
+ * \return \c ESP_OK always.
+ */
+esp_err_t http_srv_config_pwd_post_handler(httpd_req_t * p_req)
+{
+    if (!http_srv_cfg_auth_check(p_req))
+    {
+        return ESP_OK;
+    }
+
+    /* Read POST body. */
+    char * p_body   = NULL;
+    int    body_len = (int)p_req->content_len;
+
+    if ((body_len <= 0) || (body_len >= (int)HTTP_SRV_HTML_BUF_LEN))
+    {
+        (void)httpd_resp_set_status(p_req, "400 Bad Request");
+        (void)httpd_resp_sendstr(p_req, "Invalid body length");
+        return ESP_OK;
+    }
+
+    p_body = malloc((size_t)body_len + 1U);
+    if (NULL == p_body)
+    {
+        (void)httpd_resp_set_status(p_req, "500 Internal Server Error");
+        (void)httpd_resp_sendstr(p_req, "Out of memory");
+        return ESP_OK;
+    }
+
+    int received = httpd_req_recv(p_req, p_body, (size_t)body_len);
+    if (received <= 0)
+    {
+        free(p_body);
+        (void)httpd_resp_set_status(p_req, "400 Bad Request");
+        (void)httpd_resp_sendstr(p_req, "Body read error");
+        return ESP_OK;
+    }
+    p_body[received] = '\0';
+
+    /* Parse fields. */
+    static char current_pwd[CONFIG_MNGR_CFG_PASSWORD_MAX_LEN + 1U];
+    static char new_pwd[CONFIG_MNGR_CFG_PASSWORD_MAX_LEN + 1U];
+    static char confirm_pwd[CONFIG_MNGR_CFG_PASSWORD_MAX_LEN + 1U];
+    static char enc_val[HTTP_SRV_FORM_VALUE_ENC_MAX_LEN + 1U];
+
+    current_pwd[0] = '\0';
+    new_pwd[0]     = '\0';
+    confirm_pwd[0] = '\0';
+
+    if (ESP_OK == httpd_query_key_value(p_body, "current_pwd", enc_val, sizeof(enc_val)))
+    {
+        http_srv_url_decode(enc_val, current_pwd, sizeof(current_pwd));
+    }
+    if (ESP_OK == httpd_query_key_value(p_body, "new_pwd", enc_val, sizeof(enc_val)))
+    {
+        http_srv_url_decode(enc_val, new_pwd, sizeof(new_pwd));
+    }
+    if (ESP_OK == httpd_query_key_value(p_body, "confirm_pwd", enc_val, sizeof(enc_val)))
+    {
+        http_srv_url_decode(enc_val, confirm_pwd, sizeof(confirm_pwd));
+    }
+
+    free(p_body);
+
+    /* Validate current password. */
+    if (!config_mngr_cfg_credentials_check(current_pwd))
+    {
+        (void)httpd_resp_set_status(p_req, "400 Bad Request");
+        (void)httpd_resp_sendstr(p_req, "Current password incorrect");
+        return ESP_OK;
+    }
+
+    /* Validate new password length. */
+    size_t new_len = strlen(new_pwd);
+    if ((0U == new_len) || (new_len > CONFIG_MNGR_CFG_PASSWORD_MAX_LEN))
+    {
+        (void)httpd_resp_set_status(p_req, "400 Bad Request");
+        (void)httpd_resp_sendstr(p_req, "Password too short or too long");
+        return ESP_OK;
+    }
+
+    /* Validate passwords match. */
+    if (0 != strcmp(new_pwd, confirm_pwd))
+    {
+        (void)httpd_resp_set_status(p_req, "400 Bad Request");
+        (void)httpd_resp_sendstr(p_req, "Passwords do not match");
+        return ESP_OK;
+    }
+
+    esp_err_t ret = config_mngr_cfg_password_set(new_pwd);
+    if (ESP_OK != ret)
+    {
+        (void)httpd_resp_set_status(p_req, "500 Internal Server Error");
+        (void)httpd_resp_sendstr(p_req, esp_err_to_name(ret));
+        return ESP_OK;
+    }
+
+    /* Redirect to GET /config/pwd?saved=1. */
+    (void)httpd_resp_set_status(p_req, "303 See Other");
+    (void)httpd_resp_set_hdr(p_req, "Location", "/config/pwd?saved=1");
+    (void)httpd_resp_sendstr(p_req, "");
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 //==================================================================================================
 // Private Functions
 //==================================================================================================
+
+/**
+ * \brief Verify the HTTP Basic Auth header on \p p_req for the config endpoints.
+ *
+ * Sends a 401 response (with \c WWW-Authenticate header) and returns \c false
+ * if credentials are absent, malformed, or incorrect.
+ *
+ * \param[in] p_req  HTTP request handle.
+ *
+ * \return \c true if authentication passed, \c false otherwise.
+ */
+static bool http_srv_cfg_auth_check(httpd_req_t * p_req)
+{
+    size_t hdr_len = httpd_req_get_hdr_value_len(p_req, "Authorization");
+
+    if (0U == hdr_len)
+    {
+        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
+        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
+        (void)httpd_resp_sendstr(p_req, "Unauthorized");
+        return false;
+    }
+
+    static char hdr_buf[HTTP_SRV_CFG_AUTH_HDR_MAX];
+    if (ESP_OK != httpd_req_get_hdr_value_str(p_req, "Authorization", hdr_buf, sizeof(hdr_buf)))
+    {
+        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
+        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
+        (void)httpd_resp_sendstr(p_req, "Unauthorized");
+        return false;
+    }
+
+    /* Verify "Basic " prefix. */
+    if (0 != strncmp(hdr_buf, "Basic ", HTTP_SRV_CFG_BASIC_PREFIX_LEN))
+    {
+        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
+        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
+        (void)httpd_resp_sendstr(p_req, "Unauthorized");
+        return false;
+    }
+
+    /* Base64-decode the credential portion. */
+    static char decoded[HTTP_SRV_CFG_DECODED_MAX + 1U];
+    int         dec_len =
+        http_srv_base64_decode(hdr_buf + HTTP_SRV_CFG_BASIC_PREFIX_LEN, decoded, sizeof(decoded));
+
+    if (dec_len < 0)
+    {
+        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
+        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
+        (void)httpd_resp_sendstr(p_req, "Unauthorized");
+        return false;
+    }
+    decoded[dec_len] = '\0';
+
+    /* Split on first ':'. */
+    char * p_colon = strchr(decoded, ':');
+    if (NULL == p_colon)
+    {
+        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
+        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
+        (void)httpd_resp_sendstr(p_req, "Unauthorized");
+        return false;
+    }
+    *p_colon                = '\0';
+    const char * p_user     = decoded;
+    const char * p_password = p_colon + 1;
+
+    /* Check username and password. */
+    if ((0 != strcmp(p_user, CONFIG_MNGR_CFG_HTTP_USERNAME)) ||
+        !config_mngr_cfg_credentials_check(p_password))
+    {
+        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
+        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
+        (void)httpd_resp_sendstr(p_req, "Unauthorized");
+        return false;
+    }
+
+    return true;
+}
+
+//--------------------------------------------------------------------------------------------------
 
 /**
  * \brief Parse a MAC address string into a 6-byte array.

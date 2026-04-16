@@ -62,6 +62,7 @@
 #define CONFIG_MNGR_DEF_BUZZER_ENABLED        ((uint8_t)1U)
 #define CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S ("bz_spd_thr_s")
 #define CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S ((uint16_t)3U)
+#define CONFIG_MNGR_KEY_CFG_PWD               ("cfg_pwd")
 
 /* String size limits (spec §5.1). */
 #define CONFIG_MNGR_MAX_SSID_LEN (32U) /* max 32 chars + NUL */
@@ -160,6 +161,10 @@ esp_err_t config_mngr_init(void)
         CONFIG_MNGR_DEF_REWARD_COUNTER_S);
     ret |= config_mngr_default_u16_write(handle, CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S,
         CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S);
+
+    /* cfg_pwd (string) */
+    ret |= config_mngr_default_str_write(handle, CONFIG_MNGR_KEY_CFG_PWD,
+        CONFIG_MNGR_CFG_PASSWORD_DEFAULT);
 
     /* buzzer_enabled (uint8: 0=false, 1=true) */
     {
@@ -467,6 +472,94 @@ esp_err_t config_mngr_low_speed_buzzer_threshold_s_set(uint16_t val)
 
 //--------------------------------------------------------------------------------------------------
 
+esp_err_t config_mngr_cfg_password_get(char * p_buf, size_t len)
+{
+    if ((NULL == p_buf) || (0U == len))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t    ret = nvs_open(CONFIG_MNGR_NAMESPACE, NVS_READONLY, &handle);
+
+    if (ESP_OK == ret)
+    {
+        size_t out_len = len;
+        ret            = nvs_get_str(handle, CONFIG_MNGR_KEY_CFG_PWD, p_buf, &out_len);
+        nvs_close(handle);
+    }
+
+    if (ESP_OK != ret)
+    {
+        strncpy(p_buf, CONFIG_MNGR_CFG_PASSWORD_DEFAULT, len - 1U);
+        p_buf[len - 1U] = '\0';
+        ret             = ESP_OK;
+    }
+
+    return ret;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t config_mngr_cfg_password_set(const char * p_password)
+{
+    if (NULL == p_password)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t pwd_len = strlen(p_password);
+    if ((0U == pwd_len) || (pwd_len > CONFIG_MNGR_CFG_PASSWORD_MAX_LEN))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t    ret = nvs_open(CONFIG_MNGR_NAMESPACE, NVS_READWRITE, &handle);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "config_mngr_cfg_password_set open failed: 0x%x", ret);
+        return ret;
+    }
+
+    ret = nvs_set_str(handle, CONFIG_MNGR_KEY_CFG_PWD, p_password);
+    if (ESP_OK == ret)
+    {
+        ret = nvs_commit(handle);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGE(gp_tag, "config_mngr_cfg_password_set commit failed: 0x%x", ret);
+        }
+    }
+    else
+    {
+        ESP_LOGE(gp_tag, "nvs_set_str(%s) failed: 0x%x", CONFIG_MNGR_KEY_CFG_PWD, ret);
+    }
+
+    nvs_close(handle);
+    return ret;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+bool config_mngr_cfg_credentials_check(const char * p_password)
+{
+    if (NULL == p_password)
+    {
+        return false;
+    }
+
+    char stored[CONFIG_MNGR_CFG_PASSWORD_MAX_LEN + 1U];
+    if (ESP_OK != config_mngr_cfg_password_get(stored, sizeof(stored)))
+    {
+        return false;
+    }
+
+    return (0 == strcmp(stored, p_password));
+}
+
+//--------------------------------------------------------------------------------------------------
+
 esp_err_t config_mngr_reset_to_defaults(void)
 {
     nvs_handle_t handle;
@@ -507,6 +600,7 @@ esp_err_t config_mngr_reset_to_defaults(void)
     ret |= nvs_set_u8(handle, CONFIG_MNGR_KEY_BUZZER_ENABLED, CONFIG_MNGR_DEF_BUZZER_ENABLED);
     ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S,
         CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S);
+    ret |= nvs_set_str(handle, CONFIG_MNGR_KEY_CFG_PWD, CONFIG_MNGR_CFG_PASSWORD_DEFAULT);
 
     if (ESP_OK == ret)
     {

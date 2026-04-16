@@ -81,6 +81,11 @@ static const buzzer_step_t s_pat_speed_low[1] = {
     { BUZZER_PATTERN_SPEED_LOW_UNITS, 0U },
 };
 
+/** 50 units ON = 2.5 s continuous beep for password reset confirmation. */
+static const buzzer_step_t s_pat_password_reset[1] = {
+    { 50U, 0U },
+};
+
 /* ---- Playback state (spinlock-protected) ---- */
 
 /** Spinlock protecting all playback state. */
@@ -191,6 +196,10 @@ void buzzer_pattern_play(buzzer_pattern_id_t pattern)
             break;
         case BUZZER_PATTERN_SPEED_LOW:
             p_steps = s_pat_speed_low;
+            count   = 1U;
+            break;
+        case BUZZER_PATTERN_PASSWORD_RESET:
+            p_steps = s_pat_password_reset;
             count   = 1U;
             break;
         default:

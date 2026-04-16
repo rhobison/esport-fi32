@@ -82,6 +82,7 @@ Key behaviour:
 | GPIO internal pull     | Pull-up (sensor contact closes to GND)                                  |
 | GPIO active edge       | **Falling edge** (sensor closes → logic low pulse)                      |
 | Buzzer output GPIO     | **GPIO 11** (configurable at build time via `CONFIG_ESPORT_BUZZER_GPIO`). Active buzzer, HIGH = on, LOW = off. |
+| BOOT button GPIO       | **GPIO 9** (configurable at build time via `CONFIG_ESPORT_BOOT_BUTTON_GPIO`). Internal pull-up; active LOW. Used for physical password reset. |
 
 > The GPIO number and active edge can be changed via Kconfig without changing source code.
 
@@ -110,6 +111,7 @@ All parameters are stored at runtime in NVS and survive reboots. They are initia
 | `reward_counter_s`                      | `reward_ctr_s` | uint32 | `0`             | 0   | (unlimited) | **Legacy / migration only.** Read once at boot by `time_ctr_init()` to seed the current rider's device-registry counter when that slot is still zero. No longer written by the firmware after Feature 4. |
 | `buzzer_enabled`                        | `buzzer_en`    | uint8  | `1` (true)      | 0   | 1           | Enable/disable all buzzer audio feedback.  When `0` (false), all `buzzer_*` calls are no-ops and the GPIO stays LOW. |
 | `low_speed_buzzer_threshold_s`          | `bz_spd_thr_s` | uint16 | `3`             | 0   | 65535       | Number of consecutive seconds the speed must remain below the minimum before the speed-low buzzer beep begins.  Set to `0` for immediate feedback on the first below-threshold tick. |
+| `config_password`                       | `cfg_pwd`      | string | `"esport-fi32"` | —   | 63 chars    | Password for HTTP Basic Auth on all `/config` endpoints.  Username is always `admin`.  Change via `POST /config/pwd`. |
 
 ---
 
@@ -171,6 +173,11 @@ firmware/
     session_tracker.h
     session_log.h
     http_server.h
+    http_server_config.h
+    http_server_ota.h
+    http_server_utils.h
+    buzzer.h
+    button_reset.h
     event_ids.h
   src/
     main.c                   <- app_main, module init sequencing
@@ -183,7 +190,15 @@ firmware/
     session_tracker.c
     session_log.c
     http_server.c
+    http_server_config.c
+    http_server_api.c
+    http_server_dashboard.c
+    http_server_export.c
+    http_server_ota.c
+    http_server_utils.c
     buzzer.c
+    button_reset.c
+    ota_manager.c
 ```
 
 ---
@@ -240,6 +255,11 @@ uint16_t  config_mngr_min_speed_to_increment_time_kmh_x10_get(void);
 esp_err_t config_mngr_min_speed_to_increment_time_kmh_x10_set(uint16_t val);
 uint32_t  config_mngr_reward_counter_s_get(void);
 esp_err_t config_mngr_reward_counter_s_set(uint32_t val);
+
+/* Config page password (Feature 6) */
+esp_err_t config_mngr_cfg_password_get(char *p_buf, size_t len);
+esp_err_t config_mngr_cfg_password_set(const char *p_password);
+bool      config_mngr_cfg_credentials_check(const char *p_password);
 ```
 
 **Validation rules (setters reject values outside this range with `ESP_ERR_INVALID_ARG`):**
@@ -657,6 +677,7 @@ bool      device_reg_entry_is_connected(uint8_t idx);
 | `BUZZER_PATTERN_SESSION_QUALIFIED`  | ST_QUALIFYING → ST_ACTIVE            | 10 units ON (500 ms)                              |
 | `BUZZER_PATTERN_SESSION_CLOSED`     | ST_ACTIVE → ST_IDLE (idle timeout)   | 2 ON, 1 OFF, 2 ON, 1 OFF, 2 ON (3 beeps)        |
 | `BUZZER_PATTERN_SPEED_LOW`          | Per tick: SESSION or EARNING, speed below min for ≥ `low_speed_buzzer_threshold_s` consecutive ticks   | 2 units ON (100 ms)                               |
+| `BUZZER_PATTERN_PASSWORD_RESET`     | BOOT button held for reset duration  | 50 units ON (2.5 s continuous beep)               |
 
 - **Interruption rule:** a new `buzzer_pattern_play()` call immediately interrupts the current pattern and starts the new one.  `buzzer_speed_low_update(false)` only stops a `SPEED_LOW` pattern; it does not interrupt other patterns.
 - Runtime enable/disable via `config_mngr_buzzer_enabled_get()`.  When disabled, all API calls are no-ops and the GPIO stays LOW.
@@ -671,6 +692,27 @@ void      buzzer_pattern_play(buzzer_pattern_id_t pattern);
 void      buzzer_stop(void);
 void      buzzer_speed_low_update(bool b_active);
 ```
+
+---
+
+### 5.11 Button Reset Module
+
+**File:** `button_reset.c` / `button_reset.h`
+
+**Responsibilities:**
+- Monitor the BOOT button (`CONFIG_ESPORT_BOOT_BUTTON_GPIO`, default GPIO 9, active LOW, internal pull-up) via a 100 ms periodic `esp_timer`.
+- When the button is held continuously for `CONFIG_ESPORT_BOOT_BUTTON_RESET_HOLD_S` seconds (default 5 s), reset both the config page password and the OTA password to their factory defaults (`"esport-fi32"`).
+- Play `BUZZER_PATTERN_PASSWORD_RESET` (2.5 s continuous beep) to confirm the reset.
+- Prevent re-triggering: after a reset fires, the reset flag is cleared only when the button is released (GPIO reads HIGH).
+- Both Kconfig symbols (`CONFIG_ESPORT_BOOT_BUTTON_GPIO` and `CONFIG_ESPORT_BOOT_BUTTON_RESET_HOLD_S`) are user-configurable via `menuconfig`.
+
+**API:**
+
+```c
+esp_err_t btn_rst_init(void);
+```
+
+Must be called after `buzzer_init()`, `config_mngr_init()`, and `ota_mngr_init()`.
 
 ---
 
@@ -723,6 +765,9 @@ Serves a form pre-populated with current config values.
 | Pulse Debounce (ms)      | number     | `pulse_debounce_time_ms`    |
 | Timezone (POSIX TZ)      | text       | `timezone`                  |
 | Buzzer feedback          | checkbox   | `buzzer_enabled`            |
+
+All `/config` endpoints are protected by HTTP Basic Auth (username `admin`, password stored
+in NVS key `cfg_pwd`).  A "Change Config Password" link navigates to `GET /config/pwd`.
 
 **Device Management section** (rendered after the base parameters):
 
@@ -911,6 +956,19 @@ Protected by HTTP Basic Auth on all four OTA routes.
 - Password: configurable via `POST /ota/pwd`, stored in NVS namespace `esport_ota` key
   `ota_pwd`. Default: `"esport-fi32"`.
 
+### 6.8 Config Password Change — `GET /config/pwd`, `POST /config/pwd`
+
+Protected by HTTP Basic Auth (same credentials as `/config`).
+
+| Route              | Auth | Description                                              |
+| ------------------ | ---- | -------------------------------------------------------- |
+| `GET /config/pwd`  | Yes  | HTML form: current password, new password, confirm       |
+| `POST /config/pwd` | Yes  | Validate + save new config page password; redirect on success |
+
+`POST /config/pwd` validates the current password via `config_mngr_cfg_credentials_check()`,
+checks new/confirm match and length (1-63 chars), then calls `config_mngr_cfg_password_set()`.
+Returns HTTP 400 on any validation failure; redirects to `GET /config/pwd?saved=1` on success.
+
 **`GET /ota`** returns an HTML page showing the running firmware version and a file-input
 form for uploading a new `.bin` image. Browser-side JavaScript uploads the file via
 `XMLHttpRequest` with a progress bar.
@@ -941,7 +999,8 @@ the new password to NVS namespace `esport_ota`.
 2. config_mngr_init()         <- load config, apply factory defaults
 2a. device_reg_init()         <- load device registry from NVS (esport_dev namespace)
 2b. buzzer_init()             <- configure buzzer GPIO; create pattern timer
-2c. ota_mngr_init()           <- mark firmware valid (cancel rollback); open esport_ota namespace
+2c. btn_rst_init()            <- configure BOOT button GPIO; start 100 ms poll timer
+2d. ota_mngr_init()           <- mark firmware valid (cancel rollback); open esport_ota namespace
 3. esp_event_loop_create_default()
 4. wifi_mngr_init()           <- start AP+STA; reward AP always-on from init
    a. if wifi_ssid is empty: skip STA connection (reward AP still starts)
@@ -1099,6 +1158,7 @@ so that no flash byte goes unused across the full 4 MB device.
 | `reward_ctr_s` | uint32 | reward_counter_s (persisted counter)  |
 | `buzzer_en`    | uint8  | buzzer_enabled (0 = false, 1 = true)  |
 | `bz_spd_thr_s` | uint16 | low_speed_buzzer_threshold_s          |
+| `cfg_pwd`      | string | config page Basic Auth password (max 63 chars, default `"esport-fi32"`) |
 
 ### Namespace: `esport_log`
 
@@ -1174,6 +1234,8 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 - `session_log`: if the log namespace cannot be opened or its metadata is inconsistent (`head > MAX` or `count > MAX`), erase the log namespace and reinitialise.
 
 **No hardware factory-reset button.** Recovery is via the config web portal, accessible via the reward AP at `192.168.5.1` or via the home network STA IP.
+
+**Physical password reset:** Holding the BOOT button (GPIO 9, configurable) for 5 seconds (configurable) resets both the config page and OTA passwords to `"esport-fi32"` and plays a 2.5 s buzzer confirmation beep.
 
 ---
 

@@ -99,4 +99,21 @@ menu "esport-fi32 Configuration"
             HIGH when on, LOW when off.  Build-time constant; cannot be
             changed at runtime.
 
+    config ESPORT_BOOT_BUTTON_GPIO
+        int "BOOT button GPIO number"
+        default 9
+        range 0 30
+        help
+            GPIO connected to the BOOT button.  Default is GPIO 9 (ESP32-C6 BOOT).
+            The button is active LOW (internal pull-up enabled).
+
+    config ESPORT_BOOT_BUTTON_RESET_HOLD_S
+        int "BOOT button hold time for password reset (seconds)"
+        default 5
+        range 1 30
+        help
+            Duration in seconds the BOOT button must be held to trigger a
+            password reset.  Both the config and OTA passwords are reset to
+            their factory defaults and a 2.5 s buzzer beep confirms the action.
+
 endmenu

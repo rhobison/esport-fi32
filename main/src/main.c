@@ -32,6 +32,7 @@
 #include "time_manager.h"
 #include "wifi_manager.h"
 #include "buzzer.h"
+#include "button_reset.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -93,7 +94,10 @@ void app_main(void)
     /* Step 2b: Initialise buzzer GPIO and pattern timer. */
     ESP_ERROR_CHECK(buzzer_init());
 
-    /* Step 2c: Mark firmware valid (cancel rollback); open esport_ota NVS namespace. */
+    /* Step 2c: Initialise BOOT button long-press password reset module. */
+    ESP_ERROR_CHECK(btn_rst_init());
+
+    /* Step 2d: Mark firmware valid (cancel rollback); open esport_ota NVS namespace. */
     ESP_ERROR_CHECK(ota_mngr_init());
 
     /* Step 3: Create the default event loop before any module that posts. */

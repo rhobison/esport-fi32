@@ -113,6 +113,20 @@ esp_err_t http_srv_form_field_get(const char * p_body, const char * p_key, char 
  */
 void http_srv_html_attr_encode(const char * p_src, char * p_dst, size_t dst_len);
 
+/**
+ * \brief Decode a standard RFC 4648 Base64 string into \p p_out.
+ *
+ * The output is NOT null-terminated; the caller must null-terminate using the
+ * returned length.
+ *
+ * \param[in]  p_in    NUL-terminated Base64-encoded input string.
+ * \param[out] p_out   Output buffer.
+ * \param[in]  out_len Size of \p p_out in bytes (must be >= decoded length + 1).
+ *
+ * \return Number of decoded bytes, or -1 on invalid input or buffer overflow.
+ */
+int http_srv_base64_decode(const char * p_in, char * p_out, size_t out_len);
+
 #ifdef __cplusplus
 }
 #endif
