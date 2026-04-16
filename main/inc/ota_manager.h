@@ -37,6 +37,9 @@ extern "C"
 /** Fixed HTTP Basic Auth username for the OTA endpoint. */
 #define OTA_MNGR_HTTP_USERNAME ("admin")
 
+/** Factory default OTA password. */
+#define OTA_MNGR_PASSWORD_DEFAULT ("esport-fi32")
+
 /**
  * \brief OTA manager state.
  */

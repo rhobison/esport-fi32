@@ -958,6 +958,8 @@ Every symbol (functions, types, `#define` macros, `enum` values) **must** start 
 | `device_registry`       | `device_reg_`          | `DEVICE_REG_`       |
 | `ota_manager`           | `ota_mngr_`            | `OTA_MNGR_`         |
 | `http_server_ota`       | `http_srv_ota_`        | `HTTP_SRV_OTA_`     |
+| `buzzer`                | `buzzer_`              | `BUZZER_`           |
+| `button_reset`          | `btn_rst_`             | `BTN_RST_`          |
 
 > `gp_tag` is a universal file-scope variable name and does **not** carry a module prefix (it follows the BARR-C:2018 pointer variable naming rule instead).
 

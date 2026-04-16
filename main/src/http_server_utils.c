@@ -15,6 +15,7 @@
 #include "http_server_utils.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -221,6 +222,354 @@ void http_srv_html_attr_encode(const char * p_src, char * p_dst, size_t dst_len)
     }
 
     p_dst[pos] = '\0';
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Decode a standard RFC 4648 Base64 string into \p p_out.
+ *
+ * Uses a look-up table for the Base64 alphabet.  The output is NOT
+ * null-terminated by this function; the caller must null-terminate using the
+ * returned length.
+ *
+ * \param[in]  p_in    NUL-terminated Base64-encoded input string.
+ * \param[out] p_out   Output buffer.
+ * \param[in]  out_len Size of \p p_out in bytes (must be >= decoded length + 1).
+ *
+ * \return Number of decoded bytes, or -1 on invalid input or buffer overflow.
+ */
+int http_srv_base64_decode(const char * p_in, char * p_out, size_t out_len)
+{
+    /* Look-up table: maps ASCII value to 6-bit group; 0xFF = invalid. */
+    static const uint8_t sc_lut[256] = {
+        /* 0x00-0x2B */ 0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        /* '+' = 62 */ 62U,
+        /* 0x2C-0x2E */ 0xFF,
+        0xFF,
+        0xFF,
+        /* '/' = 63 */ 63U,
+        /* '0'-'9' */ 52U,
+        53U,
+        54U,
+        55U,
+        56U,
+        57U,
+        58U,
+        59U,
+        60U,
+        61U,
+        /* 0x3A-0x40 */ 0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        /* 'A'-'Z' */ 0U,
+        1U,
+        2U,
+        3U,
+        4U,
+        5U,
+        6U,
+        7U,
+        8U,
+        9U,
+        10U,
+        11U,
+        12U,
+        13U,
+        14U,
+        15U,
+        16U,
+        17U,
+        18U,
+        19U,
+        20U,
+        21U,
+        22U,
+        23U,
+        24U,
+        25U,
+        /* 0x5B-0x60 */ 0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        /* 'a'-'z' */ 26U,
+        27U,
+        28U,
+        29U,
+        30U,
+        31U,
+        32U,
+        33U,
+        34U,
+        35U,
+        36U,
+        37U,
+        38U,
+        39U,
+        40U,
+        41U,
+        42U,
+        43U,
+        44U,
+        45U,
+        46U,
+        47U,
+        48U,
+        49U,
+        50U,
+        51U,
+        /* 0x7B-0xFF */ 0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+    };
+
+    size_t out_idx = 0U;
+    size_t in_idx  = 0U;
+    size_t in_len  = strlen(p_in);
+
+    while (in_idx < in_len)
+    {
+        /* Skip whitespace / newlines that may trail the encoded string. */
+        if (('\r' == p_in[in_idx]) || ('\n' == p_in[in_idx]) || (' ' == p_in[in_idx]))
+        {
+            in_idx++;
+            continue;
+        }
+
+        /* Collect up to 4 Base64 characters. */
+        uint8_t c[4];
+        int     valid = 0;
+
+        for (int i = 0; i < 4; i++)
+        {
+            if ((in_idx + (size_t)i) >= in_len)
+            {
+                c[i] = 0U;
+            }
+            else if ('=' == p_in[in_idx + (size_t)i])
+            {
+                c[i] = 0U; /* padding */
+            }
+            else
+            {
+                uint8_t v = sc_lut[(uint8_t)p_in[in_idx + (size_t)i]];
+                if (0xFFU == v)
+                {
+                    return -1; /* invalid character */
+                }
+                c[i]  = v;
+                valid = i + 1;
+            }
+        }
+
+        /* Emit decoded bytes. */
+        if (valid >= 2)
+        {
+            if (out_idx >= (out_len - 1U))
+            {
+                return -1; /* overflow */
+            }
+            p_out[out_idx++] = (char)(((c[0] << 2) & 0xFC) | ((c[1] >> 4) & 0x03));
+        }
+        if (valid >= 3)
+        {
+            if (out_idx >= (out_len - 1U))
+            {
+                return -1;
+            }
+            p_out[out_idx++] = (char)(((c[1] << 4) & 0xF0) | ((c[2] >> 2) & 0x0F));
+        }
+        if (valid >= 4)
+        {
+            if (out_idx >= (out_len - 1U))
+            {
+                return -1;
+            }
+            p_out[out_idx++] = (char)(((c[2] << 6) & 0xC0) | (c[3] & 0x3F));
+        }
+
+        in_idx += 4U;
+    }
+
+    return (int)out_idx;
 }
 
 //--------------------------------------------------------------------------------------------------

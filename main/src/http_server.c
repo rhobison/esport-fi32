@@ -56,7 +56,7 @@ esp_err_t http_srv_init(void)
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = 80U;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 13U;
+    cfg.max_uri_handlers = 15U;
 
     esp_err_t ret = httpd_start(&gp_server_handle, &cfg);
     if (ESP_OK != ret)
@@ -139,6 +139,19 @@ esp_err_t http_srv_init(void)
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_ota_post);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_ota_pwd_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_ota_pwd_post);
+
+    static const httpd_uri_t sc_uri_config_pwd_get = {
+        .uri     = "/config/pwd",
+        .method  = HTTP_GET,
+        .handler = http_srv_config_pwd_get_handler,
+    };
+    static const httpd_uri_t sc_uri_config_pwd_post = {
+        .uri     = "/config/pwd",
+        .method  = HTTP_POST,
+        .handler = http_srv_config_pwd_post_handler,
+    };
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_config_pwd_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_config_pwd_post);
 
     ESP_LOGI(gp_tag, "started on port %u", (unsigned)cfg.server_port);
     return ESP_OK;

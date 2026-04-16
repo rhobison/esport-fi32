@@ -34,6 +34,7 @@ idf_component_register(
         "src/buzzer.c"
         "src/ota_manager.c"
         "src/http_server_ota.c"
+        "src/button_reset.c"
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)

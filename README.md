@@ -73,9 +73,12 @@ Lets you set all parameters without reflashing:
 - Session detection timings, debounce
 - Traffic threshold for per-device countdown pause
 - Timezone (POSIX TZ string)
+- Buzzer feedback enable/disable
 - **Registered Devices** table: per-device nickname, MAC (read-only), counter (h:mm:ss, editable with auto-format), enabled toggle, current-rider radio, remove button
 - **Add Device** form: MAC address input (auto-formatted), nickname
 - **Connected Unregistered Stations**: lists AP-connected devices not in the registry with a one-click Add button (handles Android MAC randomisation)
+
+> **Auth:** All `/config` endpoints require HTTP Basic Auth (default credentials: `admin` / `esport-fi32`). Change the password at `/config/pwd`.
 
 ### Firmware Update OTA (`/ota`)
 
@@ -101,6 +104,7 @@ After a successful upload the device reboots automatically. If the new firmware 
 | GPIO pull        | Internal pull-up (sensor closes to GND)               |
 | Active edge      | Falling edge                                          |
 | Buzzer GPIO      | GPIO 11 (configurable via `CONFIG_ESPORT_BUZZER_GPIO`); active HIGH |
+| BOOT button GPIO | GPIO 9 (configurable via `CONFIG_ESPORT_BOOT_BUTTON_GPIO`); active LOW, internal pull-up. Hold for 5 s to reset both config and OTA passwords to `esport-fi32`. |
 
 Connect the exercise bike's reed switch or hall-effect sensor between **GPIO 10** and **GND**.
 
@@ -189,6 +193,7 @@ All parameters are stored in NVS and can be changed at runtime via the web UI.
 | `soft_ap_idle_throughput_timeout_s`     | `30`    | Seconds of low traffic per device before countdown actually pauses                             |
 | `min_speed_to_increment_time_kmh_x10`   | `30`    | Minimum speed (km/h x 10, e.g. `30` = 3.0 km/h) required for a pulse to earn credits; `0` disables the gate |
 | `buzzer_enabled`                        | `true`  | Enable/disable all buzzer audio feedback                                                      |
+| `config_password`                       | `"esport-fi32"` | Password for HTTP Basic Auth on all `/config` endpoints (username always `admin`). Change via `/config/pwd`. |
 
 ---
 
@@ -197,7 +202,9 @@ All parameters are stored in NVS and can be changed at runtime via the web UI.
 | Endpoint               | Method     | Description                   |
 | ---------------------- | ---------- | ----------------------------- |
 | `/`                    | GET        | Status dashboard (HTML)       |
-| `/config`              | GET / POST | Configuration form (HTML)     |
+| `/config`              | GET / POST | Configuration form (HTML) — **Basic Auth required** |
+| `/config/reset`        | POST       | Reset all settings to factory defaults — **Basic Auth required** |
+| `/config/pwd`          | GET / POST | Change config page password — **Basic Auth required** |
 | `/api/status`          | GET        | Live state as JSON            |
 | `/api/sessions`        | GET        | Session history as JSON       |
 | `/api/sessions/export` | GET        | Download CSV or JSON report   |
