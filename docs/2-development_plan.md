@@ -960,6 +960,8 @@ Every symbol (functions, types, `#define` macros, `enum` values) **must** start 
 | `http_server_ota`       | `http_srv_ota_`        | `HTTP_SRV_OTA_`     |
 | `buzzer`                | `buzzer_`              | `BUZZER_`           |
 | `button_reset`          | `btn_rst_`             | `BTN_RST_`          |
+| `activity_manager`      | `act_mngr_`            | `ACT_MNGR_`         |
+| `http_server_activities`| `http_srv_`            | `HTTP_SRV_`         |
 
 > `gp_tag` is a universal file-scope variable name and does **not** carry a module prefix (it follows the BARR-C:2018 pointer variable naming rule instead).
 
@@ -1041,6 +1043,12 @@ This section tracks incremental improvements beyond the base specification.  Eac
 | 6.4   | 6       | Button Reset Module — BOOT long-press reset    | `button_reset.c/h`, `Kconfig.projbuild`, `CMakeLists.txt`             |
 | 6.5   | 6       | Integration & Build Verification               | `main.c`, `http_server.c`                                              |
 | 6.6   | 6       | Spec & Document Update                         | `docs/1-specification.md`, `docs/2-development_plan.md`                |
+| 7.1   | 7       | Spec Update — Activity Credits                 | `docs/1-specification.md`                                              |
+| 7.2   | 7       | Activity Manager Core Module                   | `activity_manager.c/h`, `event_ids.h`, `CMakeLists.txt`                |
+| 7.3   | 7       | HTTP Server: Activities Pages                  | `http_server_activities.c/h`, `http_server.c`, `http_server_config.c`  |
+| 7.4   | 7       | HTTP Server: Activity Credit API               | `http_server_api.c`                                                    |
+| 7.5   | 7       | Integration & Verification                     | `main.c`                                                               |
+| 7.6   | 7       | Documentation & README Update                  | `docs/1-specification.md`, `docs/2-development_plan.md`, `README.md`   |
 
 ---
 
@@ -3251,3 +3259,822 @@ and the new buzzer pattern.
 - [ ] §8 includes `"cfg_pwd"` in the `esport_cfg` key table.
 - [ ] §10 documents the BOOT button password reset procedure.
 - [ ] Module Prefix Table includes `button_reset` | `btn_rst_` | `BTN_RST_`.
+
+---
+
+## Feature 7 — Activity Credits
+
+### Overview
+
+This feature lets a parent/admin define a **global pool of up to 30 activities** (e.g. "Read for 30 min", "Math homework", "Tidy room") and assign them to any of the registered devices (users). On a dedicated **Activities award page** (`GET /activities`), the admin selects a user from a combobox; the page shows that user's assigned activities with a "Credit h:mm:ss" button per activity. Clicking the button instantly adds the configured internet-time credits to the user's counter.
+
+Each activity has a configurable **daily limit** (how many times per day a user can earn credits for it). Once reached, the button is greyed out. The daily count resets at midnight local time and persists across reboots in NVS so the system cannot be "gamed" by power-cycling. A **credit log** (last 30 entries per user, NVS-backed) is shown at the bottom of the page.
+
+A separate **Activity Manager page** (`GET /activities/manage`) lets the admin create, edit, and delete activities in the global pool, and manage which activities are assigned to which users.
+
+A **JSON API endpoint** (`POST /api/activities/credit`) exposes the same credit action programmatically. This enables future **gamification**: a client-side game (e.g. a math-quiz web app running on the child's device) can dynamically calculate earned credits based on performance, then call the API to award them. The game is entirely client-side; the firmware only receives and applies the final credit amount. The activity's `time_limit_s` field serves as a reference that games use for their credit-scaling logic. The optional `completion_time_s` field in the API call is stored in the credit log for future analytics.
+
+Key behaviours:
+- **30 activities** max in the global pool; each has an auto-generated unique integer ID (1-based, never reused).
+- Each activity carries: `name` (≤20 chars), `credit_s` (0 = dynamic/API-provided), `time_limit_s` (gamification reference), `daily_limit` (1–255 times/day, same cap for all users it is assigned to).
+- An activity with `credit_s = 0` is a **dynamic-credit** activity: it is visible in the Activity Manager but **hidden** on the award page. It can only be credited via the JSON API (with the caller supplying the exact `credits_s`).
+- The same activity can be assigned to multiple users independently. Up to **20 activities** per user.
+- Both `/activities` and `/activities/manage` are protected by the same HTTP Basic Auth as `/config`.
+- A new event `ESPORT_EVENT_ACTIVITY_CREDITED` is posted whenever credits are applied, allowing future integrations.
+
+### Suggested Improvements
+
+> The following enhancements are recommended and worth discussing with the project owner before finalising the plan:
+
+1. **Buzzer confirmation beep** — Add a new buzzer pattern `BUZZER_PATTERN_ACTIVITY_CREDIT` (e.g. 2 ON, 1 OFF, 2 ON = "double ding") that fires whenever an activity is credited. This gives the child instant audible confirmation that their credit has landed, consistent with the existing buzzer feedback for bike sessions.
+
+2. **`completion_time_s` in the credit API** — Include this optional field now (0 = not provided). Client-side games fill it in when they complete a timed challenge. The firmware stores it in the credit log entry. This costs nothing in the current implementation and unlocks rich analytics in the future (e.g. plotting completion-time trends per activity).
+
+3. **`GET /api/activities` read endpoint** — Expose the activity list (with per-user daily status) as a JSON API so client-side games can discover available activities, their `time_limit_s`, and their `credit_s` without scraping the HTML page. This is necessary for the gamification use case.
+
+4. **Activity credits in the status dashboard** — Add a "Credits today" column to the Devices table on the status dashboard showing the sum of `credits_s` awarded to each user today via activities. This makes achievements visible at a glance alongside the bike-earned credits, and requires only a small change to `http_server_dashboard.c` and `http_server_api.c`.
+
+5. **Gamification pattern documentation** — Document the recommended client-side game integration pattern in the spec and plan: (a) game fetches `GET /api/activities?device_idx=N` to list available activities and their `time_limit_s`; (b) game runs a timed challenge, measures `completion_time_s`; (c) game computes `credits_s` using whatever formula it wants (e.g. `min(credit_s, credit_s * time_limit_s / completion_time_s)` capped at 2×); (d) game calls `POST /api/activities/credit` with `device_idx`, `act_id`, `credits_s`, `completion_time_s`. The firmware does not validate the formula — it trusts the caller, consistent with the admin-only auth on the API.
+
+### New Configuration Parameter
+
+| Parameter | Type | NVS key | Default | Description |
+| --------- | ---- | ------- | ------- | ----------- |
+| `activity_credit_buzzer_en` | bool (uint8) | `"ac_bz_en"` | `true` | Enable/disable the buzzer beep (`BUZZER_PATTERN_ACTIVITY_CREDIT`) played when an activity credit is applied.  When `false`, no beep is played but all other crediting behaviour is unchanged. |
+
+### New NVS Namespace: `esport_act`
+
+| NVS Key | Type | Description |
+| ------- | ---- | ----------- |
+| `ac_cnt` | uint8 | Number of activities in pool (0–30) |
+| `ac_nxt` | uint32 | Next auto-increment activity ID (starts at 1; never reset to 0 after deletion) |
+| `ac_N` (N=0..29) | blob (`act_mngr_entry_t`) | Activity entry at global pool slot N |
+| `ua_N` (N=0..3) | blob (`act_mngr_user_assigns_t`) | User N's list of assigned activity IDs |
+| `ud_N` (N=0..3) | blob (`act_mngr_user_daily_t`) | User N's daily done counts + current day |
+| `ul_N_hd` (N=0..3) | uint8 | User N credit log write head (ring buffer) |
+| `ul_N_cnt` (N=0..3) | uint8 | User N credit log entry count |
+| `ul_N_K` (N=0..3, K=0..29) | blob (`act_credit_log_entry_t`) | User N, credit log entry K |
+
+All keys fit within the NVS 15-character key limit.
+
+### Data Model
+
+```c
+#define ACT_MNGR_MAX_ACTIVITIES       (30U)
+#define ACT_MNGR_MAX_ASSIGNS_PER_USER (20U)
+#define ACT_MNGR_MAX_CREDIT_LOG       (30U)
+#define ACT_MNGR_NAME_MAX_LEN         (20U)
+#define ACT_MNGR_NO_ID                (0U)    /* reserved; never a valid activity ID */
+#define ACT_MNGR_SAVE_INTERVAL_S      (60U)   /* periodic NVS save interval */
+
+typedef struct act_mngr_entry_tag {
+    uint32_t id;                                  /* auto-generated, 1-based, never reused */
+    char     name[ACT_MNGR_NAME_MAX_LEN + 1U];   /* null-terminated, max 20 chars          */
+    uint32_t credit_s;                            /* 0 = dynamic (API-provided)             */
+    uint32_t time_limit_s;                        /* max completion time (gamification ref) */
+    uint8_t  daily_limit;                         /* max times per day; 1–255               */
+} act_mngr_entry_t;
+
+typedef struct act_mngr_user_assigns_tag {
+    uint32_t act_ids[ACT_MNGR_MAX_ASSIGNS_PER_USER]; /* activity IDs; ACT_MNGR_NO_ID = empty */
+    uint8_t  count;
+} act_mngr_user_assigns_t;
+
+typedef struct act_mngr_user_daily_tag {
+    uint32_t date_ymd;                         /* YYYYMMDD; 0 = uninitialized               */
+    uint8_t  done[ACT_MNGR_MAX_ACTIVITIES];    /* done count per activity SLOT (0-based)    */
+} act_mngr_user_daily_t;
+
+typedef struct act_credit_log_entry_tag {
+    int64_t  timestamp_utc;    /* Unix timestamp when credited                              */
+    uint32_t act_id;           /* activity ID                                               */
+    uint32_t credits_s;        /* seconds awarded                                           */
+    uint32_t completion_time_s;/* 0 if not provided; gamification analytics                 */
+} act_credit_log_entry_t;
+```
+
+### Quick Reference
+
+| Phase | Feature | Name                                       | Key output files                                                                      |
+| ----- | ------- | ------------------------------------------ | ------------------------------------------------------------------------------------- |
+| 7.1   | 7       | Spec Update — Activity Credits             | `docs/1-specification.md`                                                             |
+| 7.2   | 7       | Activity Manager Core Module               | `activity_manager.c/h`, `event_ids.h`, `CMakeLists.txt`, `config_manager.c/h`        |
+| 7.3   | 7       | HTTP Server: Activities Pages              | `http_server_activities.c/h`, `http_server.c`, `http_server_config.c`                |
+| 7.4   | 7       | HTTP Server: Activity Credit API           | `http_server_api.c`                                                                   |
+| 7.5   | 7       | Integration & Verification                 | `main.c`                                                                              |
+| 7.6   | 7       | Documentation & README Update              | `docs/1-specification.md`, `docs/2-development_plan.md`, `README.md`                 |
+
+---
+
+### Phase 7.1 — Spec Update
+
+#### Goal
+
+Update `docs/1-specification.md` to document the Activity Manager module, the new NVS namespace, the two new web pages, and all new API endpoints. All later phases implement what this spec describes.
+
+#### Inputs
+
+- `docs/0-draft-input.md` §Improvements item 7
+- `docs/1-specification.md` (current)
+
+#### Tasks
+
+1. **§1 Overview** — add a bullet: "A parent/admin can define a global pool of activities and assign them to registered devices. Crediting an activity adds pre-configured (or API-specified) internet time to the corresponding device counter. Both the management and award pages are protected by HTTP Basic Auth."
+
+2. **§3 Configuration Parameters table** — add one row under `esport_cfg`:
+   - `activity_credit_buzzer_en` — `bool` (stored as `uint8`), NVS key `"ac_bz_en"`, default `true`, description: "Enable/disable the `BUZZER_PATTERN_ACTIVITY_CREDIT` beep on activity credit.  When `false`, no beep plays."  Note in the table footer that activity pool data lives in the separate `esport_act` namespace (§8).
+
+3. **§4 System Architecture** — add an `Activity Manager` block to the architecture diagram, connected to the `Device Registry` and `HTTP Server`.
+
+4. **§4 Component/File Layout** — add `activity_manager.h` to `inc/` and `activity_manager.c`, `http_server_activities.c` to `src/`; add `http_server_activities.h` to `inc/`.
+
+5. **New §5.X — Activity Manager Module** — insert after the Button Reset Module section:
+
+   **File:** `activity_manager.c` / `activity_manager.h`
+
+   **Responsibilities:**
+   - Maintain a global pool of up to `ACT_MNGR_MAX_ACTIVITIES` (30) activity entries in NVS namespace `esport_act`.
+   - Auto-generate monotonically increasing unique integer IDs (uint32_t, 1-based, stored in NVS key `ac_nxt`, never reset on deletion).
+   - Manage user-activity assignments: up to `ACT_MNGR_MAX_ASSIGNS_PER_USER` (20) activity IDs per device slot. Assignments are stored per-user in NVS.
+   - Track per-user daily done counts (indexed by activity slot, not ID) in NVS. Lazily resets to zero when the local calendar day (YYYYMMDD) changes. The date is checked and the reset applied on every call to `act_mngr_activity_credit()` and `act_mngr_user_daily_done_get()`.
+   - Maintain a per-user credit log as a 30-entry NVS ring buffer (newest-first read order).
+   - `act_mngr_activity_credit()` — the single write path: validates the request, applies the daily-reset check, verifies the daily limit is not exceeded, adds `credits_s` to the target device's counter via `device_reg_entry_counter_set()`, increments the daily done count, appends a credit log entry, and posts `ESPORT_EVENT_ACTIVITY_CREDITED`.
+   - Expose a `act_mngr_daily_reset_check()` function (callable from the time-counter tick once per minute) that lazily resets all users' daily counts when the date has changed.
+
+   **NVS Namespace:** `esport_act`
+
+   *(include the key table from the "New NVS Namespace" section above)*
+
+   **Public API:**
+
+   ```c
+   esp_err_t act_mngr_init(void);
+
+   /* Activity pool CRUD */
+   esp_err_t act_mngr_activity_add(const char *p_name, uint32_t credit_s,
+                                   uint32_t time_limit_s, uint8_t daily_limit,
+                                   uint32_t *p_id_out);
+   esp_err_t act_mngr_activity_remove(uint32_t id);
+   esp_err_t act_mngr_activity_update(uint32_t id, const char *p_name,
+                                      uint32_t credit_s, uint32_t time_limit_s,
+                                      uint8_t daily_limit);
+   esp_err_t act_mngr_activity_get(uint32_t id, act_mngr_entry_t *p_out);
+   esp_err_t act_mngr_activity_slot_get(uint8_t slot, act_mngr_entry_t *p_out);
+   uint8_t   act_mngr_activity_count(void);
+
+   /* User-activity assignment */
+   esp_err_t act_mngr_user_assign(uint8_t dev_idx, uint32_t act_id);
+   esp_err_t act_mngr_user_unassign(uint8_t dev_idx, uint32_t act_id);
+   uint8_t   act_mngr_user_assign_count(uint8_t dev_idx);
+   esp_err_t act_mngr_user_assigns_get(uint8_t dev_idx, act_mngr_user_assigns_t *p_out);
+   bool      act_mngr_user_is_assigned(uint8_t dev_idx, uint32_t act_id);
+
+   /* Daily done-count tracking */
+   uint8_t   act_mngr_user_daily_done_get(uint8_t dev_idx, uint32_t act_id);
+   bool      act_mngr_user_daily_limit_reached(uint8_t dev_idx, uint32_t act_id);
+   void      act_mngr_daily_reset_check(void);  /* call periodically; resets on day change */
+
+   /* Credit an activity — the single write path */
+   esp_err_t act_mngr_activity_credit(uint8_t dev_idx, uint32_t act_id,
+                                      uint32_t credits_s, uint32_t completion_time_s);
+
+   /* Credit log (newest first) */
+   uint8_t   act_mngr_credit_log_count(uint8_t dev_idx);
+   uint8_t   act_mngr_credit_log_read(uint8_t dev_idx, act_credit_log_entry_t *p_out,
+                                      uint8_t max_count);
+   ```
+
+   **Thread safety:** all in-RAM state (pool array, assignment arrays, daily counts, log indices) is protected by a single `portMUX_TYPE g_act_mux = portMUX_INITIALIZER_UNLOCKED` spinlock. NVS writes happen outside the spinlock. `device_reg_entry_counter_set()` handles its own locking.
+
+6. **§5.10 Buzzer Module** — add `BUZZER_PATTERN_ACTIVITY_CREDIT = 5` to the pattern table: 2 ON, 1 OFF, 2 ON ("double ding", 250 ms total); triggered by `act_mngr_activity_credit()` when `config_mngr_activity_credit_buzzer_en_get()` returns `true`.
+
+6a. **§5.1 NVS Configuration Manager** — add getter/setter entries for `activity_credit_buzzer_en` to the public API:
+   ```c
+   bool      config_mngr_activity_credit_buzzer_en_get(void);
+   esp_err_t config_mngr_activity_credit_buzzer_en_set(bool b_enabled);
+   ```
+
+7. **§6 Web Interface** — add two new subsections:
+
+   **§6.X Activities Award Page — `GET /activities`**
+
+   Protected by HTTP Basic Auth (same credentials as `/config`).
+
+   Serves an HTML page with:
+   - A user combobox at the top (all registered devices from Device Registry).
+   - On combobox change: a JavaScript `fetch('/api/activities?device_idx=N')` call populates:
+     - An activities table showing each assigned activity with a "Credit h:mm:ss" button on the left.  The button text shows the activity's `credit_hms` value.  The button is greyed/disabled (`disabled` attribute) when `done_today >= daily_limit`.
+     - A "Total credits" line showing the selected user's current counter (`counter_hms` from `/api/status`).
+   - Clicking a Credit button calls `POST /api/activities/credit` (JSON, via `fetch`) with `device_idx`, `act_id`, `credits_s` (= activity's `credit_s`), `completion_time_s = 0`.  On success, the button's daily counter increments and the total-credits display updates.
+   - Activities with `credit_s == 0` are **not shown** on this page (dynamic-credit activities are admin/API-only).
+   - A credit log table at the bottom (fetched from `GET /api/activities/log?device_idx=N`) showing the last 30 credited activities: timestamp (local), activity name, credits awarded (h:mm:ss).
+   - The page is self-contained (no external CSS/JS resources).
+
+   **§6.X Activity Manager Page — `GET /activities/manage` and `POST /activities/manage`**
+
+   Protected by HTTP Basic Auth.
+
+   Serves an HTML form page with two sections:
+
+   *Global Activity Pool section:*
+   - A table listing all activities in the pool. Each row: ID (read-only), name (text input), credit (h:mm:ss input), time limit (h:mm:ss input), daily limit (number input), Delete button.
+   - An "Add Activity" sub-form with fields: name, credit (h:mm:ss), time limit (h:mm:ss), daily limit.
+   - On submit (`POST /activities/manage`): processes `action=add_activity`, `action=update_activity&id=N`, or `action=delete_activity&id=N`.
+
+   *Activity Assignments section:*
+   - For each registered device: a sub-table showing its assigned activities with an "Unassign" button per activity, and a dropdown/select to add a new assignment from the global pool.
+   - On submit: processes `action=assign&dev_idx=N&act_id=M` or `action=unassign&dev_idx=N&act_id=M`.
+
+   All actions redirect to `GET /activities/manage?saved=1` on success; return HTTP 400 on validation error.
+
+8. **§6.3 JSON Status API (`GET /api/status`)** — add an optional note that the `"devices"` array may include a future `"activity_credits_today_s"` field (not implemented in phase 7, reserved for future use).
+
+9. **§6.X JSON Activities API — `GET /api/activities`**
+
+   Query parameter: `device_idx` (optional, 0–3). When present, filters to activities assigned to that user and includes per-user daily status.
+
+   Returns:
+   ```json
+   {
+     "activities": [
+       {
+         "id": 1,
+         "slot": 0,
+         "name": "Read for 30 min",
+         "credit_s": 1800,
+         "credit_hms": "0:30:00",
+         "time_limit_s": 1800,
+         "time_limit_hms": "0:30:00",
+         "daily_limit": 1,
+         "done_today": 0,
+         "available": true
+       }
+     ]
+   }
+   ```
+   `"available"`: `done_today < daily_limit`. Only activities where `credit_s > 0` appear when `device_idx` is specified. When `device_idx` is absent, returns all pool activities without `done_today` / `available` fields.
+
+10. **§6.X Activity Credit API — `POST /api/activities/credit`**
+
+    Protected by HTTP Basic Auth.
+
+    **Request body** (`application/json`):
+    ```json
+    {
+      "device_idx":        0,
+      "act_id":            1,
+      "credits_s":         1800,
+      "completion_time_s": 0
+    }
+    ```
+    - `device_idx`: 0–3 (must be a registered device).
+    - `act_id`: must exist in the pool and be assigned to the device.
+    - `credits_s`: must be > 0.  For activities with `credit_s > 0`, the caller should pass that value.  For dynamic activities (`credit_s == 0`), the caller supplies its own calculated value.
+    - `completion_time_s`: optional analytics field (0 if unused).
+
+    **Response (200 OK)**:
+    ```json
+    {
+      "ok": true,
+      "new_counter_s": 7200,
+      "new_counter_hms": "2:00:00"
+    }
+    ```
+
+    **Error responses**: HTTP 400 with `{"error": "<description>"}` for invalid input; HTTP 401 without credentials; HTTP 429 with `{"error": "daily limit reached"}` when daily limit is exhausted.
+
+11. **§6.X Credit Log API — `GET /api/activities/log`**
+
+    Query parameter: `device_idx` (required, 0–3).
+
+    Returns (newest first):
+    ```json
+    {
+      "log": [
+        {
+          "timestamp_utc":    1741905000,
+          "timestamp_local":  "2026-03-14T08:30:00",
+          "act_id":           1,
+          "act_name":         "Read for 30 min",
+          "credits_s":        1800,
+          "credits_hms":      "0:30:00",
+          "completion_time_s": 0
+        }
+      ]
+    }
+    ```
+
+12. **§7.1 Boot Sequence** — add `act_mngr_init()` after `device_reg_init()` and before `wifi_mngr_init()`.
+
+13. **§8 NVS Layout** — add namespace `esport_act` with the full key table from the "New NVS Namespace" section above.
+
+14. **§9 Event Bus** — add `ESPORT_EVENT_ACTIVITY_CREDITED` with description: "Posted (no payload) when an activity credit is applied via `act_mngr_activity_credit()`. Consumers may use this to update live displays."
+
+15. **Module Prefix Table** — add rows:
+    - `activity_manager` | `act_mngr_` | `ACT_MNGR_`
+    - `http_server_activities` | `http_srv_` | `HTTP_SRV_`
+
+#### Acceptance Criteria
+
+- [ ] §1 Overview mentions the activity credit feature.
+- [ ] §4 architecture diagram includes the Activity Manager block.
+- [ ] §4 file layout lists `activity_manager.h/c` and `http_server_activities.h/c`.
+- [ ] New §5.X fully documents the Activity Manager module (data model, NVS, full API, daily-reset logic, thread safety).
+- [ ] §5.10 Buzzer module documents `BUZZER_PATTERN_ACTIVITY_CREDIT = 5` and its guard on `config_mngr_activity_credit_buzzer_en_get()`.
+- [ ] §5.1 lists `config_mngr_activity_credit_buzzer_en_get/set()` in the public API.
+- [ ] §3 includes `activity_credit_buzzer_en` (`"ac_bz_en"`) with correct type, default, and description.
+- [ ] New §6.X fully documents `GET /activities` with combobox, credit buttons, and credit log.
+- [ ] New §6.X fully documents `GET /activities/manage` and `POST /activities/manage`.
+- [ ] New §6.X fully documents `GET /api/activities` with full JSON schema.
+- [ ] New §6.X fully documents `POST /api/activities/credit` request/response schema including `completion_time_s` and HTTP 429 for daily limit exhaustion.
+- [ ] New §6.X fully documents `GET /api/activities/log` JSON schema.
+- [ ] §7.1 Boot Sequence includes `act_mngr_init()`.
+- [ ] §8 includes `esport_act` namespace with complete key table.
+- [ ] §9 includes `ESPORT_EVENT_ACTIVITY_CREDITED`.
+- [ ] Module Prefix Table includes `activity_manager` and `http_server_activities`.
+
+---
+
+### Phase 7.2 — Activity Manager Core Module
+
+#### Goal
+
+Create `activity_manager.c` / `activity_manager.h` — the central store for the global activity pool, per-user assignments, daily done-count tracking, credit log ring buffers, and the credit-apply function. Add `ESPORT_EVENT_ACTIVITY_CREDITED` to `event_ids.h`. Add `BUZZER_PATTERN_ACTIVITY_CREDIT` to the buzzer module.
+
+#### Inputs
+
+- `docs/1-specification.md` §5.X (Phase 7.1 output)
+- `main/inc/event_ids.h` (existing)
+- `main/inc/device_registry.h` (existing — `device_reg_entry_counter_get/set`)
+- `main/inc/buzzer.h` (existing)
+- `main/inc/time_manager.h` (existing — `time_mngr_utc_get`, `time_mngr_is_synced`)
+- `main/CMakeLists.txt` (existing)
+
+#### Tasks
+
+1. **`main/inc/event_ids.h`** — add `ESPORT_EVENT_ACTIVITY_CREDITED` to `esport_event_id_t` with the next sequential explicit integer value.
+
+2. **`main/inc/buzzer.h`** — add `BUZZER_PATTERN_ACTIVITY_CREDIT = 5` to the `buzzer_pattern_id_t` enum (after `BUZZER_PATTERN_PASSWORD_RESET = 4`).
+
+3. **`main/src/buzzer.c`** — add the new pattern to the internal pattern table:
+   - `s_pat_act_credit[3]`: `{ 2 ON, 1 OFF }`, `{ 2 ON, 0 OFF }` — sequence: 2 units HIGH, 1 unit LOW, 2 units HIGH (a "double ding", 250 ms total).
+   - Add a case for `BUZZER_PATTERN_ACTIVITY_CREDIT` in the `switch` inside `buzzer_pattern_play()`.
+
+4. **`main/inc/config_manager.h`** — declare (with full Doxygen, following existing style):
+   ```c
+   bool      config_mngr_activity_credit_buzzer_en_get(void);
+   esp_err_t config_mngr_activity_credit_buzzer_en_set(bool b_enabled);
+   ```
+
+5. **`main/src/config_manager.c`** — implement:
+   - Add `#define CONFIG_MNGR_KEY_ACT_CREDIT_BZ_EN  ("ac_bz_en")` and `#define CONFIG_MNGR_DEF_ACT_CREDIT_BZ_EN  ((uint8_t)1U)`.
+   - In `config_mngr_init()`: read `"ac_bz_en"`; if `ESP_ERR_NVS_NOT_FOUND`, write the default `1`.
+   - `config_mngr_activity_credit_buzzer_en_get()`: read NVS key `"ac_bz_en"` as `uint8_t`; return `(val != 0U)`; on any NVS error return `true` (fail-safe: beep on by default).
+   - `config_mngr_activity_credit_buzzer_en_set(b_enabled)`: write `(uint8_t)(b_enabled ? 1U : 0U)` to NVS key `"ac_bz_en"`; commit; return result.
+
+6. **Create `main/inc/activity_manager.h`**:
+   - Define all `#define` constants (each replacement value in parentheses): `ACT_MNGR_MAX_ACTIVITIES`, `ACT_MNGR_MAX_ASSIGNS_PER_USER`, `ACT_MNGR_MAX_CREDIT_LOG`, `ACT_MNGR_NAME_MAX_LEN`, `ACT_MNGR_NO_ID`, `ACT_MNGR_SAVE_INTERVAL_S`.
+   - Define the four typedefs with tag names: `act_mngr_entry_t`, `act_mngr_user_assigns_t`, `act_mngr_user_daily_t`, `act_credit_log_entry_t`.
+   - Declare all public API functions with full Doxygen (`\\` tags, `\\param[in/out]`, blank line before `\\return`).
+   - Use `hhtemplate` structure; guard with `ACTIVITY_MANAGER_H`.
+
+5. **Create `main/src/activity_manager.c`**:
+
+   a. **File-scope state** protected by `static portMUX_TYPE g_act_mux = portMUX_INITIALIZER_UNLOCKED`:
+   - `static act_mngr_entry_t g_pool[ACT_MNGR_MAX_ACTIVITIES]` — activity pool (slot-indexed).
+   - `static uint8_t g_pool_count = 0U` — active entries.
+   - `static uint32_t g_next_id = 1U` — auto-increment counter.
+   - `static act_mngr_user_assigns_t g_assigns[DEVICE_REG_MAX_ENTRIES]`.
+   - `static act_mngr_user_daily_t g_daily[DEVICE_REG_MAX_ENTRIES]`.
+   - Per-user credit log ring buffer indices (not under spinlock — accessed only from HTTP task, sequentially):
+     - `static uint8_t g_log_head[DEVICE_REG_MAX_ENTRIES]` — write index.
+     - `static uint8_t g_log_count[DEVICE_REG_MAX_ENTRIES]` — entry count.
+
+   b. **Internal static helpers** (declare in Internal Function Prototypes section):
+   - `act_mngr_pool_slot_find(uint32_t id)` → `int8_t`: finds slot for activity ID; returns -1 if not found. Called under spinlock.
+   - `act_mngr_pool_save(uint8_t slot)`: saves `g_pool[slot]` to NVS key `"ac_N"` where N=slot.
+   - `act_mngr_pool_meta_save(void)`: saves `ac_cnt` and `ac_nxt` to NVS.
+   - `act_mngr_assigns_save(uint8_t dev_idx)`: saves `g_assigns[dev_idx]` to NVS key `"ua_N"`.
+   - `act_mngr_daily_save(uint8_t dev_idx)`: saves `g_daily[dev_idx]` to NVS key `"ud_N"`.
+   - `act_mngr_log_save(uint8_t dev_idx, uint8_t slot, const act_credit_log_entry_t *p_entry)`: saves a log entry blob to NVS key `"ul_N_K"`.
+   - `act_mngr_date_ymd_get(void)` → `uint32_t`: returns current local date as YYYYMMDD using `localtime_r(time_mngr_utc_get())`.
+   - `act_mngr_daily_reset_if_needed(uint8_t dev_idx)`: checks `g_daily[dev_idx].date_ymd` vs `act_mngr_date_ymd_get()`; if different, zeroes `done[]`, updates `date_ymd`, calls `act_mngr_daily_save(dev_idx)`.
+
+   c. **`act_mngr_init()`**:
+   - Open namespace `esport_act` NVS_READWRITE.
+   - Read `ac_cnt` → `g_pool_count` (validate ≤ `ACT_MNGR_MAX_ACTIVITIES`; on invalid reset to 0).
+   - Read `ac_nxt` → `g_next_id` (validate > 0; on 0 reset to 1).
+   - For each slot `< g_pool_count`: read `ac_N` blob into `g_pool[N]`.
+   - For each device index `0..DEVICE_REG_MAX_ENTRIES-1`: read `ua_N` blob into `g_assigns[N]` (on missing key, zero-init); read `ud_N` blob into `g_daily[N]` (on missing key, zero-init); read `ul_N_hd` → `g_log_head[N]`; read `ul_N_cnt` → `g_log_count[N]`.
+   - Close handle.
+   - Log pool count at `ESP_LOGI`.
+
+   d. **`act_mngr_activity_add()`**:
+   - Validate: `p_name` non-NULL, `strlen(p_name) >= 1 && <= ACT_MNGR_NAME_MAX_LEN`; `daily_limit >= 1`; `g_pool_count < ACT_MNGR_MAX_ACTIVITIES`.
+   - Under spinlock: assign slot = `g_pool_count`; fill `g_pool[slot]` with `id = g_next_id++`, name, credit_s, time_limit_s, daily_limit; increment `g_pool_count`.
+   - Outside spinlock: call `act_mngr_pool_save(slot)` and `act_mngr_pool_meta_save()`.
+   - Write `*p_id_out = g_pool[slot].id`.
+   - Return `ESP_ERR_INVALID_ARG` on validation failure; `ESP_ERR_NO_MEM` if pool full.
+
+   e. **`act_mngr_activity_remove(id)`**:
+   - Under spinlock: find slot via `act_mngr_pool_slot_find(id)`; return `ESP_ERR_NOT_FOUND` if missing.
+   - Compact array: shift `g_pool[slot+1..count-1]` left by one. Decrement `g_pool_count`.
+   - For each device: compact `g_assigns[N].act_ids[]` by removing any element equal to `id`; decrement `count`.
+   - Outside spinlock: rewrite all affected pool blobs, delete stale last blob key (`"ac_N"` where N = old count-1) via `nvs_erase_key()`; rewrite all assignment blobs; save metadata.
+
+   f. **`act_mngr_activity_credit(dev_idx, act_id, credits_s, completion_time_s)`**:
+   - Validate: `dev_idx < DEVICE_REG_MAX_ENTRIES`; `credits_s > 0`; `act_id != ACT_MNGR_NO_ID`.
+   - Outside spinlock: find slot; if -1 return `ESP_ERR_NOT_FOUND`.
+   - Check `act_mngr_user_is_assigned(dev_idx, act_id)`; if false return `ESP_ERR_INVALID_STATE`.
+   - Call `act_mngr_daily_reset_if_needed(dev_idx)`.
+   - Under spinlock: read `g_daily[dev_idx].done[slot]`; compare with `g_pool[slot].daily_limit`; if already at limit, return `ESP_ERR_NOT_ALLOWED`.
+   - Increment `g_daily[dev_idx].done[slot]`.
+   - Outside spinlock: call `act_mngr_daily_save(dev_idx)`.
+   - Get current counter: `old_ctr = device_reg_entry_counter_get(dev_idx)`.
+   - Set new counter: `device_reg_entry_counter_set(dev_idx, old_ctr + credits_s)`.
+   - Build `act_credit_log_entry_t` entry (timestamp, act_id, credits_s, completion_time_s).
+   - Under spinlock: write to log ring buffer (`g_log_head`, `g_log_count` per user).
+   - Outside spinlock: call `act_mngr_log_save(dev_idx, head_slot, &entry)`; update `ul_N_hd` and `ul_N_cnt` in NVS.
+   - If `config_mngr_activity_credit_buzzer_en_get()` returns `true`: call `buzzer_pattern_play(BUZZER_PATTERN_ACTIVITY_CREDIT)`.
+   - Post `ESPORT_EVENT_ACTIVITY_CREDITED` (no payload) via `esp_event_post`.
+   - Return `ESP_OK`.
+
+   g. **`act_mngr_credit_log_read(dev_idx, p_out, max_count)`**:
+   - Reads up to `min(max_count, g_log_count[dev_idx])` entries from NVS in reverse-chronological order (newest first), starting from `(g_log_head[dev_idx] - 1 + MAX) % MAX` and stepping backwards.
+   - Returns actual count written to `p_out`.
+
+   h. Implement all remaining getters/setters/query functions following the patterns above.
+
+   i. Follow `cctemplate` structure with `gp_tag = "act_mngr"`, all section separators, and `/*** end of file ***/` footer.
+
+6. **`main/CMakeLists.txt`** — add `"src/activity_manager.c"` to the `SRCS` list.
+
+7. **`main/src/time_counter.c`** — in `time_ctr_tick_cb()`, add a periodic daily-reset check: add a `static uint16_t g_act_reset_ticks = 0U` counter; increment it each tick; when `g_act_reset_ticks >= 60U`, call `act_mngr_daily_reset_check()` and reset to 0. Add `#include "activity_manager.h"`.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `act_mngr_activity_add()` with 30 different activities returns `ESP_OK` each time; 31st call returns `ESP_ERR_NO_MEM`.
+- [ ] Adding an activity with empty name or `daily_limit = 0` returns `ESP_ERR_INVALID_ARG`.
+- [ ] `act_mngr_activity_get(id, &e)` returns `ESP_OK` and correct fields for a known ID.
+- [ ] `act_mngr_activity_get(0xDEAD, &e)` (unknown ID) returns `ESP_ERR_NOT_FOUND`.
+- [ ] `act_mngr_activity_remove(id)` removes from pool; `act_mngr_activity_count()` decrements.
+- [ ] Remove propagates: assigned slots holding that ID are cleaned from all users.
+- [ ] After `act_mngr_init()` reinit (simulated reboot), all pool entries, assignments, log head/count, and `g_next_id` are restored from NVS.
+- [ ] `act_mngr_user_assign(dev_idx, act_id)` returns `ESP_OK`; `act_mngr_user_is_assigned()` returns `true`.
+- [ ] Assigning a 21st activity to one user returns `ESP_ERR_NO_MEM`.
+- [ ] `act_mngr_activity_credit(dev_idx, act_id, credits_s, 0)`: device counter increments by `credits_s`.
+- [ ] Calling credit on an activity not assigned to the user returns `ESP_ERR_INVALID_STATE`.
+- [ ] Calling credit on a non-existent activity ID returns `ESP_ERR_NOT_FOUND`.
+- [ ] Calling credit with `credits_s = 0` returns `ESP_ERR_INVALID_ARG`.
+- [ ] `act_mngr_user_daily_limit_reached()` returns `false` initially; returns `true` after `daily_limit` credits.
+- [ ] Credit beyond `daily_limit` on the same day returns `ESP_ERR_NOT_ALLOWED`.
+- [ ] Daily count resets on simulated day change: set `g_daily[N].date_ymd` to yesterday's YYYYMMDD; next call to `act_mngr_activity_credit()` resets counts and succeeds.
+- [ ] Credit log ring buffer: after 35 credits to the same user, `act_mngr_credit_log_count()` returns 30 (capped); newest entries are kept.
+- [ ] Credit log order: `act_mngr_credit_log_read()` returns entries newest-first.
+- [ ] Log survives reboot: after reinit, previously logged entries are readable.
+- [ ] `ESPORT_EVENT_ACTIVITY_CREDITED` is posted exactly once per successful credit.
+- [ ] `BUZZER_PATTERN_ACTIVITY_CREDIT` plays the correct 2-on 1-off 2-on sequence when `activity_credit_buzzer_en` is `true`.
+- [ ] With `activity_credit_buzzer_en == false`: `act_mngr_activity_credit()` succeeds but no buzzer pattern plays.
+- [ ] `config_mngr_activity_credit_buzzer_en_set(false)` returns `ESP_OK`; value survives reinit.
+- [ ] Factory default `true` applied when NVS key `"ac_bz_en"` is absent.
+- [ ] `act_mngr_daily_reset_check()` is called from `time_ctr_tick_cb()` approximately once per minute.
+- [ ] No heap allocation, no NVS access, and no ESP event posting occur inside the spinlock.
+
+---
+
+### Phase 7.3 — HTTP Server: Activities Pages
+
+#### Goal
+
+Create `http_server_activities.c` / `http_server_activities.h` handling four routes: `GET /activities/manage`, `POST /activities/manage`, `GET /activities`, and the authentication guard common to all four. Register the routes in `http_server.c` and increase `max_uri_handlers`.
+
+#### Inputs
+
+- `docs/1-specification.md` §6.X (Phase 7.1 output)
+- `main/inc/activity_manager.h` (Phase 7.2 output)
+- `main/inc/device_registry.h` (existing)
+- `main/src/http_server_config.c` — reference for `http_srv_cfg_auth_check()` (already declared in `http_server_config.h`)
+- `main/inc/http_server_utils.h` (existing helpers)
+- `main/src/http_server.c` (existing — URI registration)
+
+#### Tasks
+
+1. **Create `main/inc/http_server_activities.h`** (internal header):
+   - Declare:
+     ```c
+     esp_err_t http_srv_activities_manage_get_handler(httpd_req_t *p_req);
+     esp_err_t http_srv_activities_manage_post_handler(httpd_req_t *p_req);
+     esp_err_t http_srv_activities_get_handler(httpd_req_t *p_req);
+     ```
+   - Guard with `HTTP_SERVER_ACTIVITIES_H`; use `hhtemplate` structure.
+
+2. **Create `main/src/http_server_activities.c`**:
+
+   a. **`http_srv_activities_manage_get_handler()`** (GET /activities/manage):
+   - Call `http_srv_cfg_auth_check(p_req)`; return `ESP_OK` if auth fails (401 already sent).
+   - Allocate HTML buffer from heap (`HTTP_SRV_HTML_BUF_LEN` bytes); return HTTP 500 on failure.
+   - Build HTML page with two sections:
+
+     *Global Activity Pool section:*
+     - A table listing all `act_mngr_activity_count()` activities (`act_mngr_activity_slot_get()` for each slot).
+     - Each row: hidden `<input name="act_id" value="N">`, name `<input type="text" name="act_name_N" maxlength="20">`, credit h:mm:ss `<input type="text" name="act_credit_N">` with auto-format `oninput` (same pattern as device counter field in `/config`), time limit h:mm:ss `<input type="text" name="act_limit_N">`, daily limit `<input type="number" name="act_daily_N" min="1" max="255">`, Update button (`name="action" value="update_N"`), Delete button (`name="action" value="delete_N"`).
+     - Below table: "Add Activity" sub-form — name, credit h:mm:ss, time limit h:mm:ss, daily limit, Add button (`name="action" value="add_activity"`).
+
+     *Activity Assignments section:*
+     - For each registered device (`device_reg_entry_count()` entries): a sub-section showing the device nickname + a table of its assigned activities with Unassign buttons. Below the table: a `<select>` of all pool activities not yet assigned to this device, with an Assign button.
+     - Unassign: `name="action" value="unassign_N_M"` where N=dev_idx, M=act_id.
+     - Assign: `name="action" value="assign_N"` with a `<select name="new_act_N">` of available activity IDs.
+
+   - Include a "Back to Activities" link to `/activities` and a "Back to Config" link to `/config`.
+
+2. **`main/src/http_server_config.c`** — add the activity credit buzzer enable field to `GET /config` and `POST /config` handlers:
+   - **GET handler**: add one checkbox field to the config form HTML:
+     - Label: "Activity credit beep"
+     - `<input type="checkbox" name="activity_credit_buzzer_en" value="1"` with `checked` attribute if `config_mngr_activity_credit_buzzer_en_get()` returns `true`.
+   - **POST handler**: parse `activity_credit_buzzer_en`:
+     - Field present → `b_enabled = true`; field absent → `b_enabled = false` (standard checkbox behaviour).
+     - Call `config_mngr_activity_credit_buzzer_en_set(b_enabled)`.
+     - No range validation required.
+   - Place the field in the config form directly below the existing "Buzzer feedback" (`buzzer_enabled`) checkbox, so both buzzer-related settings are grouped together.
+
+   b. **`http_srv_activities_manage_post_handler()`** (POST /activities/manage):
+   - Call `http_srv_cfg_auth_check(p_req)`.
+   - Read body (URL-encoded, up to `HTTP_SRV_POST_BODY_MAX_LEN`).
+   - Parse `action` field.
+   - **`action == "add_activity"`**: parse name (validate ≤20 chars, non-empty), credit h:mm:ss (`hms_to_s()`), time limit h:mm:ss, daily limit (1–255). Call `act_mngr_activity_add()`. Handle `ESP_ERR_NO_MEM` ("Pool full — max 30 activities") and `ESP_ERR_INVALID_ARG` as HTTP 400.
+   - **`action == "update_N"`** (N = activity ID): parse and validate same fields; call `act_mngr_activity_update(N, ...)`. Return HTTP 400 on `ESP_ERR_NOT_FOUND` or `ESP_ERR_INVALID_ARG`.
+   - **`action == "delete_N"`**: call `act_mngr_activity_remove(N)`. Ignore `ESP_ERR_NOT_FOUND` (idempotent).
+   - **`action == "assign_N"`** (N = dev_idx): parse `new_act_N` field as act_id. Call `act_mngr_user_assign(N, act_id)`. Handle `ESP_ERR_NO_MEM` ("Max 20 activities per user"), `ESP_ERR_NOT_FOUND`, `ESP_ERR_INVALID_STATE` ("Already assigned").
+   - **`action == "unassign_N_M"`** (N = dev_idx, M = act_id): call `act_mngr_user_unassign(N, M)`.
+   - On success: redirect HTTP 303 to `/activities/manage?saved=1`.
+   - On error: respond HTTP 400 with error description.
+
+   c. **`http_srv_activities_get_handler()`** (GET /activities):
+   - Call `http_srv_cfg_auth_check(p_req)`.
+   - Allocate HTML buffer; return HTTP 500 on failure.
+   - Build HTML page:
+     - `<h1>Activities</h1>`
+     - A `<select id="user-select">` combobox populated with all registered devices (from `device_reg_entry_get()`). Default to device 0 if any are registered.
+     - A `<div id="total-credits">` placeholder updated by JS.
+     - A `<div id="activity-list">` placeholder populated by JS on combobox change.
+     - A `<div id="credit-log">` placeholder populated by JS on combobox change.
+     - Inline JavaScript:
+       - `loadUser(dev_idx)`: calls `fetch('/api/activities?device_idx=' + dev_idx)` and `fetch('/api/activities/log?device_idx=' + dev_idx)`.
+       - On activities response: builds the activity table with "Credit h:mm:ss" buttons. Buttons call `creditActivity(dev_idx, act_id, credits_s)`. Disabled if `!data.available`.
+       - `creditActivity(dev_idx, act_id, credits_s)`: sends `POST /api/activities/credit` with JSON body; on success updates the total-credits display and disables the button if now at daily limit.
+       - `fetch('/api/status')` to update total credits display (using `devices[dev_idx].counter_hms`).
+       - On log response: builds the credit log table.
+       - Calls `loadUser(0)` on page load; calls `loadUser(dev_idx)` on combobox `change` event.
+     - The page is self-contained; no external CSS/JS.
+   - Include a "Manage Activities" link to `/activities/manage`.
+
+   d. Define any needed local buffer-size constants at the top of the file (e.g. `ACT_HTML_BUF_LEN`). All buffers > 512 bytes are heap-allocated. Stack variables ≤ 512 bytes total in any call chain.
+
+   e. Define a static helper `hms_str_to_s(const char *p_str, uint32_t *p_out)` that splits on `:`, expects exactly two separators, converts tokens with `strtoul`, and validates minutes and seconds 0–59. Returns `ESP_ERR_INVALID_ARG` on bad format.
+
+   f. Follow `cctemplate` structure with `gp_tag = "http_srv_act"`.
+
+3. **`main/src/http_server.c`** — register four new URI handlers:
+   ```c
+   { .uri = "/activities/manage", .method = HTTP_GET,  .handler = http_srv_activities_manage_get_handler  }
+   { .uri = "/activities/manage", .method = HTTP_POST, .handler = http_srv_activities_manage_post_handler }
+   { .uri = "/activities",        .method = HTTP_GET,  .handler = http_srv_activities_get_handler         }
+   ```
+   Increase `cfg.max_uri_handlers` from `15U` to `18U` (adding 3 new routes; one more is added in Phase 7.4).
+
+4. **`main/CMakeLists.txt`** — add `"src/http_server_activities.c"` to `SRCS`.
+
+#### Notes
+
+> Stack budget: no function in `http_server_activities.c` may allocate more than 512 bytes of local variables on the stack at any point. All HTML and POST body buffers are heap-allocated.
+
+> `hms_str_to_s()` is local to this translation unit (static). Do not move it to `http_server_utils.c` unless another file needs it — keep it `static`.
+
+> The `GET /activities` page uses JavaScript to dynamically load activity lists and the credit log. The page itself is very thin HTML; all dynamic content is populated by `fetch()` calls after load.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `GET /activities/manage` without credentials returns HTTP 401.
+- [ ] `GET /activities/manage` with valid credentials returns HTTP 200 with both form sections.
+- [ ] `POST /activities/manage` with `action=add_activity` and valid fields adds an activity; subsequent `GET` shows it.
+- [ ] `POST /activities/manage` with an activity name longer than 20 chars returns HTTP 400.
+- [ ] `POST /activities/manage` with `daily_limit=0` returns HTTP 400.
+- [ ] `POST /activities/manage` with `action=add_activity` when pool is full returns HTTP 400 "Pool full".
+- [ ] `POST /activities/manage` with `action=update_N` updates name/credit/limit; GET shows updated values.
+- [ ] `POST /activities/manage` with `action=delete_N` removes activity; GET no longer shows it.
+- [ ] `POST /activities/manage` with `action=assign_N` assigns activity to user; GET assignment section shows it.
+- [ ] `POST /activities/manage` with `action=unassign_N_M` removes assignment.
+- [ ] Assigning a 21st activity to one user returns HTTP 400 "Max 20 activities per user".
+- [ ] `GET /activities` without credentials returns HTTP 401.
+- [ ] `GET /activities` with valid credentials returns HTTP 200 with HTML containing user combobox and JS.
+- [ ] `GET /activities` page JavaScript (by inspection): `loadUser()`, `creditActivity()`, combobox `change` handler are present.
+- [ ] `GET /activities` page includes link to `/activities/manage`.
+- [ ] Credit h:mm:ss input field in manage page includes `oninput` auto-format handler.
+- [ ] `hms_str_to_s()` correctly parses `"1:30:00"` to 5400, `"0:00:00"` to 0, and rejects `"abc"` and `"1:2"`.
+- [ ] No local variable block exceeds 512 bytes on the stack in any handler.
+- [ ] All three new routes are registered in `http_server.c`; `max_uri_handlers` is `18U`.
+
+---
+
+### Phase 7.4 — HTTP Server: Activity Credit API
+
+#### Goal
+
+Add three new JSON API endpoints to `http_server_api.c`: `GET /api/activities`, `POST /api/activities/credit`, and `GET /api/activities/log`. Register the new route in `http_server.c`.
+
+#### Inputs
+
+- `docs/1-specification.md` §6.X (Phase 7.1 output)
+- `main/src/http_server_api.c` (existing)
+- `main/inc/activity_manager.h` (Phase 7.2 output)
+- `main/inc/device_registry.h`, `main/inc/time_manager.h` (existing)
+- `main/src/http_server.c` (Phase 7.3 output — `max_uri_handlers` already at 18U)
+- `main/inc/http_server_config.h` — for `http_srv_cfg_auth_check()` (credit endpoint requires auth)
+
+#### Tasks
+
+1. **`main/src/http_server_api.c`** — add `#include "activity_manager.h"` and `#include "http_server_config.h"`.
+
+2. **`GET /api/activities` handler** (`http_srv_api_activities_get_handler`):
+   - Parse optional query parameter `device_idx` (0–3) from the URI using `httpd_req_get_url_query_str()` + `httpd_query_key_value()`. If absent, set `dev_idx = 0xFF` (no user filter).
+   - Build JSON response:
+     ```
+     { "activities": [ ... ] }
+     ```
+   - Iterate `act_mngr_activity_count()` slots; for each slot call `act_mngr_activity_slot_get()`.
+   - When `dev_idx != 0xFF`: only include activities that `act_mngr_user_is_assigned(dev_idx, entry.id)` returns `true` for AND have `entry.credit_s > 0`. Include `"done_today"` and `"available"` fields for each.
+   - When `dev_idx == 0xFF`: include all activities; omit `"done_today"` and `"available"`.
+   - Format `credit_s` and `time_limit_s` as h:mm:ss strings (`h:mm:ss` format: `"%u:%02u:%02u"`).
+   - Heap-allocate the JSON buffer (4 096 bytes is sufficient for 30 activities).
+   - Return `Content-Type: application/json`.
+
+3. **`POST /api/activities/credit` handler** (`http_srv_api_activities_credit_handler`):
+   - Call `http_srv_cfg_auth_check(p_req)`; if auth fails, return `ESP_OK` (401 already sent).
+   - Read request body (up to 256 bytes); content-type should be `application/json`.
+   - Parse JSON manually using `strstr` / `sscanf` for the four fields (`device_idx`, `act_id`, `credits_s`, `completion_time_s`). Do not use a third-party JSON parser. The body format is fixed and simple:
+     - Extract `"device_idx"`: parse integer using `strstr("\"device_idx\"")` + `strtoul`.
+     - Similarly for `act_id`, `credits_s`, `completion_time_s` (optional; default 0).
+   - Validate: `device_idx` 0–3; `act_id` != 0; `credits_s` > 0.
+   - Call `act_mngr_activity_credit(device_idx, act_id, credits_s, completion_time_s)`.
+   - Map return codes to HTTP responses:
+     - `ESP_OK` → HTTP 200 `{"ok":true,"new_counter_s":<N>,"new_counter_hms":"<H:MM:SS>"}`.
+     - `ESP_ERR_NOT_FOUND` → HTTP 400 `{"error":"activity not found"}`.
+     - `ESP_ERR_INVALID_STATE` → HTTP 400 `{"error":"activity not assigned to user"}`.
+     - `ESP_ERR_NOT_ALLOWED` → HTTP 429 `{"error":"daily limit reached"}`.
+     - `ESP_ERR_INVALID_ARG` → HTTP 400 `{"error":"invalid arguments"}`.
+   - All response JSON is written into a small stack buffer (`char resp[128]` is sufficient).
+
+4. **`GET /api/activities/log` handler** (`http_srv_api_activities_log_get_handler`):
+   - Parse required query parameter `device_idx` (0–3); return HTTP 400 `{"error":"device_idx required"}` if absent or invalid.
+   - Call `act_mngr_credit_log_count(dev_idx)` then `act_mngr_credit_log_read(dev_idx, p_log, count)`.
+   - For each entry: look up activity name via `act_mngr_activity_get(entry.act_id, &act)` (name may be missing if activity was deleted — use `"(deleted)"` as fallback).
+   - Format `timestamp_utc` to local time string using `localtime_r` + `strftime`.
+   - Format `credits_s` as h:mm:ss.
+   - Build JSON `{"log":[...]}` array. Heap-allocate 4 096 bytes for the buffer.
+
+5. **`main/src/http_server.c`** — register one new URI handler:
+   ```c
+   { .uri = "/api/activities/credit", .method = HTTP_POST, .handler = http_srv_api_activities_credit_handler }
+   ```
+   Increase `cfg.max_uri_handlers` from `18U` to `19U`.
+   Also register:
+   ```c
+   { .uri = "/api/activities",      .method = HTTP_GET, .handler = http_srv_api_activities_get_handler      }
+   { .uri = "/api/activities/log",  .method = HTTP_GET, .handler = http_srv_api_activities_log_get_handler  }
+   ```
+   Increase `cfg.max_uri_handlers` from `19U` to `21U`.
+
+   > **Note:** `GET /api/activities` and `GET /api/activities/log` are unauthenticated (read-only), consistent with the existing `/api/*` convention. Only `POST /api/activities/credit` requires auth.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `GET /api/activities` (no `device_idx`) returns HTTP 200 JSON with all pool activities; no `done_today` or `available` fields.
+- [ ] `GET /api/activities?device_idx=0` returns only activities assigned to device 0 with `credit_s > 0`; includes `"done_today"` and `"available"` for each.
+- [ ] Dynamic-credit activities (`credit_s == 0`) are excluded from the response when `device_idx` is specified.
+- [ ] `GET /api/activities?device_idx=0`: `"available"` is `false` when `done_today >= daily_limit`.
+- [ ] `POST /api/activities/credit` without credentials returns HTTP 401.
+- [ ] `POST /api/activities/credit` with valid JSON body returns HTTP 200 with `new_counter_s` and `new_counter_hms`.
+- [ ] `POST /api/activities/credit` when daily limit reached returns HTTP 429 `{"error":"daily limit reached"}`.
+- [ ] `POST /api/activities/credit` for unknown activity ID returns HTTP 400.
+- [ ] `POST /api/activities/credit` for an activity not assigned to the user returns HTTP 400.
+- [ ] `POST /api/activities/credit` with `credits_s = 0` returns HTTP 400.
+- [ ] `POST /api/activities/credit` with missing `completion_time_s` defaults to 0 (no error).
+- [ ] `GET /api/activities/log?device_idx=0` returns HTTP 200 with `{"log":[...]}` (empty array when no credits yet).
+- [ ] `GET /api/activities/log` (no `device_idx`) returns HTTP 400.
+- [ ] Credit log entries appear newest-first; `act_name` is `"(deleted)"` for activities removed after crediting.
+- [ ] All three new routes are registered in `http_server.c`; `max_uri_handlers` is `21U`.
+- [ ] Stack usage in all three handlers is ≤ 512 bytes of local variables.
+
+---
+
+### Phase 7.5 — Integration & Verification
+
+#### Goal
+
+Wire the `activity_manager` module into `main.c`, confirm the build, and verify end-to-end behaviour.
+
+#### Inputs
+
+- All Phase 7.1–7.4 outputs.
+- `main/src/main.c` (existing)
+
+#### Tasks
+
+1. **`main/src/main.c`** — add `#include "activity_manager.h"` and call `act_mngr_init()` after `device_reg_init()` and before `wifi_mngr_init()`, guarded by `ESP_ERROR_CHECK`.
+
+2. Run `idf.py build` and fix any remaining compilation or linker errors.
+
+3. **End-to-end checklist:**
+
+   | #  | Test                                                                                                               | Pass/Fail |
+   | -- | ------------------------------------------------------------------------------------------------------------------ | --------- |
+   | 1  | `GET /activities/manage` without auth → HTTP 401                                                                   |           |
+   | 2  | `GET /activities/manage` with auth → HTTP 200 with both form sections                                             |           |
+   | 3  | Add activity "Read 30 min" (credit 0:30:00, limit 0:30:00, daily 1) → appears in GET                              |           |
+   | 4  | Assign activity to device 0 via manage page → device 0 shows it on `/activities`                                  |           |
+   | 5  | `GET /activities` page: combobox shows registered devices; JS `loadUser()` present                                |           |
+   | 6  | `POST /api/activities/credit` with valid body → device counter increments; HTTP 200 returned                      |           |
+   | 7  | Credit button on `/activities` page → calls API, counter updates, button disabled after daily limit               |           |
+   | 8  | `POST /api/activities/credit` a second time on same day (daily_limit=1) → HTTP 429                                |           |
+   | 9  | Buzzer plays "double ding" on successful credit                                                                    |           |
+   | 10 | `GET /api/activities/log?device_idx=0` → credit log shows entry with correct timestamp and credits_hms            |           |
+   | 11 | Power cycle (reboot): activity pool, assignments, credit log, and daily done counts restored from NVS             |           |
+   | 12 | Simulated day change (set `date_ymd` to yesterday in NVS, reinit): daily done count resets; button re-enabled     |           |
+   | 13 | Delete activity from manage page → removed from pool and from all user assignment lists                           |           |
+   | 14 | `GET /api/activities?device_idx=0`: dynamic-credit activity (`credit_s=0`) is excluded from response             |           |
+   | 15 | `POST /api/activities/credit` for unassigned activity → HTTP 400 "activity not assigned to user"                  |           |
+   | 16 | `GET /activities/manage` shows 30 activities in pool; add button returns HTTP 400 "Pool full" on 31st add attempt |           |
+   | 17 | Assigning 21st activity to a user returns HTTP 400 "Max 20 activities per user"                                   |           |
+   | 18 | `ESPORT_EVENT_ACTIVITY_CREDITED` fires exactly once per successful API credit call                                 |           |
+   | 19 | All existing endpoints (`/`, `/config`, `/api/status`, `/ota`, etc.) respond correctly — no regression            |           |
+   | 20 | Set `activity_credit_buzzer_en = false` on `/config` page → buzzer silent on next credit; counter still increments |           |
+   | 21 | Re-enable `activity_credit_buzzer_en = true` → buzzer resumes on next credit                                       |           |
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and zero warnings (`-Werror` enforced).
+- [ ] `act_mngr_init()` is called in `app_main()` after `device_reg_init()`.
+- [ ] All 21 end-to-end tests pass.
+- [ ] No assertion failures or watchdog triggers during 10-minute continuous operation.
+- [ ] `max_uri_handlers` in `http_server.c` is `21U`.
+
+---
+
+### Phase 7.6 — Documentation & README Update
+
+#### Goal
+
+Update all project documentation to reflect the complete Feature 7 implementation. Bring `docs/1-specification.md` up to date with all new modules, APIs, and configuration parameters. Update `README.md` to describe the Activity Credits feature for end users and developers.
+
+#### Inputs
+
+- All Phase 7.1–7.5 outputs.
+- `docs/1-specification.md` (current — Phase 7.1 output)
+- `README.md` (existing)
+- `docs/2-development_plan.md` (current)
+
+#### Tasks
+
+1. **`docs/1-specification.md`** — verify all sections updated by Phase 7.1 are consistent with the final implementation.  Correct any discrepancies between the spec and the implemented code:
+   - §3: Confirm `activity_credit_buzzer_en` row is present with NVS key `"ac_bz_en"`, type uint8, default `true`.
+   - §4 Architecture diagram: confirm Activity Manager block is present.
+   - §4 File Layout: confirm `activity_manager.h/c` and `http_server_activities.h/c` are listed.
+   - §5.X Activity Manager: confirm full module spec (data model, NVS, API, daily-reset, thread safety) is accurate.
+   - §5.1 Config Manager: confirm `config_mngr_activity_credit_buzzer_en_get/set()` are listed.
+   - §5.10 Buzzer: confirm `BUZZER_PATTERN_ACTIVITY_CREDIT = 5` and the `activity_credit_buzzer_en` guard are documented.
+   - §6 Web Interface: confirm `GET /activities`, `GET /activities/manage`, `GET /api/activities`, `POST /api/activities/credit`, `GET /api/activities/log` are all documented.
+   - §6.2 Config Page: confirm "Activity credit beep" checkbox field is listed in the fields table.
+   - §7.1 Boot Sequence: confirm `act_mngr_init()` step is present.
+   - §8 NVS Layout: confirm `esport_act` namespace with full key table is present; confirm `"ac_bz_en"` is in `esport_cfg` table.
+   - §9 Event Bus: confirm `ESPORT_EVENT_ACTIVITY_CREDITED` is listed.
+   - Module Prefix Table (in `docs/2-development_plan.md`): confirm `activity_manager` and `http_server_activities` rows are present.
+
+2. **`README.md`** — add or update a section describing Feature #7 (Activity Credits):
+   - Section title: "Activity Credits"
+   - Describe the concept: admin-defined activity pool, user assignments, daily limits, credit log.
+   - Describe the two new web pages: `/activities` (award page) and `/activities/manage` (admin manager page), both requiring the config password.
+   - Describe the JSON API: `GET /api/activities`, `POST /api/activities/credit`, `GET /api/activities/log`.
+   - Describe gamification: the `time_limit_s` field and `completion_time_s` in the credit API enable client-side games to compute dynamic credit amounts.
+   - Mention the buzzer confirmation beep and the "Activity credit beep" config toggle on the `/config` page.
+   - Keep the section concise and user-facing; refer readers to `docs/1-specification.md` for full technical detail.
+
+3. **`docs/2-development_plan.md`** — make any final corrections:
+   - Verify the Module Prefix Table includes `activity_manager | act_mngr_ | ACT_MNGR_` and `http_server_activities | http_srv_ | HTTP_SRV_`.
+   - Verify the global and local Quick Reference tables are consistent and include Phase 7.6.
+
+#### Acceptance Criteria
+
+- [ ] `docs/1-specification.md` §3 includes `activity_credit_buzzer_en` (`"ac_bz_en"`) under `esport_cfg`.
+- [ ] `docs/1-specification.md` §5.1 lists `config_mngr_activity_credit_buzzer_en_get/set()`.
+- [ ] `docs/1-specification.md` §5.X Activity Manager fully documents the module.
+- [ ] `docs/1-specification.md` §6.2 Config Page field table includes "Activity credit beep" checkbox.
+- [ ] `docs/1-specification.md` §8 includes both the `esport_act` namespace and `"ac_bz_en"` in `esport_cfg`.
+- [ ] `README.md` contains a clear "Activity Credits" section describing the feature for new users.
+- [ ] `README.md` mentions the `/activities` and `/activities/manage` pages and auth requirement.
+- [ ] `README.md` mentions the gamification API (`POST /api/activities/credit` with `completion_time_s`).
+- [ ] `README.md` mentions the "Activity credit beep" config toggle.
+- [ ] `docs/2-development_plan.md` Module Prefix Table includes both new module rows.
+- [ ] All three documents are internally consistent with each other.
