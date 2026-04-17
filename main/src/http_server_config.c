@@ -1356,10 +1356,56 @@ esp_err_t http_srv_config_pwd_post_handler(httpd_req_t * p_req)
         return ESP_OK;
     }
 
-    /* Redirect to GET /config/pwd?saved=1. */
-    (void)httpd_resp_set_status(p_req, "303 See Other");
-    (void)httpd_resp_set_hdr(p_req, "Location", "/config/pwd?saved=1");
-    (void)httpd_resp_sendstr(p_req, "");
+    /* Serve the success page inline — a redirect would cause the browser to
+     * re-authenticate with the now-stale cached credentials, triggering a 401. */
+    char max_len_str[8];
+    (void)snprintf(max_len_str, sizeof(max_len_str), "%u",
+        (unsigned)CONFIG_MNGR_CFG_PASSWORD_MAX_LEN);
+
+    (void)httpd_resp_set_type(p_req, "text/html");
+
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<!DOCTYPE html><html><head>"
+        "<meta charset=\"UTF-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>ESPort-fi32 -- Config Password</title>"
+        "<style>"
+        "body{font-family:sans-serif;max-width:500px;margin:2em auto;padding:0 1em;}"
+        "h1{font-size:1.3em;}h2{font-size:1.1em;margin-top:1.5em;}"
+        ".card{border:1px solid #ccc;border-radius:6px;padding:1em;margin:1em 0;}"
+        "label{display:block;margin:0.4em 0 0.1em;}"
+        "input[type=password]{width:100%;box-sizing:border-box;padding:0.4em;}"
+        "button,.btn{background:#2a6db5;color:#fff;border:none;padding:0.5em 1.2em;"
+        "border-radius:4px;cursor:pointer;text-decoration:none;display:inline-block;"
+        "margin-top:0.8em;}"
+        "button:hover,.btn:hover{background:#1e5490;}"
+        ".ok{color:green;font-weight:bold;}"
+        "nav a{margin-right:1em;}"
+        "</style></head><body>"
+        "<h1>Config Password</h1>");
+
+    (void)httpd_resp_sendstr_chunk(p_req, "<p class=\"ok\">Password saved successfully.</p>");
+
+    static char form_buf[512];
+    (void)snprintf(form_buf, sizeof(form_buf),
+        "<div class=\"card\"><h2>Change Config Password</h2>"
+        "<form method=\"POST\" action=\"/config/pwd\">"
+        "<label>Current password</label>"
+        "<input type=\"password\" name=\"current_pwd\" required>"
+        "<label>New password (max %s chars)</label>"
+        "<input type=\"password\" name=\"new_pwd\" maxlength=\"%s\" required>"
+        "<label>Confirm new password</label>"
+        "<input type=\"password\" name=\"confirm_pwd\" maxlength=\"%s\" required>"
+        "<button type=\"submit\">Save</button>"
+        "</form></div>",
+        max_len_str, max_len_str, max_len_str);
+    (void)httpd_resp_sendstr_chunk(p_req, form_buf);
+
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<nav><a class=\"btn\" href=\"/config\">Back to Configuration</a></nav>"
+        "</body></html>");
+
+    (void)httpd_resp_sendstr_chunk(p_req, NULL);
     return ESP_OK;
 }
 
