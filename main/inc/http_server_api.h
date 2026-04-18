@@ -141,7 +141,18 @@ esp_err_t http_srv_api_activities_credit_handler(httpd_req_t * p_req);
  * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
  */
 esp_err_t http_srv_api_activities_log_get_handler(httpd_req_t * p_req);
-
+/**
+ * \brief Handler for \c GET /api/dyn.
+ *
+ * Returns the device PIN and the list of assigned dynamic activities with
+ * daily status for the device specified by the required \c device_idx query
+ * parameter.  No admin auth required.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_api_dyn_get_handler(httpd_req_t * p_req);
 #ifdef __cplusplus
 }
 #endif

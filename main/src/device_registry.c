@@ -11,12 +11,14 @@
 
 #include "device_registry.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_rom_crc.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "nvs.h"
@@ -849,6 +851,42 @@ static void device_reg_counters_save_all(void)
     {
         (void)device_reg_entry_save(i);
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Compute a deterministic 8-hex-char PIN from a device's registered MAC address.
+ *
+ * \param[in]  dev_idx    Entry index (0 to #DEVICE_REG_MAX_ENTRIES-1).
+ * \param[out] p_pin_out  Caller-supplied buffer of at least #DEVICE_REG_PIN_LEN + 1 bytes.
+ *
+ * \return \c ESP_OK on success.
+ * \return \c ESP_ERR_INVALID_ARG when \p dev_idx is out of range or the slot is unregistered.
+ */
+esp_err_t device_reg_pin_compute(uint8_t dev_idx, char * p_pin_out)
+{
+    if ((dev_idx >= (uint8_t)DEVICE_REG_MAX_ENTRIES) || (NULL == p_pin_out))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    device_reg_entry_t entry;
+    esp_err_t          ret = device_reg_entry_get(dev_idx, &entry);
+    if (ESP_OK != ret)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    static const uint8_t sc_zero_mac[6U] = { 0U, 0U, 0U, 0U, 0U, 0U };
+    if (0 == memcmp(entry.mac, sc_zero_mac, sizeof(sc_zero_mac)))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint32_t crc = esp_rom_crc32_be(0U, entry.mac, (uint32_t)DEVICE_REG_MAC_LEN);
+    (void)snprintf(p_pin_out, DEVICE_REG_PIN_LEN + 1U, "%08" PRIX32, crc);
+    return ESP_OK;
 }
 
 //--------------------------------------------------------------------------------------------------

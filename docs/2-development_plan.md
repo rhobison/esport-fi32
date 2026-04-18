@@ -1051,6 +1051,12 @@ This section tracks incremental improvements beyond the base specification.  Eac
 | 7.4   | 7       | HTTP Server: Activity Credit API               | `http_server_api.c`                                                    |
 | 7.5   | 7       | Integration & Verification                     | `main.c`                                                               |
 | 7.6   | 7       | Documentation & README Update                  | `docs/1-specification.md`, `docs/2-development_plan.md`, `README.md`   |
+| 8.1   | 8       | Data Model: `b_is_dynamic` & Credit Validation | `activity_manager.h`, `activity_manager.c`, `http_server_activities.c`, `http_server_api.c` |
+| 8.2   | 8       | MAC-Based PIN & Dual Auth Credit API           | `device_registry.h`, `device_registry.c`, `http_server_config.h`, `http_server_config.c`, `http_server_api.c` |
+| 8.3   | 8       | Build Infrastructure & Demo Pages              | `main/dyn_activities/*.html`, `CMakeLists.txt`, `dyn_act_registry.h`, generated `dyn_act_registry.c` |
+| 8.4   | 8       | HTTP Server: `/dyn` Page, File Server & Manage UI | `http_server_dyn.h`, `http_server_dyn.c`, `http_server_activities.c`, `http_server_api.c`, `http_server.c` |
+| 8.5   | 8       | Integration & Verification                     | all prior outputs, `http_server.c`                                     |
+| 8.6   | 8       | Documentation & README Update                  | `docs/1-specification.md`, `docs/2-development_plan.md`, `README.md`   |
 
 ---
 
@@ -4821,9 +4827,9 @@ All Phase 8.1–8.4 outputs, `main/src/main.c` (no changes needed — `act_mngr_
 
 #### Acceptance Criteria
 
-- [ ] `idf.py build` succeeds with zero errors and zero warnings (`-Werror` enforced).
+- [x] `idf.py build` succeeds with zero errors and zero warnings (`-Werror` enforced).
 - [ ] All 22 end-to-end tests pass.
-- [ ] `max_uri_handlers` in `http_server.c` is `24U`.
+- [x] `max_uri_handlers` in `http_server.c` is `24U`.
 - [ ] No assertion failures or watchdog triggers during 10-minute continuous operation.
 
 ---
@@ -4892,17 +4898,17 @@ Update `docs/1-specification.md`, `docs/2-development_plan.md` (Module Prefix Ta
 
 #### Acceptance Criteria
 
-- [ ] `docs/1-specification.md` §4 file layout includes `dyn_act_registry.h`, `http_server_dyn.h/c`, and `dyn_activities/`.
-- [ ] `docs/1-specification.md` §5.X Activity Manager data model includes `b_is_dynamic`; add/update signatures updated; `credit_s == 0` rejection and NVS backward compat noted.
-- [ ] `docs/1-specification.md` §5.X Device Registry documents `device_reg_pin_compute()`.
-- [ ] `docs/1-specification.md` includes a new §5.X for the Dynamic Activity Registry module.
-- [ ] `docs/1-specification.md` includes a new §5.X for the HTTP Server Dynamic module.
-- [ ] `docs/1-specification.md` §6.X `GET /api/dyn` is documented with full JSON schema.
-- [ ] `docs/1-specification.md` §6.X `POST /api/activities/credit` documents the `pin` field, HTTP 403, and credit cap.
-- [ ] `docs/1-specification.md` §8 NVS `act_mngr_entry_t` blob reflects `b_is_dynamic` and backward-compat note.
-- [ ] `README.md` contains a clear "Dynamic Activities (Mini-Games)" section covering admin setup, kid workflow, PIN system, credit cap, and adding new games.
-- [ ] `docs/2-development_plan.md` Module Prefix Table includes `dyn_act_registry | dyn_act_ | DYN_ACT_` and `http_server_dyn | http_srv_dyn_ | HTTP_SRV_DYN_`.
-- [ ] All three documents are internally consistent with each other.
+- [x] `docs/1-specification.md` §4 file layout includes `dyn_act_registry.h`, `http_server_dyn.h/c`, and `dyn_activities/`.
+- [x] `docs/1-specification.md` §5.X Activity Manager data model includes `b_is_dynamic`; add/update signatures updated; `credit_s == 0` rejection and NVS backward compat noted.
+- [x] `docs/1-specification.md` §5.X Device Registry documents `device_reg_pin_compute()`.
+- [x] `docs/1-specification.md` includes a new §5.X for the Dynamic Activity Registry module.
+- [x] `docs/1-specification.md` includes a new §5.X for the HTTP Server Dynamic module.
+- [x] `docs/1-specification.md` §6.X `GET /api/dyn` is documented with full JSON schema.
+- [x] `docs/1-specification.md` §6.X `POST /api/activities/credit` documents the `pin` field, HTTP 403, and credit cap.
+- [x] `docs/1-specification.md` §8 NVS `act_mngr_entry_t` blob reflects `b_is_dynamic` and backward-compat note.
+- [x] `README.md` contains a clear "Dynamic Activities (Mini-Games)" section covering admin setup, kid workflow, PIN system, credit cap, and adding new games.
+- [x] `docs/2-development_plan.md` Module Prefix Table includes `dyn_act_registry | dyn_act_ | DYN_ACT_` and `http_server_dyn | http_srv_dyn_ | HTTP_SRV_DYN_`.
+- [x] All three documents are internally consistent with each other.
 
 ---
 

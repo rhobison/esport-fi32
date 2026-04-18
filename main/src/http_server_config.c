@@ -42,6 +42,7 @@ static const char * gp_tag __attribute__((unused)) = "http_srv_config";
 // Internal Function Prototypes
 //==================================================================================================
 
+static bool      http_srv_cfg_credentials_valid(httpd_req_t * p_req);
 static esp_err_t parse_mac_address(const char * p_str, uint8_t * p_mac_out);
 
 //==================================================================================================
@@ -1444,6 +1445,65 @@ esp_err_t http_srv_config_pwd_post_handler(httpd_req_t * p_req)
 //==================================================================================================
 
 /**
+ * \brief Validate HTTP Basic Auth credentials without sending any HTTP response.
+ *
+ * Reads the \c Authorization header, decodes the Base64 payload, and checks
+ * the username and password against the stored config credentials.  This
+ * helper performs no I/O on the request socket.
+ *
+ * \param[in] p_req  HTTP request handle.
+ *
+ * \return \c true when credentials are valid, \c false otherwise.
+ */
+static bool http_srv_cfg_credentials_valid(httpd_req_t * p_req)
+{
+    size_t hdr_len = httpd_req_get_hdr_value_len(p_req, "Authorization");
+    if (0U == hdr_len)
+    {
+        return false;
+    }
+
+    static char hdr_buf[HTTP_SRV_CFG_AUTH_HDR_MAX];
+    if (ESP_OK != httpd_req_get_hdr_value_str(p_req, "Authorization", hdr_buf, sizeof(hdr_buf)))
+    {
+        return false;
+    }
+
+    if (0 != strncmp(hdr_buf, "Basic ", HTTP_SRV_CFG_BASIC_PREFIX_LEN))
+    {
+        return false;
+    }
+
+    static char decoded[HTTP_SRV_CFG_DECODED_MAX + 1U];
+    int         dec_len =
+        http_srv_base64_decode(hdr_buf + HTTP_SRV_CFG_BASIC_PREFIX_LEN, decoded, sizeof(decoded));
+    if (dec_len < 0)
+    {
+        return false;
+    }
+    decoded[dec_len] = '\0';
+
+    char * p_colon = strchr(decoded, ':');
+    if (NULL == p_colon)
+    {
+        return false;
+    }
+    *p_colon                = '\0';
+    const char * p_user     = decoded;
+    const char * p_password = p_colon + 1;
+
+    if ((0 != strcmp(p_user, CONFIG_MNGR_CFG_HTTP_USERNAME)) ||
+        !config_mngr_cfg_credentials_check(p_password))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
  * \brief Verify the HTTP Basic Auth header on \p p_req for the config endpoints.
  *
  * Sends a 401 response (with \c WWW-Authenticate header) and returns \c false
@@ -1455,72 +1515,34 @@ esp_err_t http_srv_config_pwd_post_handler(httpd_req_t * p_req)
  */
 bool http_srv_cfg_auth_check(httpd_req_t * p_req)
 {
-    size_t hdr_len = httpd_req_get_hdr_value_len(p_req, "Authorization");
-
-    if (0U == hdr_len)
+    if (http_srv_cfg_credentials_valid(p_req))
     {
-        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
-        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
-        (void)httpd_resp_sendstr(p_req, "Unauthorized");
-        return false;
+        return true;
     }
 
-    static char hdr_buf[HTTP_SRV_CFG_AUTH_HDR_MAX];
-    if (ESP_OK != httpd_req_get_hdr_value_str(p_req, "Authorization", hdr_buf, sizeof(hdr_buf)))
-    {
-        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
-        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
-        (void)httpd_resp_sendstr(p_req, "Unauthorized");
-        return false;
-    }
+    (void)httpd_resp_set_status(p_req, "401 Unauthorized");
+    (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
+    (void)httpd_resp_sendstr(p_req, "Unauthorized");
+    return false;
+}
 
-    /* Verify "Basic " prefix. */
-    if (0 != strncmp(hdr_buf, "Basic ", HTTP_SRV_CFG_BASIC_PREFIX_LEN))
-    {
-        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
-        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
-        (void)httpd_resp_sendstr(p_req, "Unauthorized");
-        return false;
-    }
+//--------------------------------------------------------------------------------------------------
 
-    /* Base64-decode the credential portion. */
-    static char decoded[HTTP_SRV_CFG_DECODED_MAX + 1U];
-    int         dec_len =
-        http_srv_base64_decode(hdr_buf + HTTP_SRV_CFG_BASIC_PREFIX_LEN, decoded, sizeof(decoded));
-
-    if (dec_len < 0)
-    {
-        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
-        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
-        (void)httpd_resp_sendstr(p_req, "Unauthorized");
-        return false;
-    }
-    decoded[dec_len] = '\0';
-
-    /* Split on first ':'. */
-    char * p_colon = strchr(decoded, ':');
-    if (NULL == p_colon)
-    {
-        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
-        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
-        (void)httpd_resp_sendstr(p_req, "Unauthorized");
-        return false;
-    }
-    *p_colon                = '\0';
-    const char * p_user     = decoded;
-    const char * p_password = p_colon + 1;
-
-    /* Check username and password. */
-    if ((0 != strcmp(p_user, CONFIG_MNGR_CFG_HTTP_USERNAME)) ||
-        !config_mngr_cfg_credentials_check(p_password))
-    {
-        (void)httpd_resp_set_status(p_req, "401 Unauthorized");
-        (void)httpd_resp_set_hdr(p_req, "WWW-Authenticate", "Basic realm=\"esport-fi32 Config\"");
-        (void)httpd_resp_sendstr(p_req, "Unauthorized");
-        return false;
-    }
-
-    return true;
+/**
+ * \brief Check HTTP Basic Auth credentials without sending any HTTP response.
+ *
+ * Unlike #http_srv_cfg_auth_check, this function does \b not send an HTTP 401
+ * response on failure; it simply returns \c false.  Use when the caller
+ * intends to try an alternative auth method before deciding to reject the
+ * request.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c true when credentials are valid, \c false otherwise.
+ */
+bool http_srv_cfg_auth_check_silent(httpd_req_t * p_req)
+{
+    return http_srv_cfg_credentials_valid(p_req);
 }
 
 //--------------------------------------------------------------------------------------------------

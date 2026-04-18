@@ -17,6 +17,7 @@
 #include "http_server_dashboard.h"
 #include "http_server_ota.h"
 #include "http_server_activities.h"
+#include "http_server_dyn.h"
 
 #include <string.h>
 
@@ -57,7 +58,7 @@ esp_err_t http_srv_init(void)
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = 80U;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 21U;
+    cfg.max_uri_handlers = 24U;
 
     esp_err_t ret = httpd_start(&gp_server_handle, &cfg);
     if (ESP_OK != ret)
@@ -190,6 +191,25 @@ esp_err_t http_srv_init(void)
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_activities_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_activities_credit_post);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_activities_log_get);
+
+    static const httpd_uri_t sc_uri_dyn_page_get = {
+        .uri     = "/dyn",
+        .method  = HTTP_GET,
+        .handler = http_srv_dyn_page_get_handler,
+    };
+    static const httpd_uri_t sc_uri_dyn_file_get = {
+        .uri     = "/dyn_activities/*",
+        .method  = HTTP_GET,
+        .handler = http_srv_dyn_file_get_handler,
+    };
+    static const httpd_uri_t sc_uri_api_dyn_get = {
+        .uri     = "/api/dyn",
+        .method  = HTTP_GET,
+        .handler = http_srv_api_dyn_get_handler,
+    };
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_dyn_page_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_dyn_file_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_dyn_get);
 
     ESP_LOGI(gp_tag, "started on port %u", (unsigned)cfg.server_port);
     return ESP_OK;

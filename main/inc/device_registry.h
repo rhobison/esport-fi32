@@ -53,6 +53,9 @@ extern "C"
 /** Length of a MAC address in bytes. */
 #define DEVICE_REG_MAC_LEN (6U)
 
+/** Length of the device PIN in characters (excluding NUL terminator). */
+#define DEVICE_REG_PIN_LEN (8U)
+
 /**
  * \brief One entry in the device registry.
  *
@@ -300,6 +303,22 @@ uint32_t device_reg_entry_throughput_kbps_get(uint8_t idx);
  *         \c false otherwise or when \p idx is out of range.
  */
 bool device_reg_entry_is_paused(uint8_t idx);
+
+/**
+ * \brief Compute a deterministic PIN for the device registered at \p dev_idx.
+ *
+ * The PIN is the CRC32 of the device's 6-byte MAC address formatted as 8
+ * uppercase hex characters (e.g. \c "A3B7F201").  The buffer pointed to by
+ * \p p_pin_out must be at least #DEVICE_REG_PIN_LEN + 1 bytes.
+ *
+ * \param[in]  dev_idx    Entry index (0 to #DEVICE_REG_MAX_ENTRIES-1).
+ * \param[out] p_pin_out  Caller-supplied buffer (min #DEVICE_REG_PIN_LEN + 1 bytes).
+ *
+ * \return \c ESP_OK on success; \p p_pin_out is NUL-terminated.
+ * \return \c ESP_ERR_INVALID_ARG when \p dev_idx >= #DEVICE_REG_MAX_ENTRIES or
+ *         the slot's MAC is all-zero (unregistered).
+ */
+esp_err_t device_reg_pin_compute(uint8_t dev_idx, char * p_pin_out);
 
 #ifdef __cplusplus
 }

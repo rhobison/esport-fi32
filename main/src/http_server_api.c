@@ -26,8 +26,10 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 
+#include "activity_manager.h"
 #include "config_manager.h"
 #include "device_registry.h"
+#include "http_server_config.h"
 #include "session_log.h"
 #include "session_tracker.h"
 #include "time_counter.h"
@@ -451,9 +453,6 @@ esp_err_t http_srv_api_sessions_daily_handler(httpd_req_t * p_req)
 
 //--------------------------------------------------------------------------------------------------
 
-#include "activity_manager.h"
-#include "http_server_config.h"
-
 esp_err_t http_srv_api_activities_get_handler(httpd_req_t * p_req)
 {
     /* Parse optional device_idx query parameter. */
@@ -500,14 +499,14 @@ esp_err_t http_srv_api_activities_get_handler(httpd_req_t * p_req)
             continue;
         }
 
-        /* When device_idx specified: only assigned activities with credit_s > 0. */
+        /* When device_idx specified: only assigned static activities (b_is_dynamic == 0). */
         if (b_has_dev)
         {
             if (!act_mngr_user_is_assigned(dev_idx, entry.id))
             {
                 continue;
             }
-            if (0U == entry.credit_s)
+            if (0U != entry.b_is_dynamic)
             {
                 continue;
             }
@@ -563,11 +562,6 @@ esp_err_t http_srv_api_activities_get_handler(httpd_req_t * p_req)
 
 esp_err_t http_srv_api_activities_credit_handler(httpd_req_t * p_req)
 {
-    if (!http_srv_cfg_auth_check(p_req))
-    {
-        return ESP_OK;
-    }
-
     char body[256];
     int  recv_len = httpd_req_recv(p_req, body, sizeof(body) - 1U);
     if (recv_len <= 0)
@@ -625,6 +619,49 @@ esp_err_t http_srv_api_activities_credit_handler(httpd_req_t * p_req)
         }
     }
 
+    /* Parse optional PIN field. */
+    char received_pin[DEVICE_REG_PIN_LEN + 1U];
+    received_pin[0] = '\0';
+    p               = strstr(body, "\"pin\"");
+    if (NULL != p)
+    {
+        /* Locate the opening quote of the value. */
+        p = strchr(p + 5, '"');
+        if (NULL != p)
+        {
+            p++; /* step past opening quote */
+            size_t pin_idx = 0U;
+            while (('\0' != *p) && ('"' != *p) && (pin_idx < DEVICE_REG_PIN_LEN))
+            {
+                received_pin[pin_idx++] = *p++;
+            }
+            received_pin[pin_idx] = '\0';
+        }
+    }
+
+    /* Dual auth: admin Basic Auth OR device PIN. */
+    bool b_admin = http_srv_cfg_auth_check_silent(p_req);
+    bool b_pin   = false;
+
+    if (!b_admin && ('\0' != received_pin[0]))
+    {
+        char expected_pin[DEVICE_REG_PIN_LEN + 1U];
+        if ((device_idx < (uint32_t)DEVICE_REG_MAX_ENTRIES) &&
+            (device_reg_pin_compute((uint8_t)device_idx, expected_pin) == ESP_OK) &&
+            (strncmp(received_pin, expected_pin, DEVICE_REG_PIN_LEN) == 0))
+        {
+            b_pin = true;
+        }
+    }
+
+    if (!b_admin && !b_pin)
+    {
+        httpd_resp_set_status(p_req, "403 Forbidden");
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_sendstr(p_req, "{\"error\":\"unauthorized\"}");
+        return ESP_OK;
+    }
+
     /* Basic input validation. */
     if ((device_idx >= (uint32_t)DEVICE_REG_MAX_ENTRIES) || (ACT_MNGR_NO_ID == act_id) ||
         (0U == credits_s))
@@ -633,6 +670,17 @@ esp_err_t http_srv_api_activities_credit_handler(httpd_req_t * p_req)
         httpd_resp_set_status(p_req, "400 Bad Request");
         httpd_resp_sendstr(p_req, "{\"error\":\"invalid arguments\"}");
         return ESP_OK;
+    }
+
+    /* Credit cap for PIN-authenticated calls. */
+    if (!b_admin && b_pin)
+    {
+        act_mngr_entry_t act_entry;
+        if ((act_mngr_activity_get(act_id, &act_entry) == ESP_OK) &&
+            (credits_s > act_entry.credit_s))
+        {
+            credits_s = act_entry.credit_s;
+        }
     }
 
     esp_err_t credit_ret =
@@ -795,6 +843,153 @@ esp_err_t http_srv_api_activities_log_get_handler(httpd_req_t * p_req)
 #undef LOG_APPEND
 
     free(p_log);
+
+    httpd_resp_set_type(p_req, "application/json");
+    httpd_resp_send(p_req, p_buf, HTTPD_RESP_USE_STRLEN);
+    free(p_buf);
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+#include "dyn_act_registry.h"
+
+/**
+ * \brief Handler for \c GET /api/dyn.
+ *
+ * Returns the PIN and the list of assigned dynamic activities for a device.
+ * Required query parameter: \c device_idx (0\u20133).  No admin auth required.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_api_dyn_get_handler(httpd_req_t * p_req)
+{
+    /* Parse required device_idx query parameter. */
+    char query_buf[32];
+    if (ESP_OK != httpd_req_get_url_query_str(p_req, query_buf, sizeof(query_buf)))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"device_idx required\"}");
+        return ESP_OK;
+    }
+
+    char dev_val[8];
+    if (ESP_OK != httpd_query_key_value(query_buf, "device_idx", dev_val, sizeof(dev_val)))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"device_idx required\"}");
+        return ESP_OK;
+    }
+
+    char * p_end = NULL;
+    long   dv    = strtol(dev_val, &p_end, 10);
+    if ((p_end == dev_val) || (dv < 0L) || (dv >= (long)DEVICE_REG_MAX_ENTRIES))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"device_idx required\"}");
+        return ESP_OK;
+    }
+    uint8_t dev_idx = (uint8_t)dv;
+
+    /* Validate registration. */
+    device_reg_entry_t dev_entry;
+    if (ESP_OK != device_reg_entry_get(dev_idx, &dev_entry))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"device not registered\"}");
+        return ESP_OK;
+    }
+    static const uint8_t sc_zero_mac[6U] = { 0U, 0U, 0U, 0U, 0U, 0U };
+    if (0 == memcmp(dev_entry.mac, sc_zero_mac, 6U))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"device not registered\"}");
+        return ESP_OK;
+    }
+
+    /* Compute PIN. */
+    char pin[DEVICE_REG_PIN_LEN + 1U];
+    if (ESP_OK != device_reg_pin_compute(dev_idx, pin))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "500 Internal Server Error");
+        httpd_resp_sendstr(p_req, "{\"error\":\"pin error\"}");
+        return ESP_OK;
+    }
+
+    /* Build JSON response. */
+    char * p_buf = (char *)malloc(1024U);
+    if (NULL == p_buf)
+    {
+        httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    size_t pos = 0U;
+
+#define DYN_APPEND(fmt, ...) pos += (size_t)snprintf(p_buf + pos, 1024U - pos, fmt, ##__VA_ARGS__)
+
+    DYN_APPEND("{\"pin\":\"%s\",\"device_idx\":%u,\"activities\":[", pin, (unsigned int)dev_idx);
+
+    act_mngr_user_assigns_t assigns;
+    (void)act_mngr_user_assigns_get(dev_idx, &assigns);
+
+    bool first = true;
+    for (uint8_t i = 0U; i < assigns.count; i++)
+    {
+        uint32_t         aid = assigns.act_ids[i];
+        act_mngr_entry_t act_entry;
+        if (ACT_MNGR_NO_ID == aid)
+        {
+            continue;
+        }
+        if (ESP_OK != act_mngr_activity_get(aid, &act_entry))
+        {
+            continue;
+        }
+        if (0U == act_entry.b_is_dynamic)
+        {
+            continue; /* Only dynamic activities. */
+        }
+
+        uint8_t done      = act_mngr_user_daily_done_get(dev_idx, aid);
+        bool    available = !act_mngr_user_daily_limit_reached(dev_idx, aid);
+
+        uint32_t c_h  = act_entry.credit_s / 3600U;
+        uint32_t c_m  = (act_entry.credit_s % 3600U) / 60U;
+        uint32_t c_s  = act_entry.credit_s % 60U;
+        uint32_t tl_h = act_entry.time_limit_s / 3600U;
+        uint32_t tl_m = (act_entry.time_limit_s % 3600U) / 60U;
+        uint32_t tl_s = act_entry.time_limit_s % 60U;
+
+        if (!first)
+        {
+            DYN_APPEND(",");
+        }
+        first = false;
+
+        DYN_APPEND("{\"act_id\":%lu,\"name\":\"%s\","
+                   "\"credit_s\":%lu,"
+                   "\"credits_hms\":\"%lu:%02lu:%02lu\","
+                   "\"time_limit_s\":%lu,"
+                   "\"time_limit_hms\":\"%lu:%02lu:%02lu\","
+                   "\"done_today\":%u,\"available\":%s}",
+            (unsigned long)aid, act_entry.name, (unsigned long)act_entry.credit_s,
+            (unsigned long)c_h, (unsigned long)c_m, (unsigned long)c_s,
+            (unsigned long)act_entry.time_limit_s, (unsigned long)tl_h, (unsigned long)tl_m,
+            (unsigned long)tl_s, (unsigned int)done, available ? "true" : "false");
+    }
+
+    DYN_APPEND("]}");
+
+#undef DYN_APPEND
 
     httpd_resp_set_type(p_req, "application/json");
     httpd_resp_send(p_req, p_buf, HTTPD_RESP_USE_STRLEN);

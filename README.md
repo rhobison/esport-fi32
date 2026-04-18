@@ -37,6 +37,7 @@ ESPort-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 - **Firmware Over-The-Air (FOTA) updates** — upload a new `.bin` via the browser at `/ota` (HTTP Basic Auth protected). Automatic rollback: if the device crashes before the new firmware calls `ota_mngr_init()`, the bootloader reverts to the previous slot. Password configurable via `/ota/pwd`.
 - **Buzzer feedback** — an active buzzer on a configurable GPIO provides audio cues: a beep on session start, a longer beep on session qualification, a triple-beep on session close, and a repeating short tick when pedalling too slowly (after a configurable delay to avoid false alarms from momentary speed fluctuations). Can be disabled via the config page.
 - **Activity Credits** — lets a parent define a pool of up to 30 named activities (e.g. "Bike ride", "Homework", names up to 40 chars). Each activity carries a configurable internet credit (`h:mm:ss`, auto-formatted), optional daily time cap, and a per-device daily click limit. Activities are assigned per registered device. A parent opens `/activities` to view and click **Credit** buttons; each click first shows a confirmation dialog, then adds internet time to that child's counter and plays a double-ding buzzer pattern (configurable). The credit log separates today's entries from earlier ones with a shaded divider. Credit history is recorded in a per-device ring-buffer log (last 30 entries). Managed via `/activities/manage` and a JSON API at `/api/activities`, `/api/activities/credit`, and `/api/activities/log`.
+- **Dynamic Activities (Mini-Games)** — extends Activity Credits with self-contained HTML mini-games embedded directly in the firmware. Kids navigate to `/dyn` on the reward AP, see their assigned mini-games, and play them to earn credits autonomously — no parent involvement needed. See the [Dynamic Activities](#dynamic-activities-mini-games) section below for details.
 - **Fully configurable** — all parameters (SSID, password, seconds-per-pulse, thresholds, timezone, ...) are stored in NVS and can be changed at runtime via the web UI without reflashing.
 
 ---
@@ -253,6 +254,48 @@ docs/
   2-development_plan.md       # Phased development plan
   3-fota_development_plan.md  # FOTA implementation plan
 ```
+
+---
+
+## Dynamic Activities (Mini-Games)
+
+Dynamic Activities extend the Activity Credits system with self-contained HTML mini-games embedded directly in the firmware binary.  Kids play them on the reward AP and earn internet credits autonomously — no parent needs to be present.
+
+### Concept
+
+A dynamic activity is a single `.html` file compiled into the firmware.  It is served from `/dyn_activities/<name>` and plays entirely in the browser — no external resources, no back-end logic.  The game receives the device's PIN and activity parameters as URL query parameters and claims credits by calling `POST /api/activities/credit` with the device-bound PIN.
+
+### Admin setup (parent)
+
+1. Open `/activities/manage` (HTTP Basic Auth required).
+2. In the **Add Activity** row, tick **"Is Dynamic"**.
+3. Choose the mini-game name from the dropdown (populated from the embedded file list).
+4. Set a reference credit (`h:mm:ss`) and daily limit.
+5. Assign the activity to the target child's device.
+
+### Kid workflow
+
+1. On a registered device, navigate to `http://192.168.5.1/dyn` (or whatever the reward AP IP is).
+2. The firmware detects your device automatically (via ARP lookup).
+3. A button for each assigned mini-game appears — tap to launch.
+4. Play the game and tap **Claim Credits**; internet time is added immediately.
+
+### PIN system
+
+Each registered device has a deterministic 8-character uppercase hex PIN computed as CRC32 of its 6-byte MAC address.  The PIN is injected automatically into each mini-game's URL by the `/dyn` page.  It is device-bound and prevents a child from crediting another device's counter.
+
+PIN-authenticated credit calls cannot exceed the activity's reference credit value (`credits_s` is silently capped to `activity.credit_s`).
+
+### Adding new mini-games
+
+1. Create a **self-contained `.html` file** in `main/dyn_activities/` (no external JS/CSS dependencies).
+2. Run `idf.py reconfigure` to regenerate the build files.
+3. Rebuild and reflash.
+4. The filename (without `.html`) becomes the logical name shown in the admin dropdown and used in URLs.
+
+For full technical detail see §5.13, §5.14, §6.10 in [docs/1-specification.md](docs/1-specification.md).
+
+---
 
 ## Finished assembly
 

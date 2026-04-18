@@ -221,6 +221,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<a class=\"btn\" href=\"/config\">Config</a>"
         "<a class=\"btn\" href=\"/activities\">Activities</a>"
         "<a class=\"btn\" href=\"/activities/manage\">Manage Activities</a>"
+        "<a class=\"btn\" href=\"/dyn\">Mini-Games</a>"
         "</p></div>",
         time_local_str, b_synced ? "ok" : "err", b_synced ? "Synced" : "Not synced", up_d, up_h,
         up_m, up_s_rem);
