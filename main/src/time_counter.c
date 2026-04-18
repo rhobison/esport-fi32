@@ -25,6 +25,7 @@
 #include "event_ids.h"
 #include "pulse_input.h"
 #include "buzzer.h"
+#include "activity_manager.h"
 
 //==================================================================================================
 // Internal Constants/Macros/Datatypes
@@ -565,6 +566,15 @@ static void time_ctr_tick_cb(void * p_arg)
     (void)p_arg;
 
     (void)device_reg_tick();
+
+    /* Activity-manager daily-reset check (every 60 ticks ≈ 1 minute). */
+    static uint16_t s_act_reset_ticks = 0U;
+    s_act_reset_ticks++;
+    if (s_act_reset_ticks >= 60U)
+    {
+        act_mngr_daily_reset_check();
+        s_act_reset_ticks = 0U;
+    }
 
     /* Speed-low beep: fire when SESSION or EARNING, speed gate enabled,
      * rider moving but below threshold, and the speed has been continuously

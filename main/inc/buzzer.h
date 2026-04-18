@@ -60,6 +60,7 @@ typedef enum buzzer_pattern_id_tag
     BUZZER_PATTERN_SESSION_CLOSED     = 2,
     BUZZER_PATTERN_SPEED_LOW          = 3,
     BUZZER_PATTERN_PASSWORD_RESET     = 4,
+    BUZZER_PATTERN_ACTIVITY_CREDIT    = 5, /**< Double-ding (2 ON, 1 OFF, 2 ON). */
 } buzzer_pattern_id_t;
 
 //==================================================================================================

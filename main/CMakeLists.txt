@@ -35,6 +35,8 @@ idf_component_register(
         "src/ota_manager.c"
         "src/http_server_ota.c"
         "src/button_reset.c"
+        "src/activity_manager.c"
+        "src/http_server_activities.c"
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)

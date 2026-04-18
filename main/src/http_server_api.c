@@ -451,4 +451,357 @@ esp_err_t http_srv_api_sessions_daily_handler(httpd_req_t * p_req)
 
 //--------------------------------------------------------------------------------------------------
 
+#include "activity_manager.h"
+#include "http_server_config.h"
+
+esp_err_t http_srv_api_activities_get_handler(httpd_req_t * p_req)
+{
+    /* Parse optional device_idx query parameter. */
+    uint8_t dev_idx   = 0xFFU; /* 0xFF = no filter */
+    bool    b_has_dev = false;
+
+    char query_buf[32];
+    if (ESP_OK == httpd_req_get_url_query_str(p_req, query_buf, sizeof(query_buf)))
+    {
+        char dev_val[8];
+        if (ESP_OK == httpd_query_key_value(query_buf, "device_idx", dev_val, sizeof(dev_val)))
+        {
+            char * p_end = NULL;
+            long   dv    = strtol(dev_val, &p_end, 10);
+            if ((p_end != dev_val) && (dv >= 0L) && (dv < (long)DEVICE_REG_MAX_ENTRIES))
+            {
+                dev_idx   = (uint8_t)dv;
+                b_has_dev = true;
+            }
+        }
+    }
+
+    char * p_buf = (char *)malloc(4096U);
+    if (NULL == p_buf)
+    {
+        httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    size_t pos = 0U;
+
+#define ACT_APPEND(fmt, ...) pos += (size_t)snprintf(p_buf + pos, 4096U - pos, fmt, ##__VA_ARGS__)
+
+    ACT_APPEND("{\"activities\":[");
+
+    uint8_t pool_cnt   = act_mngr_activity_count();
+    bool    first_item = true;
+
+    for (uint8_t s = 0U; s < pool_cnt; s++)
+    {
+        act_mngr_entry_t entry;
+        if (ESP_OK != act_mngr_activity_slot_get(s, &entry))
+        {
+            continue;
+        }
+
+        /* When device_idx specified: only assigned activities with credit_s > 0. */
+        if (b_has_dev)
+        {
+            if (!act_mngr_user_is_assigned(dev_idx, entry.id))
+            {
+                continue;
+            }
+            if (0U == entry.credit_s)
+            {
+                continue;
+            }
+        }
+
+        if (!first_item)
+        {
+            ACT_APPEND(",");
+        }
+        first_item = false;
+
+        /* Format credit and time_limit as h:mm:ss. */
+        uint32_t c_h  = entry.credit_s / 3600U;
+        uint32_t c_m  = (entry.credit_s % 3600U) / 60U;
+        uint32_t c_s  = entry.credit_s % 60U;
+        uint32_t tl_h = entry.time_limit_s / 3600U;
+        uint32_t tl_m = (entry.time_limit_s % 3600U) / 60U;
+        uint32_t tl_s = entry.time_limit_s % 60U;
+
+        ACT_APPEND("{\"id\":%lu,\"slot\":%u,\"name\":\"%s\","
+                   "\"credit_s\":%lu,"
+                   "\"credit_hms\":\"%lu:%02lu:%02lu\","
+                   "\"time_limit_s\":%lu,"
+                   "\"time_limit_hms\":\"%lu:%02lu:%02lu\","
+                   "\"daily_limit\":%u",
+            (unsigned long)entry.id, (unsigned int)s, entry.name, (unsigned long)entry.credit_s,
+            (unsigned long)c_h, (unsigned long)c_m, (unsigned long)c_s,
+            (unsigned long)entry.time_limit_s, (unsigned long)tl_h, (unsigned long)tl_m,
+            (unsigned long)tl_s, (unsigned int)entry.daily_limit);
+
+        if (b_has_dev)
+        {
+            uint8_t done      = act_mngr_user_daily_done_get(dev_idx, entry.id);
+            bool    available = (done < entry.daily_limit);
+            ACT_APPEND(",\"done_today\":%u,\"available\":%s", (unsigned int)done,
+                available ? "true" : "false");
+        }
+
+        ACT_APPEND("}");
+    }
+
+    ACT_APPEND("]}");
+
+#undef ACT_APPEND
+
+    httpd_resp_set_type(p_req, "application/json");
+    httpd_resp_send(p_req, p_buf, HTTPD_RESP_USE_STRLEN);
+    free(p_buf);
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t http_srv_api_activities_credit_handler(httpd_req_t * p_req)
+{
+    if (!http_srv_cfg_auth_check(p_req))
+    {
+        return ESP_OK;
+    }
+
+    char body[256];
+    int  recv_len = httpd_req_recv(p_req, body, sizeof(body) - 1U);
+    if (recv_len <= 0)
+    {
+        httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Empty body");
+        return ESP_FAIL;
+    }
+    body[recv_len] = '\0';
+
+    /* Parse JSON fields with strstr + strtoul (simple fixed-format body). */
+    uint32_t device_idx        = 0xFFU;
+    uint32_t act_id            = 0U;
+    uint32_t credits_s         = 0U;
+    uint32_t completion_time_s = 0U;
+
+    const char * p;
+
+    p = strstr(body, "\"device_idx\"");
+    if (NULL != p)
+    {
+        p = strchr(p, ':');
+        if (NULL != p)
+        {
+            device_idx = (uint32_t)strtoul(p + 1, NULL, 10);
+        }
+    }
+
+    p = strstr(body, "\"act_id\"");
+    if (NULL != p)
+    {
+        p = strchr(p, ':');
+        if (NULL != p)
+        {
+            act_id = (uint32_t)strtoul(p + 1, NULL, 10);
+        }
+    }
+
+    p = strstr(body, "\"credits_s\"");
+    if (NULL != p)
+    {
+        p = strchr(p, ':');
+        if (NULL != p)
+        {
+            credits_s = (uint32_t)strtoul(p + 1, NULL, 10);
+        }
+    }
+
+    p = strstr(body, "\"completion_time_s\"");
+    if (NULL != p)
+    {
+        p = strchr(p, ':');
+        if (NULL != p)
+        {
+            completion_time_s = (uint32_t)strtoul(p + 1, NULL, 10);
+        }
+    }
+
+    /* Basic input validation. */
+    if ((device_idx >= (uint32_t)DEVICE_REG_MAX_ENTRIES) || (ACT_MNGR_NO_ID == act_id) ||
+        (0U == credits_s))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"invalid arguments\"}");
+        return ESP_OK;
+    }
+
+    esp_err_t credit_ret =
+        act_mngr_activity_credit((uint8_t)device_idx, act_id, credits_s, completion_time_s);
+
+    char resp[128];
+
+    if (ESP_OK == credit_ret)
+    {
+        uint32_t new_ctr = device_reg_entry_counter_get((uint8_t)device_idx);
+        uint32_t h       = new_ctr / 3600U;
+        uint32_t m       = (new_ctr % 3600U) / 60U;
+        uint32_t s       = new_ctr % 60U;
+        (void)snprintf(resp, sizeof(resp),
+            "{\"ok\":true,\"new_counter_s\":%lu,\"new_counter_hms\":\"%lu:%02lu:%02lu\"}",
+            (unsigned long)new_ctr, (unsigned long)h, (unsigned long)m, (unsigned long)s);
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_sendstr(p_req, resp);
+    }
+    else if (ESP_ERR_NOT_FOUND == credit_ret)
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"activity not found\"}");
+    }
+    else if (ESP_ERR_INVALID_STATE == credit_ret)
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"activity not assigned to user\"}");
+    }
+    else if (ESP_ERR_NOT_ALLOWED == credit_ret)
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "429 Too Many Requests");
+        httpd_resp_sendstr(p_req, "{\"error\":\"daily limit reached\"}");
+    }
+    else
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"invalid arguments\"}");
+    }
+
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t http_srv_api_activities_log_get_handler(httpd_req_t * p_req)
+{
+    char query_buf[32];
+    if (ESP_OK != httpd_req_get_url_query_str(p_req, query_buf, sizeof(query_buf)))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"device_idx required\"}");
+        return ESP_OK;
+    }
+
+    char dev_val[8];
+    if (ESP_OK != httpd_query_key_value(query_buf, "device_idx", dev_val, sizeof(dev_val)))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"device_idx required\"}");
+        return ESP_OK;
+    }
+
+    char * p_end   = NULL;
+    long   dev_int = strtol(dev_val, &p_end, 10);
+    if ((p_end == dev_val) || (dev_int < 0L) || (dev_int >= (long)DEVICE_REG_MAX_ENTRIES))
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_set_status(p_req, "400 Bad Request");
+        httpd_resp_sendstr(p_req, "{\"error\":\"device_idx out of range\"}");
+        return ESP_OK;
+    }
+
+    uint8_t dev_idx = (uint8_t)dev_int;
+
+    uint8_t log_cnt = act_mngr_credit_log_count(dev_idx);
+    if (0U == log_cnt)
+    {
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_sendstr(p_req, "{\"log\":[]}");
+        return ESP_OK;
+    }
+
+    act_credit_log_entry_t * p_log =
+        (act_credit_log_entry_t *)malloc(log_cnt * sizeof(act_credit_log_entry_t));
+    if (NULL == p_log)
+    {
+        httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    uint8_t actual = act_mngr_credit_log_read(dev_idx, p_log, log_cnt);
+
+    char * p_buf = (char *)malloc(4096U);
+    if (NULL == p_buf)
+    {
+        free(p_log);
+        httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    size_t pos = 0U;
+
+#define LOG_APPEND(fmt, ...) pos += (size_t)snprintf(p_buf + pos, 4096U - pos, fmt, ##__VA_ARGS__)
+
+    LOG_APPEND("{\"log\":[");
+
+    for (uint8_t i = 0U; i < actual; i++)
+    {
+        if (i > 0U)
+        {
+            LOG_APPEND(",");
+        }
+
+        const act_credit_log_entry_t * p_e = &p_log[i];
+
+        /* Resolve activity name. */
+        act_mngr_entry_t act;
+        const char *     p_act_name = "(deleted)";
+        char             act_name_buf[ACT_MNGR_NAME_MAX_LEN + 1U];
+        if (ESP_OK == act_mngr_activity_get(p_e->act_id, &act))
+        {
+            (void)strncpy(act_name_buf, act.name, sizeof(act_name_buf) - 1U);
+            act_name_buf[sizeof(act_name_buf) - 1U] = '\0';
+            p_act_name                              = act_name_buf;
+        }
+
+        /* Format local time. */
+        time_t    ts = (time_t)p_e->timestamp_utc;
+        struct tm local_tm;
+        localtime_r(&ts, &local_tm);
+        char time_str[32];
+        (void)strftime(time_str, sizeof(time_str), "%Y-%m-%dT%H:%M:%S", &local_tm);
+
+        /* Format credits as h:mm:ss. */
+        uint32_t c_h = p_e->credits_s / 3600U;
+        uint32_t c_m = (p_e->credits_s % 3600U) / 60U;
+        uint32_t c_s = p_e->credits_s % 60U;
+
+        LOG_APPEND("{\"timestamp_utc\":%" PRId64 ","
+                   "\"timestamp_local\":\"%s\","
+                   "\"act_id\":%lu,"
+                   "\"act_name\":\"%s\","
+                   "\"credits_s\":%lu,"
+                   "\"credits_hms\":\"%lu:%02lu:%02lu\","
+                   "\"completion_time_s\":%lu}",
+            (int64_t)p_e->timestamp_utc, time_str, (unsigned long)p_e->act_id, p_act_name,
+            (unsigned long)p_e->credits_s, (unsigned long)c_h, (unsigned long)c_m,
+            (unsigned long)c_s, (unsigned long)p_e->completion_time_s);
+    }
+
+    LOG_APPEND("]}");
+
+#undef LOG_APPEND
+
+    free(p_log);
+
+    httpd_resp_set_type(p_req, "application/json");
+    httpd_resp_send(p_req, p_buf, HTTPD_RESP_USE_STRLEN);
+    free(p_buf);
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 /*** end of file ***/

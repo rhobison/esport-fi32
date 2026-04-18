@@ -16,6 +16,7 @@
 #include "http_server_export.h"
 #include "http_server_dashboard.h"
 #include "http_server_ota.h"
+#include "http_server_activities.h"
 
 #include <string.h>
 
@@ -56,7 +57,7 @@ esp_err_t http_srv_init(void)
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = 80U;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 15U;
+    cfg.max_uri_handlers = 21U;
 
     esp_err_t ret = httpd_start(&gp_server_handle, &cfg);
     if (ESP_OK != ret)
@@ -152,6 +153,43 @@ esp_err_t http_srv_init(void)
     };
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_config_pwd_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_config_pwd_post);
+
+    static const httpd_uri_t sc_uri_activities_manage_get = {
+        .uri     = "/activities/manage",
+        .method  = HTTP_GET,
+        .handler = http_srv_activities_manage_get_handler,
+    };
+    static const httpd_uri_t sc_uri_activities_manage_post = {
+        .uri     = "/activities/manage",
+        .method  = HTTP_POST,
+        .handler = http_srv_activities_manage_post_handler,
+    };
+    static const httpd_uri_t sc_uri_activities_get = {
+        .uri     = "/activities",
+        .method  = HTTP_GET,
+        .handler = http_srv_activities_get_handler,
+    };
+    static const httpd_uri_t sc_uri_api_activities_get = {
+        .uri     = "/api/activities",
+        .method  = HTTP_GET,
+        .handler = http_srv_api_activities_get_handler,
+    };
+    static const httpd_uri_t sc_uri_api_activities_credit_post = {
+        .uri     = "/api/activities/credit",
+        .method  = HTTP_POST,
+        .handler = http_srv_api_activities_credit_handler,
+    };
+    static const httpd_uri_t sc_uri_api_activities_log_get = {
+        .uri     = "/api/activities/log",
+        .method  = HTTP_GET,
+        .handler = http_srv_api_activities_log_get_handler,
+    };
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_activities_manage_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_activities_manage_post);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_activities_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_activities_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_activities_credit_post);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_activities_log_get);
 
     ESP_LOGI(gp_tag, "started on port %u", (unsigned)cfg.server_port);
     return ESP_OK;

@@ -102,6 +102,46 @@ esp_err_t http_srv_api_sessions_handler(httpd_req_t * p_req);
  */
 esp_err_t http_srv_api_sessions_daily_handler(httpd_req_t * p_req);
 
+/**
+ * \brief Handler for \c GET /api/activities.
+ *
+ * Returns all pool activities (or only those assigned to a device if the
+ * optional \c device_idx query parameter is supplied) as a JSON object with
+ * an \c "activities" array.  When \c device_idx is present only activities
+ * with \c credit_s > 0 are included and per-user daily status fields are added.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_api_activities_get_handler(httpd_req_t * p_req);
+
+/**
+ * \brief Handler for \c POST /api/activities/credit.
+ *
+ * Requires HTTP Basic Auth.  Accepts a JSON body with \c device_idx,
+ * \c act_id, \c credits_s, and optional \c completion_time_s, then calls
+ * #act_mngr_activity_credit.  Returns HTTP 200 with the new counter on
+ * success, or HTTP 400/429 on validation failure.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_api_activities_credit_handler(httpd_req_t * p_req);
+
+/**
+ * \brief Handler for \c GET /api/activities/log.
+ *
+ * Requires \c device_idx query parameter (0–3).  Returns a JSON object with
+ * a \c "log" array of credit-log entries for that user, newest first.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_api_activities_log_get_handler(httpd_req_t * p_req);
+
 #ifdef __cplusplus
 }
 #endif

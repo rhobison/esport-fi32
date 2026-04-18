@@ -37,6 +37,20 @@ extern "C"
 #define HTTP_SRV_CFG_DECODED_MAX (192U)
 
 /**
+ * \brief Check HTTP Basic Auth credentials on a request.
+ *
+ * Reads the \c Authorization header, decodes the Base64 credentials, and
+ * compares them against the stored config password.  If authentication
+ * fails, sends an HTTP 401 response with a \c WWW-Authenticate header and
+ * returns \c false so the caller can return immediately.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c true when credentials are valid, \c false when auth failed (401 already sent).
+ */
+bool http_srv_cfg_auth_check(httpd_req_t * p_req);
+
+/**
  * \brief Handler for \c GET /config.
  *
  * Reads all 11 configuration parameters and sends an HTML form pre-populated
