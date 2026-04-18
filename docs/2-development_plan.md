@@ -3276,7 +3276,7 @@ A **JSON API endpoint** (`POST /api/activities/credit`) exposes the same credit 
 
 Key behaviours:
 - **30 activities** max in the global pool; each has an auto-generated unique integer ID (1-based, never reused).
-- Each activity carries: `name` (≤20 chars), `credit_s` (0 = dynamic/API-provided), `time_limit_s` (gamification reference), `daily_limit` (1–255 times/day, same cap for all users it is assigned to).
+- Each activity carries: `name` (≤40 chars), `credit_s` (0 = dynamic/API-provided), `time_limit_s` (gamification reference), `daily_limit` (1–255 times/day, same cap for all users it is assigned to).
 - An activity with `credit_s = 0` is a **dynamic-credit** activity: it is visible in the Activity Manager but **hidden** on the award page. It can only be credited via the JSON API (with the caller supplying the exact `credits_s`).
 - The same activity can be assigned to multiple users independently. Up to **20 activities** per user.
 - Both `/activities` and `/activities/manage` are protected by the same HTTP Basic Auth as `/config`.
@@ -3323,13 +3323,13 @@ All keys fit within the NVS 15-character key limit.
 #define ACT_MNGR_MAX_ACTIVITIES       (30U)
 #define ACT_MNGR_MAX_ASSIGNS_PER_USER (20U)
 #define ACT_MNGR_MAX_CREDIT_LOG       (30U)
-#define ACT_MNGR_NAME_MAX_LEN         (20U)
+#define ACT_MNGR_NAME_MAX_LEN         (40U)
 #define ACT_MNGR_NO_ID                (0U)    /* reserved; never a valid activity ID */
 #define ACT_MNGR_SAVE_INTERVAL_S      (60U)   /* periodic NVS save interval */
 
 typedef struct act_mngr_entry_tag {
     uint32_t id;                                  /* auto-generated, 1-based, never reused */
-    char     name[ACT_MNGR_NAME_MAX_LEN + 1U];   /* null-terminated, max 20 chars          */
+    char     name[ACT_MNGR_NAME_MAX_LEN + 1U];   /* null-terminated, max 40 chars          */
     uint32_t credit_s;                            /* 0 = dynamic (API-provided)             */
     uint32_t time_limit_s;                        /* max completion time (gamification ref) */
     uint8_t  daily_limit;                         /* max times per day; 1–255               */
@@ -3778,7 +3778,7 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
 
      *Global Activity Pool section:*
      - A table listing all `act_mngr_activity_count()` activities (`act_mngr_activity_slot_get()` for each slot).
-     - Each row: hidden `<input name="act_id" value="N">`, name `<input type="text" name="act_name_N" maxlength="20">`, credit h:mm:ss `<input type="text" name="act_credit_N">` with auto-format `oninput` (same pattern as device counter field in `/config`), time limit h:mm:ss `<input type="text" name="act_limit_N">`, daily limit `<input type="number" name="act_daily_N" min="1" max="255">`, Update button (`name="action" value="update_N"`), Delete button (`name="action" value="delete_N"`).
+     - Each row: hidden `<input name="act_id" value="N">`, name `<input type="text" name="act_name_N" maxlength="40">`, credit h:mm:ss `<input type="text" name="act_credit_N">` with auto-format `oninput` (same pattern as device counter field in `/config`), time limit h:mm:ss `<input type="text" name="act_limit_N">`, daily limit `<input type="number" name="act_daily_N" min="1" max="255">`, Update button (`name="action" value="update_N"`), Delete button (`name="action" value="delete_N"`).
      - Below table: "Add Activity" sub-form — name, credit h:mm:ss, time limit h:mm:ss, daily limit, Add button (`name="action" value="add_activity"`).
 
      *Activity Assignments section:*
@@ -3802,7 +3802,7 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
    - Call `http_srv_cfg_auth_check(p_req)`.
    - Read body (URL-encoded, up to `HTTP_SRV_POST_BODY_MAX_LEN`).
    - Parse `action` field.
-   - **`action == "add_activity"`**: parse name (validate ≤20 chars, non-empty), credit h:mm:ss (`hms_to_s()`), time limit h:mm:ss, daily limit (1–255). Call `act_mngr_activity_add()`. Handle `ESP_ERR_NO_MEM` ("Pool full — max 30 activities") and `ESP_ERR_INVALID_ARG` as HTTP 400.
+   - **`action == "add_activity"`**: parse name (validate ≤40 chars, non-empty), credit h:mm:ss (`hms_to_s()`), time limit h:mm:ss, daily limit (1–255). Call `act_mngr_activity_add()`. Handle `ESP_ERR_NO_MEM` ("Pool full — max 30 activities") and `ESP_ERR_INVALID_ARG` as HTTP 400.
    - **`action == "update_N"`** (N = activity ID): parse and validate same fields; call `act_mngr_activity_update(N, ...)`. Return HTTP 400 on `ESP_ERR_NOT_FOUND` or `ESP_ERR_INVALID_ARG`.
    - **`action == "delete_N"`**: call `act_mngr_activity_remove(N)`. Ignore `ESP_ERR_NOT_FOUND` (idempotent).
    - **`action == "assign_N"`** (N = dev_idx): parse `new_act_N` field as act_id. Call `act_mngr_user_assign(N, act_id)`. Handle `ESP_ERR_NO_MEM` ("Max 20 activities per user"), `ESP_ERR_NOT_FOUND`, `ESP_ERR_INVALID_STATE` ("Already assigned").
@@ -3859,7 +3859,7 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
 - [ ] `GET /activities/manage` without credentials returns HTTP 401.
 - [ ] `GET /activities/manage` with valid credentials returns HTTP 200 with both form sections.
 - [ ] `POST /activities/manage` with `action=add_activity` and valid fields adds an activity; subsequent `GET` shows it.
-- [ ] `POST /activities/manage` with an activity name longer than 20 chars returns HTTP 400.
+- [ ] `POST /activities/manage` with an activity name longer than 40 chars returns HTTP 400.
 - [ ] `POST /activities/manage` with `daily_limit=0` returns HTTP 400.
 - [ ] `POST /activities/manage` with `action=add_activity` when pool is full returns HTTP 400 "Pool full".
 - [ ] `POST /activities/manage` with `action=update_N` updates name/credit/limit; GET shows updated values.
