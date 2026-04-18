@@ -1366,18 +1366,19 @@ Stores the global activity pool and per-device assignment / daily counters / cre
 | `ul_N_h`      | uint8 | Log ring-buffer head (next write slot) for device N |
 | `ul_N_c`      | uint8 | Log entry count for device N                        |
 
-`act_mngr_entry_t` binary layout (28 bytes):
+`act_mngr_entry_t` binary layout (60 bytes, `sizeof(act_mngr_entry_t)` on ESP32-C6 with GCC default alignment):
 
-| Field          | Offset | Type       | Notes                         |
-| -------------- | ------ | ---------- | ----------------------------- |
-| `id`           | 0      | uint32_t   | Unique auto-increment ID      |
-| `credit_s`     | 4      | uint32_t   | Seconds credited per click    |
-| `time_limit_s` | 8      | uint32_t   | Optional daily time cap (0=∞) |
-| `daily_limit`  | 12     | uint8_t    | Max credits per day (1–255)   |
-| `_pad`         | 13     | uint8_t[3] | reserved                      |
-| `name`         | 16     | char[20]   | NUL-terminated name (max 19)  |
+| Field          | Offset | Type       | Notes                                    |
+| -------------- | ------ | ---------- | ---------------------------------------- |
+| `id`           | 0      | uint32_t   | Unique auto-increment ID                 |
+| `name`         | 4      | char[41]   | NUL-terminated name (max 40 chars)       |
+| *(pad)*        | 45     | uint8_t[3] | Compiler alignment padding               |
+| `credit_s`     | 48     | uint32_t   | Seconds credited per click               |
+| `time_limit_s` | 52     | uint32_t   | Optional daily time cap (0=∞)            |
+| `daily_limit`  | 56     | uint8_t    | Max credits per day (1–255)              |
+| *(pad)*        | 57     | uint8_t[3] | Trailing alignment padding               |
 
-> Total per entry: 36 bytes × 30 = 1080 bytes; pool metadata + assigns + daily + log ≈ 4 KB total.
+> Total per entry: 60 bytes × 30 entries = 1800 bytes; pool metadata + assigns + daily + log ≈ 5 KB total.
 
 ---
 

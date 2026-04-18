@@ -140,7 +140,7 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
 
         APPEND("<tr>");
         APPEND("<td>%lu</td>", (unsigned long)entry.id);
-        APPEND("<td><input type='text' name='act_name_%lu' maxlength='20' value='%s'></td>",
+        APPEND("<td><input type='text' name='act_name_%lu' maxlength='40' value='%s'></td>",
             (unsigned long)entry.id, name_enc);
         APPEND("<td><input type='text' name='act_credit_%lu' maxlength='8'"
                " value='%lu:%02lu:%02lu' oninput='hmsInput(this)'></td>",
@@ -165,7 +165,7 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
            "<th>Time Limit (h:mm:ss)</th><th>Daily Limit</th><th></th></tr>");
     APPEND("<tr>");
     APPEND("<td></td>"); /* Empty ID cell. */
-    APPEND("<td><input type='text' name='new_act_name' maxlength='20' placeholder='Name'></td>");
+    APPEND("<td><input type='text' name='new_act_name' maxlength='40' placeholder='Name'></td>");
     APPEND("<td><input type='text' name='new_act_credit' maxlength='8'"
            " placeholder='0:00:00' oninput='hmsInput(this)'></td>");
     APPEND("<td><input type='text' name='new_act_limit' maxlength='8'"
@@ -323,7 +323,7 @@ esp_err_t http_srv_activities_manage_post_handler(httpd_req_t * p_req)
         }
         else if (ESP_ERR_INVALID_ARG == op_ret)
         {
-            (void)strncpy(err_msg, "Invalid activity fields (name 1-20 chars, daily limit 1-255)",
+            (void)strncpy(err_msg, "Invalid activity fields (name 1-40 chars, daily limit 1-255)",
                 sizeof(err_msg) - 1U);
         }
     }

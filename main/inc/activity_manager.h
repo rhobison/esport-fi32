@@ -50,7 +50,7 @@ extern "C"
 #define ACT_MNGR_MAX_CREDIT_LOG (30U)
 
 /** Maximum length of an activity name (excluding NUL terminator). */
-#define ACT_MNGR_NAME_MAX_LEN (20U)
+#define ACT_MNGR_NAME_MAX_LEN (40U)
 
 /** Reserved activity ID meaning "no activity" / empty slot. */
 #define ACT_MNGR_NO_ID (0U)
@@ -66,7 +66,7 @@ extern "C"
 typedef struct act_mngr_entry_tag
 {
     uint32_t id;                               /**< Auto-generated 1-based unique ID.    */
-    char     name[ACT_MNGR_NAME_MAX_LEN + 1U]; /**< Null-terminated name, max 20 chars.  */
+    char     name[ACT_MNGR_NAME_MAX_LEN + 1U]; /**< Null-terminated name, max 40 chars.  */
     uint32_t credit_s;                         /**< Seconds to credit; 0 = dynamic.     */
     uint32_t time_limit_s;                     /**< Gamification reference duration.     */
     uint8_t  daily_limit;                      /**< Max credits per day; 1–255.          */
