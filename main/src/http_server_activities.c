@@ -92,8 +92,19 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
            ".banner{background:#d4edda;border:1px solid #c3e6cb;padding:8px;"
            "margin-bottom:1em;border-radius:4px}"
            ".sect{margin-top:1.5em;border-top:2px solid #ccc;padding-top:0.5em}"
+           ".card{background:#f9f9f9;border:1px solid #ddd;border-radius:4px;"
+           "padding:.6em .9em;margin:.6em 0}"
            "button,input[type=submit]{cursor:pointer;padding:4px 10px}"
-           "</style></head><body>");
+           "a.btn{display:inline-block;padding:4px 12px;background:#4a90d9;color:#fff;"
+           "border-radius:3px;text-decoration:none;margin-right:.5em}"
+           "a.btn:hover{background:#3a7fc9}"
+           "</style>"
+           "<script>function hmsInput(el){"
+           "var d=el.value.replace(/\\D/g,'').slice(0,6);"
+           "if(d.length>4)el.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4);"
+           "else if(d.length>2)el.value=d.slice(0,2)+':'+d.slice(2);"
+           "else el.value=d;}</script>"
+           "</head><body>");
 
     APPEND("<h2>Activity Manager</h2>");
     if (b_saved)
@@ -102,7 +113,7 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
     }
 
     /* ---- Global activity pool section ---- */
-    APPEND("<div class='sect'><h3>Global Activity Pool</h3>");
+    APPEND("<div class='card'><h3>Global Activity Pool</h3>");
     APPEND("<form method='POST' action='/activities/manage'>");
     APPEND("<table><tr><th>ID</th><th>Name</th><th>Credit (h:mm:ss)</th>"
            "<th>Time Limit (h:mm:ss)</th><th>Daily Limit</th><th>Actions</th></tr>");
@@ -131,11 +142,11 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
         APPEND("<td>%lu</td>", (unsigned long)entry.id);
         APPEND("<td><input type='text' name='act_name_%lu' maxlength='20' value='%s'></td>",
             (unsigned long)entry.id, name_enc);
-        APPEND("<td><input type='text' name='act_credit_%lu' value='%lu:%02lu:%02lu'"
-               " oninput=\"this.value=this.value.replace(/[^0-9:]/g,'')\"></td>",
+        APPEND("<td><input type='text' name='act_credit_%lu' maxlength='8'"
+               " value='%lu:%02lu:%02lu' oninput='hmsInput(this)'></td>",
             (unsigned long)entry.id, (unsigned long)c_h, (unsigned long)c_m, (unsigned long)c_s);
-        APPEND("<td><input type='text' name='act_limit_%lu' value='%lu:%02lu:%02lu'"
-               " oninput=\"this.value=this.value.replace(/[^0-9:]/g,'')\"></td>",
+        APPEND("<td><input type='text' name='act_limit_%lu' maxlength='8'"
+               " value='%lu:%02lu:%02lu' oninput='hmsInput(this)'></td>",
             (unsigned long)entry.id, (unsigned long)tl_h, (unsigned long)tl_m, (unsigned long)tl_s);
         APPEND("<td><input type='number' name='act_daily_%lu' min='1' max='255' value='%u'></td>",
             (unsigned long)entry.id, (unsigned int)entry.daily_limit);
@@ -149,20 +160,22 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
     }
     APPEND("</table>");
 
-    /* Add-activity sub-form (same form POST). */
-    APPEND("<h4 style='margin-top:1em'>Add Activity</h4>");
-    APPEND("<table><tr>");
+    /* Add-activity row — part of the same table for column alignment. */
+    APPEND("<table><tr><th></th><th>Name</th><th>Credit (h:mm:ss)</th>"
+           "<th>Time Limit (h:mm:ss)</th><th>Daily Limit</th><th></th></tr>");
+    APPEND("<tr>");
+    APPEND("<td></td>"); /* Empty ID cell. */
     APPEND("<td><input type='text' name='new_act_name' maxlength='20' placeholder='Name'></td>");
-    APPEND("<td><input type='text' name='new_act_credit' placeholder='0:00:00'"
-           " oninput=\"this.value=this.value.replace(/[^0-9:]/g,'')\"></td>");
-    APPEND("<td><input type='text' name='new_act_limit' placeholder='0:00:00'"
-           " oninput=\"this.value=this.value.replace(/[^0-9:]/g,'')\"></td>");
+    APPEND("<td><input type='text' name='new_act_credit' maxlength='8'"
+           " placeholder='0:00:00' oninput='hmsInput(this)'></td>");
+    APPEND("<td><input type='text' name='new_act_limit' maxlength='8'"
+           " placeholder='0:00:00' oninput='hmsInput(this)'></td>");
     APPEND("<td><input type='number' name='new_act_daily' min='1' max='255' value='1'></td>");
     APPEND("<td><button type='submit' name='action' value='add_activity'>Add</button></td>");
     APPEND("</tr></table></form></div>");
 
     /* ---- Activity assignments section ---- */
-    APPEND("<div class='sect'><h3>Activity Assignments</h3>");
+    APPEND("<div class='card'><h3>Activity Assignments</h3>");
 
     uint8_t dev_count = device_reg_count_get();
     for (uint8_t d = 0U; d < dev_count; d++)
@@ -228,8 +241,10 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
     }
 
     APPEND("</div>");
-    APPEND("<p><a href='/activities'>Back to Activities</a> | "
-           "<a href='/config'>Back to Config</a></p>");
+    APPEND("<div style='margin-top:1.5em'>"
+           "<a class='btn' href='/activities'>Back to Activities</a>"
+           "<a class='btn' href='/config'>Back to Config</a>"
+           "</div>");
     APPEND("</body></html>");
 
 #undef APPEND
@@ -470,6 +485,13 @@ esp_err_t http_srv_activities_get_handler(httpd_req_t * p_req)
            "th{background:#eee}button{cursor:pointer;padding:4px 10px}"
            "button:disabled{opacity:0.4;cursor:default}"
            ".total{font-size:1.1em;font-weight:bold;margin:0.5em 0}"
+           ".card{background:#f9f9f9;border:1px solid #ddd;border-radius:4px;"
+           "padding:.6em .9em;margin:.6em 0}"
+           "a.btn{display:inline-block;padding:4px 12px;background:#4a90d9;color:#fff;"
+           "border-radius:3px;text-decoration:none;margin-right:.5em}"
+           "a.btn:hover{background:#3a7fc9}"
+           ".log-sep{background:#f0f0f0;font-size:.85em;color:#666;"
+           "text-align:center;padding:2px 4px}"
            "</style></head><body>");
 
     APPEND("<h2>Activities</h2>");
@@ -491,9 +513,9 @@ esp_err_t http_srv_activities_get_handler(httpd_req_t * p_req)
     APPEND("</select></p>");
 
     APPEND("<div class='total' id='total-credits'>Total credits: --</div>");
-    APPEND("<div id='activity-list'><p><em>Loading...</em></p></div>");
-    APPEND("<h3>Credit Log</h3>");
-    APPEND("<div id='credit-log'><p><em>Loading...</em></p></div>");
+    APPEND("<div class='card' id='activity-list'><p><em>Loading...</em></p></div>");
+    APPEND("<div class='card'><h3>Credit Log</h3>"
+           "<div id='credit-log'><p><em>Loading...</em></p></div></div>");
 
     /* JavaScript. */
     APPEND(
@@ -505,6 +527,7 @@ esp_err_t http_srv_activities_get_handler(httpd_req_t * p_req)
         "return h+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');}\n"
 
         "function creditActivity(devIdx,actId,creditsS,btn){"
+        "if(!confirm('Credit '+fmtHMS(creditsS)+' internet time?'))return;"
         "btn.disabled=true;"
         "fetch('/api/activities/credit',{"
         "method:'POST',"
@@ -547,8 +570,16 @@ esp_err_t http_srv_activities_get_handler(httpd_req_t * p_req)
         "var div=document.getElementById('credit-log');"
         "if(!d.log||d.log.length===0){"
         "div.innerHTML='<p><em>No credits yet.</em></p>';return;}"
+        "var now=new Date();"
+        "var today=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')"
+        "+'-'+String(now.getDate()).padStart(2,'0');"
         "var html='<table><tr><th>Time</th><th>Activity</th><th>Credits</th></tr>';"
+        "var seenOlder=false;"
         "d.log.forEach(function(e){"
+        "var eDate=e.timestamp_local?e.timestamp_local.substring(0,10):'';"
+        "if(!seenOlder&&eDate!==today){"
+        "seenOlder=true;"
+        "html+='<tr><td colspan=3 class=log-sep>&#x2014; Earlier &#x2014;</td></tr>';}"
         "html+='<tr><td>'+e.timestamp_local+'</td><td>'+e.act_name+"
         "'</td><td>'+e.credits_hms+'</td></tr>';});"
         "html+='</table>';"
@@ -563,8 +594,10 @@ esp_err_t http_srv_activities_get_handler(httpd_req_t * p_req)
         "loadUser(0);\n"
         "</script>\n");
 
-    APPEND("<p><a href='/activities/manage'>Manage Activities</a> | "
-           "<a href='/config'>Config</a></p>");
+    APPEND("<div style='margin-top:1.5em'>"
+           "<a class='btn' href='/activities/manage'>Manage Activities</a>"
+           "<a class='btn' href='/config'>Config</a>"
+           "</div>");
     APPEND("</body></html>");
 
 #undef APPEND

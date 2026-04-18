@@ -216,7 +216,12 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<p>Time:&nbsp;<b><span id=\"sys-time\">%s</span></b></p>"
         "<p>NTP:&nbsp;<span id=\"sys-ntp\" class=\"%s\">%s</span></p>"
         "<p>Uptime:&nbsp;<b><span id=\"sys-uptime\">%" PRId32 "d&nbsp;%" PRId32 "h&nbsp;%" PRId32
-        "m&nbsp;%" PRId32 "s</span></b></p></div>",
+        "m&nbsp;%" PRId32 "s</span></b></p>"
+        "<p style=\"margin-top:.6em\">"
+        "<a class=\"btn\" href=\"/config\">Config</a>"
+        "<a class=\"btn\" href=\"/activities\">Activities</a>"
+        "<a class=\"btn\" href=\"/activities/manage\">Manage Activities</a>"
+        "</p></div>",
         time_local_str, b_synced ? "ok" : "err", b_synced ? "Synced" : "Not synced", up_d, up_h,
         up_m, up_s_rem);
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
