@@ -200,8 +200,8 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         ".ok{color:#1a7f1a}.err{color:#c0392b}"
         ".card{background:#f9f9f9;border:1px solid #ddd;border-radius:4px;"
         "padding:.5em .8em;margin:.5em 0}"
-        "a.btn{display:inline-block;padding:4px 12px;background:#4a90d9;color:#fff;"
-        "border-radius:3px;text-decoration:none;margin-right:.5em}"
+        "a.btn{display:block;padding:6px 8px;background:#4a90d9;color:#fff;"
+        "border-radius:3px;text-decoration:none;text-align:center;box-sizing:border-box}"
         "svg{display:block;width:100%;height:auto}"
         "</style></head><body>"
         "<h2>ESPort-fi32 v";
@@ -217,12 +217,12 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<p>NTP:&nbsp;<span id=\"sys-ntp\" class=\"%s\">%s</span></p>"
         "<p>Uptime:&nbsp;<b><span id=\"sys-uptime\">%" PRId32 "d&nbsp;%" PRId32 "h&nbsp;%" PRId32
         "m&nbsp;%" PRId32 "s</span></b></p>"
-        "<p style=\"margin-top:.6em\">"
+        "<div style=\"margin-top:.6em;display:grid;grid-template-columns:1fr 1fr;gap:.4em\">"
         "<a class=\"btn\" href=\"/config\">Config</a>"
         "<a class=\"btn\" href=\"/activities\">Activities</a>"
         "<a class=\"btn\" href=\"/activities/manage\">Manage Activities</a>"
         "<a class=\"btn\" href=\"/dyn\">Mini-Games</a>"
-        "</p></div>",
+        "</div></div>",
         time_local_str, b_synced ? "ok" : "err", b_synced ? "Synced" : "Not synced", up_d, up_h,
         up_m, up_s_rem);
     (void)httpd_resp_sendstr_chunk(p_req, p_buf);
@@ -463,11 +463,13 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     (void)httpd_resp_sendstr_chunk(p_req, "</svg></div>");
 
     /* Export Controls */
-    static const char sc_export[] = "<div class=\"card\"><h3>Export Reports</h3>"
-                                    "<a class=\"btn\" href=\"/api/sessions/export?format=csv\">"
-                                    "Download CSV</a>"
-                                    "<a class=\"btn\" href=\"/api/sessions/export?format=json\">"
-                                    "Download JSON</a></div>";
+    static const char sc_export[] =
+        "<div class=\"card\"><h3>Export Reports</h3>"
+        "<div style=\"display:flex;gap:.4em;flex-wrap:wrap\">"
+        "<a class=\"btn\" style=\"flex:1\" href=\"/api/sessions/export?format=csv\">"
+        "Download CSV</a>"
+        "<a class=\"btn\" style=\"flex:1\" href=\"/api/sessions/export?format=json\">"
+        "Download JSON</a></div></div>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_export);
 
     /* Navigation and JS auto-refresh */

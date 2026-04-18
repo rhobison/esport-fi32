@@ -29,6 +29,7 @@
 #include "activity_manager.h"
 #include "config_manager.h"
 #include "device_registry.h"
+#include "dyn_nonce.h"
 #include "http_server_config.h"
 #include "session_log.h"
 #include "session_tracker.h"
@@ -639,7 +640,26 @@ esp_err_t http_srv_api_activities_credit_handler(httpd_req_t * p_req)
         }
     }
 
-    /* Dual auth: admin Basic Auth OR device PIN. */
+    /* Parse optional one-time token field (required for PIN auth). */
+    char received_token[DYN_NONCE_STRLEN + 1U];
+    received_token[0] = '\0';
+    p                 = strstr(body, "\"token\"");
+    if (NULL != p)
+    {
+        p = strchr(p + 7, '"');
+        if (NULL != p)
+        {
+            p++;
+            size_t tok_idx = 0U;
+            while (('\0' != *p) && ('"' != *p) && (tok_idx < DYN_NONCE_STRLEN))
+            {
+                received_token[tok_idx++] = *p++;
+            }
+            received_token[tok_idx] = '\0';
+        }
+    }
+
+    /* Dual auth: admin Basic Auth OR device PIN + one-time token. */
     bool b_admin = http_srv_cfg_auth_check_silent(p_req);
     bool b_pin   = false;
 
@@ -648,7 +668,8 @@ esp_err_t http_srv_api_activities_credit_handler(httpd_req_t * p_req)
         char expected_pin[DEVICE_REG_PIN_LEN + 1U];
         if ((device_idx < (uint32_t)DEVICE_REG_MAX_ENTRIES) &&
             (device_reg_pin_compute((uint8_t)device_idx, expected_pin) == ESP_OK) &&
-            (strncmp(received_pin, expected_pin, DEVICE_REG_PIN_LEN) == 0))
+            (strncmp(received_pin, expected_pin, DEVICE_REG_PIN_LEN) == 0) &&
+            dyn_nonce_consume(received_token, (uint8_t)device_idx, act_id))
         {
             b_pin = true;
         }
@@ -975,16 +996,20 @@ esp_err_t http_srv_api_dyn_get_handler(httpd_req_t * p_req)
         }
         first = false;
 
+        char tok[DYN_NONCE_STRLEN + 1U];
+        dyn_nonce_generate((uint8_t)dev_idx, aid, tok);
+
         DYN_APPEND("{\"act_id\":%lu,\"name\":\"%s\","
                    "\"credit_s\":%lu,"
                    "\"credits_hms\":\"%lu:%02lu:%02lu\","
                    "\"time_limit_s\":%lu,"
                    "\"time_limit_hms\":\"%lu:%02lu:%02lu\","
-                   "\"done_today\":%u,\"available\":%s}",
+                   "\"done_today\":%u,\"available\":%s,"
+                   "\"token\":\"%s\"}",
             (unsigned long)aid, act_entry.name, (unsigned long)act_entry.credit_s,
             (unsigned long)c_h, (unsigned long)c_m, (unsigned long)c_s,
             (unsigned long)act_entry.time_limit_s, (unsigned long)tl_h, (unsigned long)tl_m,
-            (unsigned long)tl_s, (unsigned int)done, available ? "true" : "false");
+            (unsigned long)tl_s, (unsigned int)done, available ? "true" : "false", tok);
     }
 
     DYN_APPEND("]}");

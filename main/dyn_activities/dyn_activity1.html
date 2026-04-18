@@ -79,6 +79,7 @@
         var deviceIdx = parseInt(params.get('device_idx') || '0', 10);
         var actId = parseInt(params.get('act_id') || '0', 10);
         var creditsS = parseInt(params.get('credits_s') || '0', 10);
+        var token = params.get('token') || '';
 
         function formatHMS(s) {
             var h = Math.floor(s / 3600);
@@ -101,7 +102,8 @@
                     act_id: actId,
                     credits_s: creditsS,
                     completion_time_s: 0,
-                    pin: pin
+                    pin: pin,
+                    token: token
                 })
             }).then(function (r) {
                 if (r.status === 429) {
@@ -110,8 +112,7 @@
                     return null;
                 }
                 if (r.status === 403) {
-                    showBanner('Unauthorised \u2014 please use your own device.', false);
-                    btn.disabled = false;
+                    showBanner('Not authorised \u2014 please go back and start the game again.', false);
                     return null;
                 }
                 if (!r.ok) {

@@ -81,6 +81,7 @@ idf_component_register(
         "src/activity_manager.c"
         "src/http_server_activities.c"
         "src/http_server_dyn.c"
+        "src/dyn_nonce.c"
         "${_DYN_REG_C}"
     EMBED_FILES ${DYN_ACT_HTMLS}
 )
