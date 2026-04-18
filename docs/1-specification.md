@@ -1002,7 +1002,14 @@ All three routes require HTTP Basic Auth (same credentials as `/config`).
 - Renders the global activity pool as a table with editable name, credit time (`h:mm:ss`), daily
   time cap (`h:mm:ss`), and daily click limit fields.  Each row has **Update** and **Delete**
   buttons.
-- Below the table an **Add Activity** sub-form allows creating a new pool entry.
+- All `h:mm:ss` time fields use an `oninput` JavaScript handler (`hmsInput`) that auto-formats
+  the value as the user types, stripping non-digit characters and inserting colons automatically.
+  This is consistent with the counter field on the Config page.
+- The **Add Activity** sub-form row is rendered in the same table as the pool, with an empty
+  first cell (ID column) so all text-box columns remain aligned between existing rows and the
+  add-row.
+- Navigation to `/activities` and `/config` is provided as blue `a.btn`-styled buttons
+  (same visual style as the dashboard Export buttons: `background:#4a90d9`).
 - A separate section below renders per-device assignment panels.  Each panel lists currently
   assigned activities (with **Unassign** buttons) and a select-box + **Assign** button to add
   more.
@@ -1025,11 +1032,16 @@ plain-text message.
 
 **`GET /activities`** — Parent credit interface.
 
-- Renders a drop-down user selector, a table of the selected user's assigned activities with
-  **Credit** buttons, and a credit log table for that user.
+- Renders a drop-down user selector, a total-credits line, a table of the selected user's
+  assigned activities with **Credit** buttons, and a credit log table for that user.
+- Clicking a **Credit** button shows a browser `confirm()` dialog showing the credit amount
+  (e.g. "Credit 0:30:00 internet time?").  If the user cancels, no request is sent.
 - All live data is fetched from `/api/activities?device_idx=N`,
   `/api/activities/log?device_idx=N`, and `/api/status` via JavaScript on page load and after
   each credit action.  The total internet counter is refreshed from `/api/status`.
+- The credit log table separates today's entries from earlier entries with a shaded
+  "Earlier" divider row.  Entries are shown newest-first (server-side ring-buffer order).
+- Navigation to `/activities/manage` and `/config` is provided as blue `a.btn`-styled buttons.
 
 ---
 

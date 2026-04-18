@@ -141,6 +141,8 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         ".sta-status{margin-top:1.5em;padding-top:1em;border-top:1px solid #ccc;font-size:.95em}"
         ".sta-ok{color:#2a2;font-weight:bold}"
         ".sta-err{color:#c00;font-weight:bold}"
+        ".card{background:#f9f9f9;border:1px solid #ddd;border-radius:4px;"
+        "padding:.6em .9em;margin:.6em 0}"
         "</style></head><body>"
         "<h2>ESPort-fi32 &mdash; Configuration</h2>";
     (void)httpd_resp_sendstr_chunk(p_req, sc_header);
@@ -157,7 +159,9 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
             "<p class=\"reset-banner\">&#10003; Configuration reset to factory defaults.</p>");
     }
 
-    (void)httpd_resp_sendstr_chunk(p_req, "<form method=\"POST\" action=\"/config\">");
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<form method=\"POST\" action=\"/config\">"
+        "<div class=\"card\"><h3 style=\"margin-top:0\">General Settings</h3>");
 
     /* ---- String fields (prefix / encoded-value / suffix chunks) ---- */
 
@@ -320,10 +324,12 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
     uint8_t dev_count = device_reg_count_get();
     uint8_t rider_idx = device_reg_current_rider_get();
 
-    (void)httpd_resp_sendstr_chunk(p_req, "<h3 style=\"margin-top:1.4em\">Registered Devices</h3>"
-                                          "<table style=\"width:100%;border-collapse:collapse\">"
-                                          "<tr><th>Nickname</th><th>MAC</th><th>Counter</th>"
-                                          "<th>Enabled</th><th>Rider</th><th>Remove</th></tr>");
+    (void)httpd_resp_sendstr_chunk(p_req, "</div>"); /* close general settings card */
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<div class=\"card\"><h3 style=\"margin-top:0\">Registered Devices</h3>"
+        "<table style=\"width:100%;border-collapse:collapse\">"
+        "<tr><th>Nickname</th><th>MAC</th><th>Counter</th>"
+        "<th>Enabled</th><th>Rider</th><th>Remove</th></tr>");
 
     for (uint8_t dev_i = 0U; dev_i < dev_count; dev_i++)
     {
@@ -485,7 +491,10 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         }
     }
 
+    (void)httpd_resp_sendstr_chunk(p_req, "</div>"); /* close devices card */
+
     /* ---- Footer: right-aligned Save + Reset buttons ---- */
+    (void)httpd_resp_sendstr_chunk(p_req, "<div class=\"card\">");
     (void)httpd_resp_sendstr_chunk(p_req,
         "<div class=\"btn-right\">"
         "<input type=\"submit\" value=\"Save Configuration\">"
@@ -509,6 +518,7 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "padding:6px 14px;border-radius:4px;text-decoration:none;font-size:inherit;'"
         ">Firmware Update</a>"
         "</div>");
+    (void)httpd_resp_sendstr_chunk(p_req, "</div>"); /* close footer card */
 
     /* ---- STA connection status ---- */
     {

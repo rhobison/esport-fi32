@@ -36,7 +36,7 @@ ESPort-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 - **Persistent per-device counters** — device registry data is saved to NVS every 60 seconds and on counter-reaching-zero; counters survive power cycles.
 - **Firmware Over-The-Air (FOTA) updates** — upload a new `.bin` via the browser at `/ota` (HTTP Basic Auth protected). Automatic rollback: if the device crashes before the new firmware calls `ota_mngr_init()`, the bootloader reverts to the previous slot. Password configurable via `/ota/pwd`.
 - **Buzzer feedback** — an active buzzer on a configurable GPIO provides audio cues: a beep on session start, a longer beep on session qualification, a triple-beep on session close, and a repeating short tick when pedalling too slowly (after a configurable delay to avoid false alarms from momentary speed fluctuations). Can be disabled via the config page.
-- **Activity Credits** — lets a parent define a pool of up to 30 named activities (e.g. "Bike ride", "Homework"). Each activity carries a configurable internet credit, optional daily time cap, and a per-device daily click limit. Activities are assigned per registered device. A parent opens `/activities` to view and click **Credit** buttons; each click adds internet time to that child's counter and plays a double-ding buzzer pattern (configurable). Credit history is recorded in a per-device ring-buffer log (last 30 entries). Managed via `/activities/manage` and a JSON API at `/api/activities`, `/api/activities/credit`, and `/api/activities/log`.
+- **Activity Credits** — lets a parent define a pool of up to 30 named activities (e.g. "Bike ride", "Homework"). Each activity carries a configurable internet credit (`h:mm:ss`, auto-formatted), optional daily time cap, and a per-device daily click limit. Activities are assigned per registered device. A parent opens `/activities` to view and click **Credit** buttons; each click first shows a confirmation dialog, then adds internet time to that child's counter and plays a double-ding buzzer pattern (configurable). The credit log separates today's entries from earlier ones with a shaded divider. Credit history is recorded in a per-device ring-buffer log (last 30 entries). Managed via `/activities/manage` and a JSON API at `/api/activities`, `/api/activities/credit`, and `/api/activities/log`.
 - **Fully configurable** — all parameters (SSID, password, seconds-per-pulse, thresholds, timezone, ...) are stored in NVS and can be changed at runtime via the web UI without reflashing.
 
 ---
@@ -83,11 +83,11 @@ Lets you set all parameters without reflashing:
 
 ### Activity Credits (`/activities`)
 
-A parent-facing credit interface (requires Basic Auth). Select a child from the drop-down to view their assigned activities with **Credit** buttons. Clicking a button adds the activity's configured internet time to the child's counter and plays a double-ding buzzer sound. The page shows the child's total counter (live, fetched from `/api/status`) and a per-session credit log.
+A parent-facing credit interface (requires Basic Auth). Select a child from the drop-down to view their assigned activities with **Credit** buttons. Clicking a button shows a confirmation dialog ("Credit 0:30:00 internet time?"); confirming adds the activity's configured internet time to the child's counter and plays a double-ding buzzer sound. The page shows the child's total counter (live-updated from `/api/status`) and a per-device credit log. The log separates today's entries from earlier ones with a shaded divider, making it easy to see what was credited today at a glance. Navigation to the management page and config is provided via blue styled buttons.
 
 ### Activity Management (`/activities/manage`)
 
-Requires Basic Auth. Manage the global activity pool (up to 30 activities): create, rename, adjust credit times, daily caps, and click limits. Assign/unassign activities per registered device.
+Requires Basic Auth. Manage the global activity pool (up to 30 activities): create, rename, adjust credit times (`h:mm:ss`, auto-formatted as you type), daily time caps, and click limits. Assign or unassign activities per registered device. The "Add Activity" row is part of the same table as existing activities so all columns stay aligned.
 
 ### Firmware Update OTA (`/ota`)
 

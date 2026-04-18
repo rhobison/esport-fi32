@@ -3814,20 +3814,20 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
    - Call `http_srv_cfg_auth_check(p_req)`.
    - Allocate HTML buffer; return HTTP 500 on failure.
    - Build HTML page:
-     - `<h1>Activities</h1>`
+     - `<h2>Activities</h2>`
      - A `<select id="user-select">` combobox populated with all registered devices (from `device_reg_entry_get()`). Default to device 0 if any are registered.
      - A `<div id="total-credits">` placeholder updated by JS.
      - A `<div id="activity-list">` placeholder populated by JS on combobox change.
      - A `<div id="credit-log">` placeholder populated by JS on combobox change.
      - Inline JavaScript:
        - `loadUser(dev_idx)`: calls `fetch('/api/activities?device_idx=' + dev_idx)` and `fetch('/api/activities/log?device_idx=' + dev_idx)`.
-       - On activities response: builds the activity table with "Credit h:mm:ss" buttons. Buttons call `creditActivity(dev_idx, act_id, credits_s)`. Disabled if `!data.available`.
-       - `creditActivity(dev_idx, act_id, credits_s)`: sends `POST /api/activities/credit` with JSON body; on success updates the total-credits display and disables the button if now at daily limit.
+       - On activities response: builds the activity table with "Credit h:mm:ss" buttons. Buttons call `creditActivity(dev_idx, act_id, credits_s, btn)`. Disabled if `!data.available`.
+       - `creditActivity(dev_idx, act_id, credits_s, btn)`: shows a `confirm()` dialog with the credit amount before posting. If confirmed, sends `POST /api/activities/credit` with JSON body; on success updates the total-credits display. If user cancels, does nothing.
        - `fetch('/api/status')` to update total credits display (using `devices[dev_idx].counter_hms`).
-       - On log response: builds the credit log table.
+       - On log response: builds the credit log table. A shaded "Earlier" divider row is inserted between today's entries and older ones (comparison uses `timestamp_local.substring(0,10)` vs current date).
        - Calls `loadUser(0)` on page load; calls `loadUser(dev_idx)` on combobox `change` event.
+     - Navigation to `/activities/manage` and `/config` is provided as blue `a.btn`-styled buttons (consistent with dashboard Export buttons).
      - The page is self-contained; no external CSS/JS.
-   - Include a "Manage Activities" link to `/activities/manage`.
 
    d. Define any needed local buffer-size constants at the top of the file (e.g. `ACT_HTML_BUF_LEN`). All buffers > 512 bytes are heap-allocated. Stack variables ≤ 512 bytes total in any call chain.
 
@@ -3870,11 +3870,16 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
 - [ ] `GET /activities` without credentials returns HTTP 401.
 - [ ] `GET /activities` with valid credentials returns HTTP 200 with HTML containing user combobox and JS.
 - [ ] `GET /activities` page JavaScript (by inspection): `loadUser()`, `creditActivity()`, combobox `change` handler are present.
-- [ ] `GET /activities` page includes link to `/activities/manage`.
-- [ ] Credit h:mm:ss input field in manage page includes `oninput` auto-format handler.
+- [ ] Clicking a **Credit** button shows a `confirm()` dialog before posting; cancelling aborts the request.
+- [ ] The credit log table shows a shaded "Earlier" divider row separating today's entries from older ones.
+- [ ] Navigation buttons on both pages use `a.btn` (blue, same as dashboard Export buttons).
+- [ ] `GET /activities` page includes "Manage Activities" and "Config" nav buttons.
+- [ ] `GET /activities/manage` page includes "Back to Activities" and "Back to Config" nav buttons.
+- [ ] Credit h:mm:ss input field in manage page includes `oninput` auto-format handler (`hmsInput`).
+- [ ] "Add Activity" sub-form row is rendered in the same table as the pool rows, with an empty first cell aligning columns identically.
 - [ ] `hms_str_to_s()` correctly parses `"1:30:00"` to 5400, `"0:00:00"` to 0, and rejects `"abc"` and `"1:2"`.
 - [ ] No local variable block exceeds 512 bytes on the stack in any handler.
-- [ ] All three new routes are registered in `http_server.c`; `max_uri_handlers` is `18U`.
+- [ ] All three new routes are registered in `http_server.c`; `max_uri_handlers` is `21U`.
 
 ---
 
