@@ -16,6 +16,7 @@
 #include "http_server_activities.h"
 #include "http_server_config.h"
 #include "http_server_utils.h"
+#include "dyn_act_registry.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -103,7 +104,18 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
            "var d=el.value.replace(/\\D/g,'').slice(0,6);"
            "if(d.length>4)el.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4);"
            "else if(d.length>2)el.value=d.slice(0,2)+':'+d.slice(2);"
-           "else el.value=d;}</script>"
+           "else el.value=d;}"
+           "function onIsDynChange(cb,sfx){"
+           "var t=document.getElementById('act_name_'+sfx);"
+           "var s=document.getElementById('dyn_name_'+sfx);"
+           "if(cb.checked){"
+           "t.style.display='none';t.disabled=true;"
+           "s.style.display='';s.disabled=false;"
+           "}else{"
+           "t.style.display='';t.disabled=false;"
+           "s.style.display='none';s.disabled=true;"
+           "}}"
+           "</script>"
            "</head><body>");
 
     APPEND("<h2>Activity Manager</h2>");
@@ -165,13 +177,28 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
            "<th>Time Limit (h:mm:ss)</th><th>Daily Limit</th><th></th></tr>");
     APPEND("<tr>");
     APPEND("<td></td>"); /* Empty ID cell. */
-    APPEND("<td><input type='text' name='new_act_name' maxlength='40' placeholder='Name'></td>");
+    APPEND("<td>"
+           "<input type='text' id='act_name_add' name='new_act_name' maxlength='40'"
+           " placeholder='Name'>"
+           "<select id='dyn_name_add' name='act_name_dyn' style='display:none;width:100%%'"
+           " disabled>");
+    for (uint8_t di = 0U; di < g_dyn_act_count; di++)
+    {
+        APPEND("<option value='%s'>%s</option>", g_dyn_act_registry[di].p_name,
+            g_dyn_act_registry[di].p_name);
+    }
+    APPEND("</select></td>");
     APPEND("<td><input type='text' name='new_act_credit' maxlength='8'"
            " placeholder='0:00:00' oninput='hmsInput(this)'></td>");
     APPEND("<td><input type='text' name='new_act_limit' maxlength='8'"
            " placeholder='0:00:00' oninput='hmsInput(this)'></td>");
     APPEND("<td><input type='number' name='new_act_daily' min='1' max='255' value='1'></td>");
-    APPEND("<td><button type='submit' name='action' value='add_activity'>Add</button></td>");
+    APPEND("<td style='white-space:nowrap'>"
+           "<label style='font-size:.9em;margin-right:.4em'>"
+           "<input type='checkbox' id='is_dyn_add' name='is_dynamic' value='1'"
+           " onchange=\"onIsDynChange(this,'add')\">Dynamic</label>"
+           "<button type='submit' name='action' value='add_activity'>Add</button>"
+           "</td>");
     APPEND("</tr></table></form></div>");
 
     /* ---- Activity assignments section ---- */
@@ -298,16 +325,51 @@ esp_err_t http_srv_activities_manage_post_handler(httpd_req_t * p_req)
         char credit_str[16];
         char limit_str[16];
         char daily_str[8];
+        char val_buf[4];
 
         (void)http_srv_form_field_get(body, "new_act_name", name, sizeof(name));
         (void)http_srv_form_field_get(body, "new_act_credit", credit_str, sizeof(credit_str));
         (void)http_srv_form_field_get(body, "new_act_limit", limit_str, sizeof(limit_str));
         (void)http_srv_form_field_get(body, "new_act_daily", daily_str, sizeof(daily_str));
 
+        /* Parse is_dynamic checkbox (present only when checked). */
+        esp_err_t dyn_ret = http_srv_form_field_get(body, "is_dynamic", val_buf, sizeof(val_buf));
+        uint8_t   b_is_dynamic = ((ESP_OK == dyn_ret) && ('1' == val_buf[0])) ? 1U : 0U;
+
+        /* For dynamic activities, use the combobox field and validate against registry. */
+        if (1U == b_is_dynamic)
+        {
+            (void)http_srv_form_field_get(body, "act_name_dyn", name, sizeof(name));
+
+            bool b_found_in_reg = false;
+            for (uint8_t di = 0U; di < g_dyn_act_count; di++)
+            {
+                if (0 == strcmp(g_dyn_act_registry[di].p_name, name))
+                {
+                    b_found_in_reg = true;
+                    break;
+                }
+            }
+            if (!b_found_in_reg)
+            {
+                free(body);
+                httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                    "Dynamic activity name not found in firmware registry");
+                return ESP_FAIL;
+            }
+        }
+
         uint32_t credit_s     = 0U;
         uint32_t time_limit_s = 0U;
         (void)hms_str_to_s(credit_str, &credit_s);
         (void)hms_str_to_s(limit_str, &time_limit_s);
+
+        if (0U == credit_s)
+        {
+            free(body);
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Credit cannot be zero");
+            return ESP_FAIL;
+        }
 
         char *  p_end      = NULL;
         long    daily_long = strtol(daily_str, &p_end, 10);
@@ -316,7 +378,8 @@ esp_err_t http_srv_activities_manage_post_handler(httpd_req_t * p_req)
                                  0U;
 
         uint32_t new_id = 0U;
-        op_ret          = act_mngr_activity_add(name, credit_s, time_limit_s, daily_lim, &new_id);
+        op_ret =
+            act_mngr_activity_add(name, credit_s, time_limit_s, daily_lim, b_is_dynamic, &new_id);
         if (ESP_ERR_NO_MEM == op_ret)
         {
             (void)strncpy(err_msg, "Pool full - max 30 activities", sizeof(err_msg) - 1U);
@@ -336,6 +399,7 @@ esp_err_t http_srv_activities_manage_post_handler(httpd_req_t * p_req)
         char credit_str[16];
         char limit_str[16];
         char daily_str[8];
+        char val_buf[4];
 
         /* Field names contain the activity ID. */
         char fn_name[32];
@@ -352,10 +416,21 @@ esp_err_t http_srv_activities_manage_post_handler(httpd_req_t * p_req)
         (void)http_srv_form_field_get(body, fn_limit, limit_str, sizeof(limit_str));
         (void)http_srv_form_field_get(body, fn_daily, daily_str, sizeof(daily_str));
 
+        /* Parse is_dynamic checkbox (present only when checked). */
+        esp_err_t dyn_ret = http_srv_form_field_get(body, "is_dynamic", val_buf, sizeof(val_buf));
+        uint8_t   b_is_dynamic = ((ESP_OK == dyn_ret) && ('1' == val_buf[0])) ? 1U : 0U;
+
         uint32_t credit_s     = 0U;
         uint32_t time_limit_s = 0U;
         (void)hms_str_to_s(credit_str, &credit_s);
         (void)hms_str_to_s(limit_str, &time_limit_s);
+
+        if (0U == credit_s)
+        {
+            free(body);
+            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Credit cannot be zero");
+            return ESP_FAIL;
+        }
 
         char *  p_end2     = NULL;
         long    daily_long = strtol(daily_str, &p_end2, 10);
@@ -363,7 +438,8 @@ esp_err_t http_srv_activities_manage_post_handler(httpd_req_t * p_req)
                                  (uint8_t)daily_long :
                                  0U;
 
-        op_ret = act_mngr_activity_update(act_id, name, credit_s, time_limit_s, daily_lim);
+        op_ret =
+            act_mngr_activity_update(act_id, name, credit_s, time_limit_s, daily_lim, b_is_dynamic);
         if (ESP_ERR_NOT_FOUND == op_ret)
         {
             (void)strncpy(err_msg, "Activity not found", sizeof(err_msg) - 1U);

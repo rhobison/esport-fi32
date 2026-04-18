@@ -115,6 +115,20 @@ esp_err_t http_srv_config_pwd_get_handler(httpd_req_t * p_req);
  */
 esp_err_t http_srv_config_pwd_post_handler(httpd_req_t * p_req);
 
+/**
+ * \brief Check HTTP Basic Auth credentials without sending any HTTP response.
+ *
+ * Reads the \c Authorization header and validates credentials identically to
+ * #http_srv_cfg_auth_check, but does \b not send an HTTP 401 response on
+ * failure.  Use when the caller intends to try an alternative auth method
+ * (e.g. PIN) before deciding to reject the request.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c true when credentials are valid, \c false otherwise.
+ */
+bool http_srv_cfg_auth_check_silent(httpd_req_t * p_req);
+
 #ifdef __cplusplus
 }
 #endif

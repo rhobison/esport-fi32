@@ -119,8 +119,22 @@ esp_err_t act_mngr_init(void)
     {
         char key[ACT_MNGR_KEY_BUF_LEN];
         (void)snprintf(key, sizeof(key), "ac_%u", (unsigned int)s);
-        size_t len = sizeof(act_mngr_entry_t);
-        if (ESP_OK != nvs_get_blob(handle, key, &g_pool[s], &len))
+
+        /* Backward compatibility: query the stored blob size first.
+         * Old blobs (pre-Feature-8) may be smaller than sizeof(act_mngr_entry_t).
+         * Zero-init the struct so missing fields default to 0 (b_is_dynamic = 0). */
+        size_t loaded_size = 0U;
+        (void)nvs_get_blob(handle, key, NULL, &loaded_size);
+        if (0U == loaded_size)
+        {
+            /* Slot unreadable – truncate pool to last good slot. */
+            cnt = s;
+            break;
+        }
+        (void)memset(&g_pool[s], 0, sizeof(act_mngr_entry_t));
+        size_t read_size =
+            (loaded_size < sizeof(act_mngr_entry_t)) ? loaded_size : sizeof(act_mngr_entry_t);
+        if (ESP_OK != nvs_get_blob(handle, key, &g_pool[s], &read_size))
         {
             /* Slot unreadable – truncate pool to last good slot. */
             cnt = s;
@@ -179,10 +193,15 @@ esp_err_t act_mngr_init(void)
 //--------------------------------------------------------------------------------------------------
 
 esp_err_t act_mngr_activity_add(const char * p_name, uint32_t credit_s, uint32_t time_limit_s,
-    uint8_t daily_limit, uint32_t * p_id_out)
+    uint8_t daily_limit, uint8_t b_is_dynamic, uint32_t * p_id_out)
 {
     if ((NULL == p_name) || (0U == strlen(p_name)) || (strlen(p_name) > ACT_MNGR_NAME_MAX_LEN) ||
         (0U == daily_limit))
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (0U == credit_s)
     {
         return ESP_ERR_INVALID_ARG;
     }
@@ -208,6 +227,7 @@ esp_err_t act_mngr_activity_add(const char * p_name, uint32_t credit_s, uint32_t
     g_pool[slot].credit_s                    = credit_s;
     g_pool[slot].time_limit_s                = time_limit_s;
     g_pool[slot].daily_limit                 = daily_limit;
+    g_pool[slot].b_is_dynamic                = b_is_dynamic;
     g_pool_count++;
     portEXIT_CRITICAL(&g_act_mux);
 
@@ -219,8 +239,8 @@ esp_err_t act_mngr_activity_add(const char * p_name, uint32_t credit_s, uint32_t
         *p_id_out = new_id;
     }
 
-    ESP_LOGI(gp_tag, "added activity id=%lu slot=%u name='%s'", (unsigned long)new_id,
-        (unsigned int)slot, p_name);
+    ESP_LOGI(gp_tag, "added activity id=%lu slot=%u name='%s' is_dynamic=%u", (unsigned long)new_id,
+        (unsigned int)slot, p_name, (unsigned int)b_is_dynamic);
     return ESP_OK;
 }
 
@@ -291,7 +311,7 @@ esp_err_t act_mngr_activity_remove(uint32_t id)
 //--------------------------------------------------------------------------------------------------
 
 esp_err_t act_mngr_activity_update(uint32_t id, const char * p_name, uint32_t credit_s,
-    uint32_t time_limit_s, uint8_t daily_limit)
+    uint32_t time_limit_s, uint8_t daily_limit, uint8_t b_is_dynamic)
 {
     if ((NULL == p_name) || (0U == strlen(p_name)) || (strlen(p_name) > ACT_MNGR_NAME_MAX_LEN) ||
         (0U == daily_limit))
@@ -311,11 +331,13 @@ esp_err_t act_mngr_activity_update(uint32_t id, const char * p_name, uint32_t cr
     g_pool[slot].credit_s                    = credit_s;
     g_pool[slot].time_limit_s                = time_limit_s;
     g_pool[slot].daily_limit                 = daily_limit;
+    g_pool[slot].b_is_dynamic                = b_is_dynamic;
     portEXIT_CRITICAL(&g_act_mux);
 
     (void)act_mngr_pool_save((uint8_t)slot);
 
-    ESP_LOGI(gp_tag, "updated activity id=%lu", (unsigned long)id);
+    ESP_LOGI(gp_tag, "updated activity id=%lu is_dynamic=%u", (unsigned long)id,
+        (unsigned int)b_is_dynamic);
     return ESP_OK;
 }
 

@@ -62,14 +62,19 @@ extern "C"
  * \brief One entry in the global activity pool.
  *
  * Stored as a blob under NVS key \c ac_N in namespace \c esport_act.
+ *
+ * NVS backward compatibility: pre-Feature-8 blobs lack the \c b_is_dynamic byte.
+ * \c act_mngr_init() zero-pads short blobs on load so old entries default to
+ * \c b_is_dynamic = 0 (static).
  */
 typedef struct act_mngr_entry_tag
 {
     uint32_t id;                               /**< Auto-generated 1-based unique ID.    */
     char     name[ACT_MNGR_NAME_MAX_LEN + 1U]; /**< Null-terminated name, max 40 chars.  */
-    uint32_t credit_s;                         /**< Seconds to credit; 0 = dynamic.     */
+    uint32_t credit_s;                         /**< Seconds to credit (must be > 0).     */
     uint32_t time_limit_s;                     /**< Gamification reference duration.     */
     uint8_t  daily_limit;                      /**< Max credits per day; 1–255.          */
+    uint8_t  b_is_dynamic; /**< Non-zero = dynamic activity (mini-game); 0 = static. */
 } act_mngr_entry_t;
 
 /**
@@ -127,18 +132,20 @@ esp_err_t act_mngr_init(void);
 /**
  * \brief Add a new activity to the global pool.
  *
- * \param[in]  p_name       Activity name (1–#ACT_MNGR_NAME_MAX_LEN chars).
- * \param[in]  credit_s     Seconds to credit; 0 = dynamic (API-provided).
- * \param[in]  time_limit_s Gamification reference duration in seconds.
- * \param[in]  daily_limit  Max credits per day (1–255).
- * \param[out] p_id_out     Receives the auto-generated activity ID on success.
+ * \param[in]  p_name        Activity name (1–#ACT_MNGR_NAME_MAX_LEN chars).
+ * \param[in]  credit_s      Seconds to credit; must be > 0.
+ * \param[in]  time_limit_s  Gamification reference duration in seconds.
+ * \param[in]  daily_limit   Max credits per day (1–255).
+ * \param[in]  b_is_dynamic  Non-zero to mark as dynamic activity (mini-game); 0 = static.
+ * \param[out] p_id_out      Receives the auto-generated activity ID on success.
  *
  * \return \c ESP_OK on success.
- * \return \c ESP_ERR_INVALID_ARG when \p p_name is invalid or \p daily_limit is 0.
+ * \return \c ESP_ERR_INVALID_ARG when \p p_name is invalid, \p daily_limit is 0, or
+ *         \p credit_s is 0.
  * \return \c ESP_ERR_NO_MEM when the pool is already full.
  */
 esp_err_t act_mngr_activity_add(const char * p_name, uint32_t credit_s, uint32_t time_limit_s,
-    uint8_t daily_limit, uint32_t * p_id_out);
+    uint8_t daily_limit, uint8_t b_is_dynamic, uint32_t * p_id_out);
 
 /**
  * \brief Remove an activity from the global pool by ID.
@@ -161,13 +168,14 @@ esp_err_t act_mngr_activity_remove(uint32_t id);
  * \param[in] credit_s     New credit in seconds.
  * \param[in] time_limit_s New gamification reference in seconds.
  * \param[in] daily_limit  New daily limit (1–255).
+ * \param[in] b_is_dynamic Non-zero to mark as dynamic activity (mini-game); 0 = static.
  *
  * \return \c ESP_OK on success.
  * \return \c ESP_ERR_NOT_FOUND when no activity with \p id exists.
  * \return \c ESP_ERR_INVALID_ARG when \p p_name is invalid or \p daily_limit is 0.
  */
 esp_err_t act_mngr_activity_update(uint32_t id, const char * p_name, uint32_t credit_s,
-    uint32_t time_limit_s, uint8_t daily_limit);
+    uint32_t time_limit_s, uint8_t daily_limit, uint8_t b_is_dynamic);
 
 /**
  * \brief Copy the activity entry for the given ID into \p p_out.
