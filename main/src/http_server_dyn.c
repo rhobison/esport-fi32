@@ -126,9 +126,9 @@ static esp_err_t http_srv_dyn_detect_device(httpd_req_t * p_req, uint8_t * p_dev
     }
     else if (AF_INET6 == peer_u.sa.sa_family)
     {
-        static const uint8_t sc_v4mapped_pfx[12U] =
-            { 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0xFFU, 0xFFU };
-        const uint8_t * b = peer_u.sin6.sin6_addr.s6_addr;
+        static const uint8_t sc_v4mapped_pfx[12U] = { 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0xFFU,
+            0xFFU };
+        const uint8_t *      b                    = peer_u.sin6.sin6_addr.s6_addr;
 
         if (0 == memcmp(b, sc_v4mapped_pfx, 12U))
         {
@@ -142,8 +142,8 @@ static esp_err_t http_srv_dyn_detect_device(httpd_req_t * p_req, uint8_t * p_dev
     }
     else
     {
-        ESP_LOGW(gp_tag, "Unexpected peer address family %d on fd %d",
-            (int)peer_u.sa.sa_family, sock);
+        ESP_LOGW(gp_tag, "Unexpected peer address family %d on fd %d", (int)peer_u.sa.sa_family,
+            sock);
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -179,8 +179,8 @@ static esp_err_t http_srv_dyn_detect_device(httpd_req_t * p_req, uint8_t * p_dev
     if (!b_found)
     {
         const uint8_t * b = (const uint8_t *)&peer_ipv4;
-        ESP_LOGW(gp_tag, "Peer IP %d.%d.%d.%d not in AP station list (%d stations)",
-            (int)b[0], (int)b[1], (int)b[2], (int)b[3], sta_ip_list.num);
+        ESP_LOGW(gp_tag, "Peer IP %d.%d.%d.%d not in AP station list (%d stations)", (int)b[0],
+            (int)b[1], (int)b[2], (int)b[3], sta_ip_list.num);
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -200,8 +200,8 @@ static esp_err_t http_srv_dyn_detect_device(httpd_req_t * p_req, uint8_t * p_dev
         }
     }
 
-    ESP_LOGW(gp_tag, "MAC %02X:%02X:%02X:%02X:%02X:%02X not in device registry",
-        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    ESP_LOGW(gp_tag, "MAC %02X:%02X:%02X:%02X:%02X:%02X not in device registry", mac[0], mac[1],
+        mac[2], mac[3], mac[4], mac[5]);
     return ESP_ERR_NOT_FOUND;
 }
 
@@ -318,7 +318,8 @@ esp_err_t http_srv_dyn_page_get_handler(httpd_req_t * p_req)
            "+\"?pin=\"+d.pin"
            "+\"&device_idx=\"+DEVICE_IDX"
            "+\"&act_id=\"+a.act_id"
-           "+\"&credits_s=\"+a.credit_s+\"'\\\">\"+lbl+'</button>';"
+           "+\"&credits_s=\"+a.credit_s"
+           "+\"&token=\"+a.token+\"'\\\">\"+lbl+'</button>';"
            "});"
            "div.innerHTML=html;"
            "})"
@@ -361,17 +362,20 @@ esp_err_t http_srv_dyn_file_get_handler(httpd_req_t * p_req)
         return ESP_OK;
     }
 
-    /* Copy the name portion (after the prefix) into a local buffer. */
+    /* Copy the name portion (after the prefix) into a local buffer.
+     * Measure length only up to the query string ('?') so that a long
+     * query string does not trigger the overflow guard. */
     char         name_buf[DYN_ACT_NAME_MAX_LEN + 8U]; /* +8 for ".html\0" headroom */
     const char * p_name_start = p_uri + HTTP_SRV_DYN_FILE_PREFIX_LEN;
-    size_t       name_len     = strlen(p_name_start);
+    const char * p_qs         = strchr(p_name_start, '?');
+    size_t       name_len = (NULL != p_qs) ? (size_t)(p_qs - p_name_start) : strlen(p_name_start);
     if (name_len >= sizeof(name_buf))
     {
         httpd_resp_send_err(p_req, HTTPD_404_NOT_FOUND, "Dynamic activity not found");
         return ESP_OK;
     }
-    (void)strncpy(name_buf, p_name_start, sizeof(name_buf) - 1U);
-    name_buf[sizeof(name_buf) - 1U] = '\0';
+    (void)memcpy(name_buf, p_name_start, name_len);
+    name_buf[name_len] = '\0';
 
     /* Strip trailing ".html" extension if present. */
     char * p_dot = strrchr(name_buf, '.');

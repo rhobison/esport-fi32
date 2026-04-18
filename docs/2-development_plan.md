@@ -963,6 +963,7 @@ Every symbol (functions, types, `#define` macros, `enum` values) **must** start 
 | `activity_manager`      | `act_mngr_`            | `ACT_MNGR_`         |
 | `http_server_activities`| `http_srv_`            | `HTTP_SRV_`         |
 | `dyn_act_registry`      | `dyn_act_`             | `DYN_ACT_`          |
+| `dyn_nonce`             | `dyn_nonce_`           | `DYN_NONCE_`        |
 | `http_server_dyn`       | `http_srv_dyn_`        | `HTTP_SRV_DYN_`     |
 
 > `gp_tag` is a universal file-scope variable name and does **not** carry a module prefix (it follows the BARR-C:2018 pointer variable naming rule instead).
