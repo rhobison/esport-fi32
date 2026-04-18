@@ -26,6 +26,7 @@
 #include "device_registry.h"
 #include "esp_wifi.h"
 #include "event_ids.h"
+#include "activity_manager.h"
 #include "time_counter.h"
 #include "time_manager.h"
 #include "wifi_manager.h"
@@ -42,7 +43,6 @@ static const char * gp_tag __attribute__((unused)) = "http_srv_config";
 //==================================================================================================
 
 static esp_err_t parse_mac_address(const char * p_str, uint8_t * p_mac_out);
-static bool      http_srv_cfg_auth_check(httpd_req_t * p_req);
 
 //==================================================================================================
 // Public Functions
@@ -301,6 +301,16 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         "<p><label>Buzzer feedback</label>"
         "<input type=\"checkbox\" name=\"buzzer_enabled\" value=\"1\"");
     if (config_mngr_buzzer_enabled_get())
+    {
+        (void)httpd_resp_sendstr_chunk(p_req, " checked");
+    }
+    (void)httpd_resp_sendstr_chunk(p_req, "></p>");
+
+    /* activity_credit_buzzer_en */
+    (void)httpd_resp_sendstr_chunk(p_req,
+        "<p><label>Activity credit beep</label>"
+        "<input type=\"checkbox\" name=\"activity_credit_buzzer_en\" value=\"1\"");
+    if (config_mngr_activity_credit_buzzer_en_get())
     {
         (void)httpd_resp_sendstr_chunk(p_req, " checked");
     }
@@ -850,6 +860,14 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
         bool b_buzzer =
             (ESP_OK == http_srv_form_field_get(body, "buzzer_enabled", bz_val, sizeof(bz_val)));
         (void)config_mngr_buzzer_enabled_set(b_buzzer);
+    }
+
+    /* activity_credit_buzzer_en (checkbox: present = true, absent = false) */
+    {
+        char ac_bz_val[4];
+        bool b_ac_bz = (ESP_OK == http_srv_form_field_get(body, "activity_credit_buzzer_en",
+                                      ac_bz_val, sizeof(ac_bz_val)));
+        (void)config_mngr_activity_credit_buzzer_en_set(b_ac_bz);
     }
 
     /* low_speed_buzzer_threshold_s */
@@ -1425,7 +1443,7 @@ esp_err_t http_srv_config_pwd_post_handler(httpd_req_t * p_req)
  *
  * \return \c true if authentication passed, \c false otherwise.
  */
-static bool http_srv_cfg_auth_check(httpd_req_t * p_req)
+bool http_srv_cfg_auth_check(httpd_req_t * p_req)
 {
     size_t hdr_len = httpd_req_get_hdr_value_len(p_req, "Authorization");
 

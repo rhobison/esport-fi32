@@ -33,6 +33,7 @@
 #include "wifi_manager.h"
 #include "buzzer.h"
 #include "button_reset.h"
+#include "activity_manager.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -90,6 +91,9 @@ void app_main(void)
 
     /* Step 2a: Initialise device registry before WiFi so the MAC filter is ready. */
     ESP_ERROR_CHECK(device_reg_init());
+
+    /* Step 2aa: Initialise activity manager (after device registry). */
+    ESP_ERROR_CHECK(act_mngr_init());
 
     /* Step 2b: Initialise buzzer GPIO and pattern timer. */
     ESP_ERROR_CHECK(buzzer_init());

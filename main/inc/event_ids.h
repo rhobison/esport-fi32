@@ -125,6 +125,14 @@ typedef enum
      * removed, or a per-device counter changes (including reaching zero).
      */
     ESPORT_EVENT_DEVICE_REGISTRY_CHANGED = 9,
+
+    /**
+     * \brief An activity credit was successfully applied via #act_mngr_activity_credit.
+     *
+     * No payload.  Posted once per successful credit operation so consumers
+     * (e.g. live dashboard) can refresh counters without polling.
+     */
+    ESPORT_EVENT_ACTIVITY_CREDITED = 10,
 } esport_event_id_t;
 
 //==================================================================================================

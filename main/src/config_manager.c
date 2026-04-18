@@ -63,6 +63,8 @@
 #define CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S ("bz_spd_thr_s")
 #define CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S ((uint16_t)3U)
 #define CONFIG_MNGR_KEY_CFG_PWD               ("cfg_pwd")
+#define CONFIG_MNGR_KEY_ACT_CREDIT_BZ_EN      ("ac_bz_en")
+#define CONFIG_MNGR_DEF_ACT_CREDIT_BZ_EN      ((uint8_t)1U)
 
 /* String size limits (spec §5.1). */
 #define CONFIG_MNGR_MAX_SSID_LEN (32U) /* max 32 chars + NUL */
@@ -174,6 +176,17 @@ esp_err_t config_mngr_init(void)
         {
             ret |=
                 nvs_set_u8(handle, CONFIG_MNGR_KEY_BUZZER_ENABLED, CONFIG_MNGR_DEF_BUZZER_ENABLED);
+        }
+    }
+
+    /* activity_credit_buzzer_en (uint8: 0=false, 1=true) */
+    {
+        uint8_t   ac_bz_val = 0U;
+        esp_err_t ac_bz_ret = nvs_get_u8(handle, CONFIG_MNGR_KEY_ACT_CREDIT_BZ_EN, &ac_bz_val);
+        if (ESP_ERR_NVS_NOT_FOUND == ac_bz_ret)
+        {
+            ret |= nvs_set_u8(handle, CONFIG_MNGR_KEY_ACT_CREDIT_BZ_EN,
+                CONFIG_MNGR_DEF_ACT_CREDIT_BZ_EN);
         }
     }
 
@@ -601,6 +614,7 @@ esp_err_t config_mngr_reset_to_defaults(void)
     ret |= nvs_set_u16(handle, CONFIG_MNGR_KEY_LOW_SPEED_BZ_THRESH_S,
         CONFIG_MNGR_DEF_LOW_SPEED_BZ_THRESH_S);
     ret |= nvs_set_str(handle, CONFIG_MNGR_KEY_CFG_PWD, CONFIG_MNGR_CFG_PASSWORD_DEFAULT);
+    ret |= nvs_set_u8(handle, CONFIG_MNGR_KEY_ACT_CREDIT_BZ_EN, CONFIG_MNGR_DEF_ACT_CREDIT_BZ_EN);
 
     if (ESP_OK == ret)
     {
@@ -618,6 +632,53 @@ esp_err_t config_mngr_reset_to_defaults(void)
         ESP_LOGI(gp_tag, "all settings reset to factory defaults");
     }
 
+    return ret;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+bool config_mngr_activity_credit_buzzer_en_get(void)
+{
+    nvs_handle_t handle;
+    uint8_t      val = CONFIG_MNGR_DEF_ACT_CREDIT_BZ_EN;
+
+    esp_err_t ret = nvs_open(CONFIG_MNGR_NAMESPACE, NVS_READONLY, &handle);
+    if (ESP_OK == ret)
+    {
+        (void)nvs_get_u8(handle, CONFIG_MNGR_KEY_ACT_CREDIT_BZ_EN, &val);
+        nvs_close(handle);
+    }
+
+    return (val != 0U);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+esp_err_t config_mngr_activity_credit_buzzer_en_set(bool b_enabled)
+{
+    nvs_handle_t handle;
+    esp_err_t    ret = nvs_open(CONFIG_MNGR_NAMESPACE, NVS_READWRITE, &handle);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "config_mngr_activity_credit_buzzer_en_set open failed: 0x%x", ret);
+        return ret;
+    }
+
+    ret = nvs_set_u8(handle, CONFIG_MNGR_KEY_ACT_CREDIT_BZ_EN, (uint8_t)(b_enabled ? 1U : 0U));
+    if (ESP_OK == ret)
+    {
+        ret = nvs_commit(handle);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGE(gp_tag, "config_mngr_activity_credit_buzzer_en_set commit failed: 0x%x", ret);
+        }
+    }
+    else
+    {
+        ESP_LOGE(gp_tag, "nvs_set_u8(%s) failed: 0x%x", CONFIG_MNGR_KEY_ACT_CREDIT_BZ_EN, ret);
+    }
+
+    nvs_close(handle);
     return ret;
 }
 

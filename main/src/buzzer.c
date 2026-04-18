@@ -86,6 +86,12 @@ static const buzzer_step_t s_pat_password_reset[1] = {
     { 50U, 0U },
 };
 
+/** Activity credit: 2 ON, 1 OFF, 2 ON ("double ding", 250 ms total). */
+static const buzzer_step_t s_pat_act_credit[2] = {
+    { 2U, 1U },
+    { 2U, 0U },
+};
+
 /* ---- Playback state (spinlock-protected) ---- */
 
 /** Spinlock protecting all playback state. */
@@ -201,6 +207,10 @@ void buzzer_pattern_play(buzzer_pattern_id_t pattern)
         case BUZZER_PATTERN_PASSWORD_RESET:
             p_steps = s_pat_password_reset;
             count   = 1U;
+            break;
+        case BUZZER_PATTERN_ACTIVITY_CREDIT:
+            p_steps = s_pat_act_credit;
+            count   = 2U;
             break;
         default:
             ESP_LOGW(gp_tag, "unknown pattern %d", (int)pattern);

@@ -402,6 +402,26 @@ bool config_mngr_cfg_credentials_check(const char * p_password);
 
 esp_err_t config_mngr_reset_to_defaults(void);
 
+/**
+ * \brief Return whether the activity-credit buzzer beep is enabled.
+ *
+ * When \c false, #buzzer_pattern_play is not called on activity credit; all
+ * other crediting behaviour is unchanged.  Defaults to \c true when the
+ * NVS key is absent.
+ *
+ * \return \c true if the activity-credit beep is enabled, \c false otherwise.
+ */
+bool config_mngr_activity_credit_buzzer_en_get(void);
+
+/**
+ * \brief Enable or disable the activity-credit buzzer beep.
+ *
+ * \param[in] b_enabled  \c true to enable the beep; \c false to suppress it.
+ *
+ * \return \c ESP_OK on success, or an NVS error code on write failure.
+ */
+esp_err_t config_mngr_activity_credit_buzzer_en_set(bool b_enabled);
+
 #ifdef __cplusplus
 }
 #endif

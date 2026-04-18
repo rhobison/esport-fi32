@@ -33,6 +33,8 @@
     - [6.5 Sessions Export API — `GET /api/sessions/export`](#65-sessions-export-api--get-apisessionsexport)
     - [6.6 Daily Aggregates API (Graphs) — `GET /api/sessions/daily`](#66-daily-aggregates-api-graphs--get-apisessionsdaily)
     - [6.7 Firmware Update — `GET /ota` and `POST /ota`](#67-firmware-update--get-ota-and-post-ota)
+    - [6.8 Activity Manager Pages — `GET /activities`, `GET /activities/manage`, `POST /activities/manage`](#68-activity-manager-pages--get-activities-get-activitiesmanage-post-activitiesmanage)
+    - [6.9 Activity Credits JSON API](#69-activity-credits-json-api)
   - [7. System Behaviour Sequences](#7-system-behaviour-sequences)
     - [7.1 Boot Sequence](#71-boot-sequence)
     - [7.2 STA Connection Flow](#72-sta-connection-flow)
@@ -46,6 +48,7 @@
     - [Namespace: `esport_log`](#namespace-esport_log)
     - [Namespace: `esport_dev`](#namespace-esport_dev)
     - [Namespace: `esport_ota`](#namespace-esport_ota)
+    - [Namespace: `esport_act`](#namespace-esport_act)
   - [9. Event Bus](#9-event-bus)
   - [10. Factory Defaults \& NVS Recovery](#10-factory-defaults--nvs-recovery)
   - [11. Coding Conventions](#11-coding-conventions)
@@ -990,6 +993,118 @@ the new password to NVS namespace `esport_ota`.
 
 ---
 
+### 6.8 Activity Manager Pages — `GET /activities`, `GET /activities/manage`, `POST /activities/manage`
+
+All three routes require HTTP Basic Auth (same credentials as `/config`).
+
+**`GET /activities/manage`** — Pool & assignment management page.
+
+- Renders the global activity pool as a table with editable name, credit time (`h:mm:ss`), daily
+  time cap (`h:mm:ss`), and daily click limit fields.  Each row has **Update** and **Delete**
+  buttons.
+- Below the table an **Add Activity** sub-form allows creating a new pool entry.
+- A separate section below renders per-device assignment panels.  Each panel lists currently
+  assigned activities (with **Unassign** buttons) and a select-box + **Assign** button to add
+  more.
+- Accepts `?saved=1` to show a success banner after redirect.
+
+**`POST /activities/manage`** — Processes management actions.
+
+Reads a hidden `action` field from the URL-encoded POST body:
+
+| `action` value    | Effect                                                   |
+| ----------------- | -------------------------------------------------------- |
+| `add_activity`    | Creates a new pool entry from `new_act_*` fields         |
+| `update_<id>`     | Updates name, credit, limit, and daily_limit for pool ID |
+| `delete_<id>`     | Removes pool entry; auto-unassigns from all devices      |
+| `assign_<dev>`    | Assigns selected activity to device `dev`                |
+| `unassign_<dev>_<id>` | Removes activity `id` from device `dev`'s assignment list |
+
+On success redirects to `GET /activities/manage?saved=1`.  On error returns HTTP 400 with a
+plain-text message.
+
+**`GET /activities`** — Parent credit interface.
+
+- Renders a drop-down user selector, a table of the selected user's assigned activities with
+  **Credit** buttons, and a credit log table for that user.
+- All live data is fetched from `/api/activities?device_idx=N`,
+  `/api/activities/log?device_idx=N`, and `/api/status` via JavaScript on page load and after
+  each credit action.  The total internet counter is refreshed from `/api/status`.
+
+---
+
+### 6.9 Activity Credits JSON API
+
+**`GET /api/activities`** — Returns pool data as JSON.
+
+Optional query parameter `device_idx=N` (0–3):
+- Without it: returns all pool activities.
+- With it: returns only activities assigned to device N with `credit_s > 0`; each entry also
+  includes `done_today` (uint) and `available` (bool) fields.
+
+Response schema:
+```json
+{
+  "activities": [
+    {
+      "id": 1,
+      "slot": 0,
+      "name": "Bike ride",
+      "credit_s": 1800,
+      "credit_hms": "0:30:00",
+      "time_limit_s": 3600,
+      "time_limit_hms": "1:00:00",
+      "daily_limit": 2,
+      "done_today": 1,
+      "available": true
+    }
+  ]
+}
+```
+
+**`POST /api/activities/credit`** — Credits internet time.  Requires Basic Auth.
+
+Request body (JSON):
+```json
+{
+  "device_idx": 0,
+  "act_id": 1,
+  "credits_s": 1800,
+  "completion_time_s": 0
+}
+```
+
+Response on success (`200 OK`):
+```json
+{ "ok": true, "new_counter_s": 5400, "new_counter_hms": "1:30:00" }
+```
+
+Error responses: `400 Bad Request` for invalid arguments or activity not found/assigned;
+`429 Too Many Requests` when the daily limit has been reached.
+
+**`GET /api/activities/log`** — Returns credit log for a device.
+
+Required query parameter `device_idx=N` (0–3).
+
+Response schema:
+```json
+{
+  "log": [
+    {
+      "timestamp_utc": 1714123456,
+      "timestamp_local": "2025-04-26T09:04:16",
+      "act_id": 1,
+      "act_name": "Bike ride",
+      "credits_s": 1800,
+      "credits_hms": "0:30:00",
+      "completion_time_s": 0
+    }
+  ]
+}
+```
+
+---
+
 ## 7. System Behaviour Sequences
 
 ### 7.1 Boot Sequence
@@ -1202,6 +1317,58 @@ so that no flash byte goes unused across the full 4 MB device.
 
 ---
 
+### Namespace: `esport_act`
+
+Stores the global activity pool and per-device assignment / daily counters / credit log.
+
+**Pool metadata:**
+
+| Key          | Type   | Content                                              |
+| ------------ | ------ | ---------------------------------------------------- |
+| `pool_count` | uint8  | Number of entries in the activity pool (0–30)        |
+| `next_id`    | uint32 | Next auto-increment activity ID (starts at 1)        |
+
+**Pool entries** (up to 30):
+
+| Key pattern   | Type | Content                              |
+| ------------- | ---- | ------------------------------------ |
+| `act_N`       | blob | `act_mngr_entry_t` binary for slot N |
+
+**Per-device assignments** (one per device index 0–3):
+
+| Key pattern   | Type  | Content                                                   |
+| ------------- | ----- | --------------------------------------------------------- |
+| `ua_N`        | blob  | `act_mngr_user_assigns_t` for device N (count + id list) |
+
+**Per-device daily state** (one per device index 0–3):
+
+| Key pattern  | Type | Content                                       |
+| ------------ | ---- | --------------------------------------------- |
+| `ud_N`       | blob | `act_mngr_user_daily_t` for device N          |
+
+**Per-device credit log** (up to 30 entries per device):
+
+| Key pattern   | Type  | Content                                             |
+| ------------- | ----- | --------------------------------------------------- |
+| `ul_N_K`      | blob  | `act_credit_log_entry_t` for device N, log slot K   |
+| `ul_N_h`      | uint8 | Log ring-buffer head (next write slot) for device N |
+| `ul_N_c`      | uint8 | Log entry count for device N                        |
+
+`act_mngr_entry_t` binary layout (28 bytes):
+
+| Field          | Offset | Type       | Notes                         |
+| -------------- | ------ | ---------- | ----------------------------- |
+| `id`           | 0      | uint32_t   | Unique auto-increment ID      |
+| `credit_s`     | 4      | uint32_t   | Seconds credited per click    |
+| `time_limit_s` | 8      | uint32_t   | Optional daily time cap (0=∞) |
+| `daily_limit`  | 12     | uint8_t    | Max credits per day (1–255)   |
+| `_pad`         | 13     | uint8_t[3] | reserved                      |
+| `name`         | 16     | char[20]   | NUL-terminated name (max 19)  |
+
+> Total per entry: 36 bytes × 30 = 1080 bytes; pool metadata + assigns + daily + log ≈ 4 KB total.
+
+---
+
 ## 9. Event Bus
 
 All inter-module communication uses the default ESP event loop (`esp_event_loop_create_default`).
@@ -1220,6 +1387,7 @@ All inter-module communication uses the default ESP event loop (`esp_event_loop_
 | `ESPORT_EVENT_STA_DISCONNECTED` | —                      | `wifi_manager`       | (logging, status)                 |
 | `ESPORT_EVENT_CONFIG_CHANGED`   | none (NULL)            | `http_server_config` | `pulse_input`, `time_counter`     |
 | `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` | none (NULL) | `device_registry`    | `http_server` (status refresh)    |
+| `ESPORT_EVENT_ACTIVITY_CREDITED` | none (NULL)           | `activity_manager`   | (buzzer feedback if enabled)      |
 
 `ESPORT_EVENT_CONFIG_CHANGED` is posted once at the end of a successful `POST /config` or `POST /config/reset` request.  Modules that cache NVS-backed config values subscribe to this event and re-read only the values they own, so configuration changes take effect immediately without a reboot.
 

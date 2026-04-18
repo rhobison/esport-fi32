@@ -36,6 +36,7 @@ ESPort-fi32 is an ESP-IDF firmware that incentivises children to exercise on a s
 - **Persistent per-device counters** — device registry data is saved to NVS every 60 seconds and on counter-reaching-zero; counters survive power cycles.
 - **Firmware Over-The-Air (FOTA) updates** — upload a new `.bin` via the browser at `/ota` (HTTP Basic Auth protected). Automatic rollback: if the device crashes before the new firmware calls `ota_mngr_init()`, the bootloader reverts to the previous slot. Password configurable via `/ota/pwd`.
 - **Buzzer feedback** — an active buzzer on a configurable GPIO provides audio cues: a beep on session start, a longer beep on session qualification, a triple-beep on session close, and a repeating short tick when pedalling too slowly (after a configurable delay to avoid false alarms from momentary speed fluctuations). Can be disabled via the config page.
+- **Activity Credits** — lets a parent define a pool of up to 30 named activities (e.g. "Bike ride", "Homework"). Each activity carries a configurable internet credit, optional daily time cap, and a per-device daily click limit. Activities are assigned per registered device. A parent opens `/activities` to view and click **Credit** buttons; each click adds internet time to that child's counter and plays a double-ding buzzer pattern (configurable). Credit history is recorded in a per-device ring-buffer log (last 30 entries). Managed via `/activities/manage` and a JSON API at `/api/activities`, `/api/activities/credit`, and `/api/activities/log`.
 - **Fully configurable** — all parameters (SSID, password, seconds-per-pulse, thresholds, timezone, ...) are stored in NVS and can be changed at runtime via the web UI without reflashing.
 
 ---
@@ -79,6 +80,14 @@ Lets you set all parameters without reflashing:
 - **Connected Unregistered Stations**: lists AP-connected devices not in the registry with a one-click Add button (handles Android MAC randomisation)
 
 > **Auth:** All `/config` endpoints require HTTP Basic Auth (default credentials: `admin` / `esport-fi32`). Change the password at `/config/pwd`.
+
+### Activity Credits (`/activities`)
+
+A parent-facing credit interface (requires Basic Auth). Select a child from the drop-down to view their assigned activities with **Credit** buttons. Clicking a button adds the activity's configured internet time to the child's counter and plays a double-ding buzzer sound. The page shows the child's total counter (live, fetched from `/api/status`) and a per-session credit log.
+
+### Activity Management (`/activities/manage`)
+
+Requires Basic Auth. Manage the global activity pool (up to 30 activities): create, rename, adjust credit times, daily caps, and click limits. Assign/unassign activities per registered device.
 
 ### Firmware Update OTA (`/ota`)
 
