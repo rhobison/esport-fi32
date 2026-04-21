@@ -20,8 +20,17 @@
             padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
             display: flex;
             flex-direction: column;
-            height: 100dvh;
             height: 100vh;
+            height: 100dvh;
+            overflow: hidden
+        }
+
+        /* screen must fill body and act as the portrait/landscape flex root */
+        #screen {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 0;
+            min-height: 0;
             overflow: hidden
         }
 
@@ -57,7 +66,7 @@
         }
 
         @media(orientation:landscape) {
-            body {
+            #screen {
                 flex-direction: row
             }
 
@@ -207,8 +216,7 @@
             color: #fff;
             cursor: default;
             box-shadow: 0 0 6px 2px rgba(100, 60, 180, .6);
-            user-select: none;
-            transition: top .05s linear
+            user-select: none
         }
 
         .meteor.active {
@@ -361,8 +369,8 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100dvh;
             min-height: 100vh;
+            min-height: 100dvh;
             text-align: center;
             padding: 1em
         }
@@ -531,12 +539,30 @@
             return 5;
         }
 
+        /* Minimum horizontal separation between meteor left-edge positions (percent).
+           80 px meteor on a ~360 px phone = ~22%; use 24% for a clear visual gap. */
+        const METEOR_MIN_SEP_PCT = 24;
+
+        function pickLeftPct() {
+            const occupied = meteors.map(m => m.leftPct);
+            for (let attempt = 0; attempt < 15; attempt++) {
+                const left = rand(5, 72);
+                if (occupied.every(x => Math.abs(x - left) >= METEOR_MIN_SEP_PCT)) return left;
+            }
+            /* Fallback: try fixed slots spread evenly across the range */
+            const slots = [8, 36, 64];
+            for (const s of slots) {
+                if (occupied.every(x => Math.abs(x - s) >= METEOR_MIN_SEP_PCT)) return s;
+            }
+            return rand(5, 72);
+        }
+
         /* ---- meteor lifecycle ---- */
         function spawnMeteor() {
             if (meteors.length >= MAX_METEORS) return;
             const prob = generateProblem();
             const id = ++meteorIdCounter;
-            const left = rand(5, 75);
+            const left = pickLeftPct();
             const dur = fallDuration();
             meteors.push({ id, prob, leftPct: left, topPx: -50, dur, startTime: performance.now(), wrongAnim: false });
             renderMeteorEl(meteors[meteors.length - 1]);
@@ -600,7 +626,13 @@
         }
 
         function spawnMetorsIfNeeded() {
-            while (meteors.length < MAX_METEORS && gameState === 'playing') spawnMeteor();
+            /* Stagger refill spawns so new meteors don't drop in sync.
+               spawnMeteor() guards MAX_METEORS itself, so delayed calls are safe. */
+            const need = MAX_METEORS - meteors.length;
+            for (let i = 0; i < need; i++) {
+                if (i === 0) spawnMeteor();
+                else setTimeout(spawnMeteor, i * 800);
+            }
         }
 
         /* ---- RAF loop ---- */
@@ -841,10 +873,12 @@
 
             renderPlaying();
 
-            /* stagger first 3 meteors */
+            /* Stagger first 3 meteors by ~1/3 of the initial fall duration (8 s),
+               so each appears roughly 1/3 of the screen height below the previous one.
+               This gives the child time to read and answer before the next arrives. */
             spawnMeteor();
-            setTimeout(spawnMeteor, 200);
-            setTimeout(spawnMeteor, 400);
+            setTimeout(spawnMeteor, 2700);
+            setTimeout(spawnMeteor, 5400);
 
             rafId = requestAnimationFrame(rafLoop);
             tickId = setInterval(onTick, 1000);
