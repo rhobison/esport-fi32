@@ -28,7 +28,7 @@
 
 ## Overview
 
-This document specifies `main/dyn_activities/dyn_space_math.html` — a self-contained
+This document specifies `main/dyn_activities/space_math.html` — a self-contained
 HTML/JS/CSS dynamic activity (mini-game) for the esport-fi32 platform targeting children
 aged approximately 8 years old.
 
@@ -39,7 +39,7 @@ speed, not keyboard proficiency.
 
 The game file is a single self-contained `.html` file placed in `main/dyn_activities/`.
 It is embedded in the firmware binary at build time by the existing CMake infrastructure
-(Phase 8.3 of Feature 8) and served by `GET /dyn_activities/dyn_space_math`.  No server
+(Phase 8.3 of Feature 8) and served by `GET /dyn_activities/space_math`.  No server
 code changes are required.
 
 ---
@@ -48,7 +48,7 @@ code changes are required.
 
 | # | Name | File | Status | Phases |
 | - | ---- | ---- | ------ | ------ |
-| 1 | Space Meteor Shower | `dyn_space_math.html` | Specified | A1.1, A1.2, A1.3 |
+| 1 | Space Meteor Shower | `space_math.html` | Specified | A1.1, A1.2, A1.3 |
 
 > To add a new activity: assign it the next available number, add a row to this table,
 > and create its own `## Activity N` section followed by phases `AN.1` (Design),
@@ -67,7 +67,7 @@ must fit within the partition table allocation.
 
 | Activity | File | Uncompressed target | Uncompressed maximum | Compressed estimate |
 | -------- | ---- | ------------------- | -------------------- | ------------------- |
-| 1        | `dyn_space_math.html` | < 40 KB | < 80 KB | ~ 10–15 KB |
+| 1        | `space_math.html` | < 40 KB | < 80 KB | ~ 10–15 KB |
 
 > **Note**: the size targets and hard maximum apply to the **uncompressed source file**
 > in the repository.  The figure that directly determines flash consumption is the
@@ -208,7 +208,7 @@ The `/dyn` page currently builds launch URLs with these query parameters
 (from `GET /api/dyn` response):
 
 ```
-/dyn_activities/dyn_space_math?pin=<PIN>&device_idx=<N>&act_id=<ID>&credits_s=<CREDIT_S>&token=<TOKEN>
+/dyn_activities/space_math?pin=<PIN>&device_idx=<N>&act_id=<ID>&credits_s=<CREDIT_S>&token=<TOKEN>
 ```
 
 `time_limit_s` is **not** in the current URL template.  Two options exist:
@@ -256,13 +256,15 @@ POST /api/activities/credit
 Response handling:
 | HTTP status | Game displays |
 | ----------- | ------------- |
-| 200 OK      | Green banner: "🎉 Credits added! Counter: `new_counter_hms`" |
-| 403         | Red banner: "⛔ Not authorised — please go back and start a new game." |
-| 429         | Orange banner: "⏰ Daily limit reached — come back tomorrow!" |
-| other       | Red banner: "Network error (HTTP `<status>`) — please try again." |
+| 200 OK      | Green banner: "Credits added! Counter: `new_counter_hms`" |
+| 403         | Red banner: "Not authorised — please go back and start a new game." |
+| 429         | Orange banner: "Daily limit reached — come back tomorrow!" |
+| other       | Red banner with a **Try again** button (retriable). |
 
-The claim button is disabled immediately on click and re-enabled only on retriable errors
-(network error, 5xx).  Non-retriable errors (403, 429) leave the button disabled.
+Credits are submitted **automatically** as soon as the END screen is shown — no user
+action is required.  A "Saving your credits…" message is displayed while the request
+is in flight.  For non-retriable errors (403, 429) the error banner replaces the message
+and the player can navigate away.  For retriable errors a **Try again** button is shown.
 
 ---
 
@@ -286,7 +288,7 @@ The claim button is disabled immediately on click and re-enabled only on retriab
 ### Goal
 
 Define the full visual layout, animation behaviour, screen states, and input method for
-`dyn_space_math.html` so that the implementation phase (A1.2) can proceed without ambiguity.
+`space_math.html` so that the implementation phase (A1.2) can proceed without ambiguity.
 
 ### Screen States
 
@@ -349,8 +351,10 @@ remaining width.  This is the **preferred orientation for tablets**.
 ```
 
 **Active problem selection**: only one meteor is "active" (highlighted with a pulsing glow)
-at a time — the one currently being answered.  The active meteor is automatically the
-lowest/fastest-falling one.  The input field is always focused on the active meteor.
+at a time.  By default the active meteor is the lowest/fastest-falling one.  The player
+can also **tap or click any meteor** to make it the active target — useful when an
+earlier problem is easier or more urgent.  Switching active meteor clears the current
+answer input.
 
 **Answer input**: a single `<input type="text" inputmode="numeric" pattern="[0-9]*">`
 with `maxlength="2"` (all answers are 1–81, at most two digits).  The on-screen keypad
@@ -376,16 +380,16 @@ Each meteor is a `<div>` absolutely positioned inside the game area:
 
 - Maximum 3 meteors on screen simultaneously.
 - A new meteor is spawned:
-  - At game start: first meteor immediately, second after 2 700 ms, third after 5 400 ms.
+  - At game start: first meteor immediately, second after 4 000 ms, third after 8 000 ms.
     This spaces the initial three meteors ~1/3 of the screen height apart so the child can
     focus on one problem at a time before the next appears.
   - After a meteor is destroyed or reaches the bottom: next meteor spawns immediately;
     if multiple slots are empty they are refilled with 800 ms between each spawn.
 - Fall duration (time from top to bottom of game area):
-  - Problems 1–5: 8 s per meteor.
-  - Problems 6–10: 7 s per meteor.
-  - Problems 11–20: 6 s per meteor.
-  - Problems 21+: 5 s per meteor (minimum).
+  - Problems 1–5: 12 s per meteor.
+  - Problems 6–10: 11 s per meteor.
+  - Problems 11–20: 10 s per meteor.
+  - Problems 21+: 9 s per meteor (minimum).
 - Horizontal start position: random `left` between 5 % and 72 % of the game area width,
   with a minimum 24 % separation from any other meteor already on screen to prevent
   visual overlap (meteors are ~80 px wide; 24 % covers the width on typical phone screens).
@@ -476,7 +480,7 @@ further prevents iOS from zooming when a form input is focused.
 
 ### Goal
 
-Implement `main/dyn_activities/dyn_space_math.html` as a single self-contained HTML5 file
+Implement `main/dyn_activities/space_math.html` as a single self-contained HTML5 file
 following all rules from Phase A1.1 and the esport-fi32 dynamic activity interface contract.
 
 ### Inputs
@@ -488,7 +492,7 @@ following all rules from Phase A1.1 and the esport-fi32 dynamic activity interfa
 
 ### File
 
-`main/dyn_activities/dyn_space_math.html`
+`main/dyn_activities/space_math.html`
 
 ### Required URL Query Parameters
 
@@ -590,6 +594,7 @@ body            → dark bg; portrait: flex column; landscape: flex row (orienta
 - [ ] Correct answer → meteor destroyed with orange explosion animation.
 - [ ] Wrong answer → meteor flashes red; timer loses 1 second.
 - [ ] Meteor reaches bottom → purple explosion; no life lost; `solved` count unchanged.
+- [ ] Tapping/clicking a meteor makes it the active target; answer input is cleared.
 - [ ] Maximum 3 meteors on screen simultaneously.
 - [ ] Meteor fall speed increases in 4 tiers as described in Phase A1.1.
 - [ ] Countdown timer decrements every second and is displayed as `MM:SS`.
@@ -636,23 +641,23 @@ body            → dark bg; portrait: flex column; landscape: flex row (orienta
 
 ### Goal
 
-Register `dyn_space_math.html` as a dynamic activity in the firmware, wire it to a
+Register `space_math.html` as a dynamic activity in the firmware, wire it to a
 test device, and verify the complete play-through flow end-to-end.
 
 ### Inputs
 
-- Phase A1.2 output: `main/dyn_activities/dyn_space_math.html`.
+- Phase A1.2 output: `main/dyn_activities/space_math.html`.
 - Existing Feature 8 infrastructure (Phases 8.1–8.5 must be complete).
 
 ### Tasks
 
 1. **Build**: run `idf.py reconfigure && idf.py build`.  The CMake glob picks up
-   `dyn_space_math.html` automatically; `g_dyn_act_count` increments by 1.
+   `space_math.html` automatically; `g_dyn_act_count` increments by 1.
 
 2. **Create activity via admin UI**:
    - Navigate to `/activities/manage`.
    - Tick "Dynamic activity".
-   - Select `dyn_space_math` from the combobox.
+   - Select `space_math` from the combobox.
    - Set **Credit** to `0:10:00` (600 s) and **Time Limit** to `0:02:00` (120 s),
      **Daily Limit** to `2`.
    - Submit → HTTP 303 redirect.
@@ -661,7 +666,7 @@ test device, and verify the complete play-through flow end-to-end.
 
 4. **Kid workflow test**:
    - Navigate to `/dyn` from device 0's browser.
-   - Verify device 0's nickname and the `dyn_space_math` button appear.
+   - Verify device 0's nickname and the `space_math` button appear.
    - Click the button; confirm the URL contains `pin`, `device_idx=0`, `act_id`,
      `credits_s=600`, `time_limit_s=120`, `token`.
    - Game loads; verify `targetProblems = floor(120 * 0.70 / 5) = 16`.
@@ -682,15 +687,15 @@ test device, and verify the complete play-through flow end-to-end.
    emulation); keypad, meteors, and timer must all be visible without horizontal scroll.
 
 10. **Build artefact check**: `g_dyn_act_registry` must include an entry with
-    `p_name == "dyn_space_math"`.
+    `p_name == "space_math"`.
 
 ### Acceptance Criteria
 
 - [ ] `idf.py build` succeeds with zero errors and zero warnings.
 - [ ] `g_dyn_act_count` increases by 1 compared to pre-game build.
-- [ ] `GET /dyn_activities/dyn_space_math` returns HTTP 200 with `Content-Type: text/html`.
-- [ ] `GET /dyn_activities/dyn_space_math.html` returns HTTP 200 (`.html` extension handled).
-- [ ] `/dyn` page shows `dyn_space_math` button for registered device.
+- [ ] `GET /dyn_activities/space_math` returns HTTP 200 with `Content-Type: text/html`.
+- [ ] `GET /dyn_activities/space_math.html` returns HTTP 200 (`.html` extension handled).
+- [ ] `/dyn` page shows `space_math` button for registered device.
 - [ ] Launch URL contains all 6 required parameters including `time_limit_s`.
 - [ ] WIN flow: `POST /api/activities/credit` returns 200; counter incremented correctly.
 - [ ] GAME OVER flow: proportional credits posted and accepted.
@@ -728,8 +733,10 @@ test device, and verify the complete play-through flow end-to-end.
 | Wrong-answer penalty | −1 second from timer | Light penalty that teaches care without destroying morale |
 | Meteor-hits-ground penalty | None (problem lost, no life system) | Reduces frustration; keeps game continuous |
 | Problem types | Add (≤99), Sub (≥1), Mul 1-digit×1-digit | Age-appropriate; no division |
-| Speed progression | 4 tiers: 8 s → 7 s → 6 s → 5 s per fall | Keeps experienced kids engaged; early stage is gentle |
+| Speed progression | 4 tiers: 12 s → 11 s → 10 s → 9 s per fall | Age-appropriate pace; early stage gives a child ~12 s to read and answer each problem |
 | No sounds | Silent | Avoids browser permission prompts; suitable for shared/school environments |
 | Graphics | Pure CSS/SVG | No external assets; keeps file size small |
+| Credit submission | Automatic on game end; retry button for network errors only | Eliminates the risk of a child missing the "Claim Credits" button |
+| Active meteor selection | Auto (lowest falling) + tap/click any meteor to switch | Lets the player skip a hard problem and solve an easier one first |
 
 /*** end of file ***/
