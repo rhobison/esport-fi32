@@ -65,9 +65,19 @@ must fit within the partition table allocation.
 
 ### Per-File Size Budget
 
-| Activity | File | Size target | Hard maximum |
-| -------- | ---- | ----------- | ------------ |
-| 1        | `dyn_space_math.html` | < 40 KB | < 80 KB |
+| Activity | File | Uncompressed target | Uncompressed maximum | Compressed estimate |
+| -------- | ---- | ------------------- | -------------------- | ------------------- |
+| 1        | `dyn_space_math.html` | < 40 KB | < 80 KB | ~ 10–15 KB |
+
+> **Note**: the size targets and hard maximum apply to the **uncompressed source file**
+> in the repository.  The figure that directly determines flash consumption is the
+> compressed size embedded in the firmware.  HTML/JS/CSS compresses very well with gzip
+> (typically 65–80 % reduction); the uncompressed cap is retained to keep source files
+> readable and maintainable, not as a flash budget limit.
+>
+> Feature 9 (`docs/2-development_plan.md`) describes the build infrastructure that
+> gzip-compresses all files in `main/dyn_activities/` at CMake configure time before
+> embedding them in the firmware binary.
 
 ### Rules for Controlling File Size (Without Obfuscation)
 
