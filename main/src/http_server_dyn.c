@@ -283,13 +283,16 @@ esp_err_t http_srv_dyn_page_get_handler(httpd_req_t * p_req)
            "border-radius:5px;border:none;background:#4a90d9;color:#fff;display:block;"
            "width:100%%;margin:0.5em 0}"
            "button:disabled{background:#aaa;cursor:default}"
-           "a.home{display:inline-block;margin-top:1em;color:#4a90d9}"
+           "a.btn{display:inline-block;margin-top:1em;padding:0.4em 1em;"
+           "background:#4a90d9;color:#fff;border-radius:5px;text-decoration:none;"
+           "margin-right:0.4em}"
+           "a.btn:hover{background:#3a7fc9}"
            "</style></head><body>");
 
     APPEND("<h1>My Activities</h1>");
     APPEND("<p>Hello, <b>%s</b></p>", dev_entry.nickname);
     APPEND("<div id='activity-list'><p><em>Loading activities&hellip;</em></p></div>");
-    APPEND("<a class='home' href='/'>&#x2190; Home</a>");
+    APPEND("<a class='btn' href='/'>Dashboard</a>");
 
     /* Embed device index as a JS constant at render time. */
     APPEND("<script>\n");

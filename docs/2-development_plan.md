@@ -3795,7 +3795,7 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
      - Unassign: `name="action" value="unassign_N_M"` where N=dev_idx, M=act_id.
      - Assign: `name="action" value="assign_N"` with a `<select name="new_act_N">` of available activity IDs.
 
-   - Include a "Back to Activities" link to `/activities` and a "Back to Config" link to `/config`.
+   - Include a "Dashboard" link to `/`, an "Activities" link to `/activities`, and a "Config" link to `/config`.
 
 2. **`main/src/http_server_config.c`** — add the activity credit buzzer enable field to `GET /config` and `POST /config` handlers:
    - **GET handler**: add one checkbox field to the config form HTML:
@@ -3882,8 +3882,8 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
 - [ ] Clicking a **Credit** button shows a `confirm()` dialog before posting; cancelling aborts the request.
 - [ ] The credit log table shows a shaded "Earlier" divider row separating today's entries from older ones.
 - [ ] Navigation buttons on both pages use `a.btn` (blue, same as dashboard Export buttons).
-- [ ] `GET /activities` page includes "Manage Activities" and "Config" nav buttons.
-- [ ] `GET /activities/manage` page includes "Back to Activities" and "Back to Config" nav buttons.
+- [ ] `GET /activities` page includes "Dashboard", "Manage Activities", and "Config" nav buttons.
+- [ ] `GET /activities/manage` page includes "Dashboard", "Activities", and "Config" nav buttons.
 - [ ] Credit h:mm:ss input field in manage page includes `oninput` auto-format handler (`hmsInput`).
 - [ ] "Add Activity" sub-form row is rendered in the same table as the pool rows, with an empty first cell aligning columns identically.
 - [ ] `hms_str_to_s()` correctly parses `"1:30:00"` to 5400, `"0:00:00"` to 0, and rejects `"abc"` and `"1:2"`.
@@ -4650,7 +4650,7 @@ Create `http_server_dyn.c/.h` with `GET /dyn` (user-facing launch page) and `GET
        - `const DEVICE_IDX = <dev_idx>;` — the detected index embedded as a JS constant at render time.
        - `function formatHMS(s)` — formats seconds as `"H:MM:SS"`.
        - On `DOMContentLoaded`: call `fetch('/api/dyn?device_idx=' + DEVICE_IDX)`.  On success: iterate `data.activities`; for each entry build a `<button>` that, when clicked, navigates to `/dyn_activities/<name>?pin=<data.pin>&device_idx=<DEVICE_IDX>&act_id=<act_id>&credits_s=<credit_s>`.  If `!entry.available`, the button is disabled and labelled `"(done today)"`.  Populate `activity-list` with the result.  On fetch failure show `"Failed to load activities."`.
-   - Include a `"← Home"` link to `/`.
+   - Include a **Dashboard** button (blue `a.btn`) linking to `/`.
    - No external resources.
    - `Content-Type: text/html`.
    - Required headers: `#include "lwip/etharp.h"`, `#include "lwip/tcpip.h"`, `#include <sys/socket.h>`, `#include <netinet/in.h>`.
