@@ -394,6 +394,10 @@ esp_err_t http_srv_dyn_file_get_handler(httpd_req_t * p_req)
         if (0 == strcmp(g_dyn_act_registry[i].p_name, name_buf))
         {
             httpd_resp_set_type(p_req, "text/html");
+            if (g_dyn_act_registry[i].b_gzip != 0U)
+            {
+                httpd_resp_set_hdr(p_req, "Content-Encoding", "gzip");
+            }
             httpd_resp_send(p_req, (const char *)g_dyn_act_registry[i].p_data,
                 (ssize_t)(g_dyn_act_registry[i].p_end - g_dyn_act_registry[i].p_data));
             return ESP_OK;

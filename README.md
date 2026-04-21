@@ -278,7 +278,7 @@ A dynamic activity is a single `.html` file compiled into the firmware.  It is s
 1. On a registered device, navigate to `http://192.168.5.1/dyn` (or whatever the reward AP IP is).
 2. The firmware detects your device automatically (via ARP lookup).
 3. A button for each assigned mini-game appears — tap to launch.
-4. Play the game and tap **Claim Credits**; internet time is added immediately.
+4. Play the game to earn **Credits**; internet time is added immediately.
 
 ### PIN system
 
@@ -312,3 +312,6 @@ For full technical detail see §5.13, §5.14, §6.10 in [docs/1-specification.md
 
 ![Assembly 2](docs/imgs/assembly-2.jpg)
 
+## Disclaimer
+
+This project was 100% implemented by AI agents. Don't take the source code too serious! :)
