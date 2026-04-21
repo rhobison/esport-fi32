@@ -216,7 +216,8 @@
             color: #fff;
             cursor: default;
             box-shadow: 0 0 6px 2px rgba(100, 60, 180, .6);
-            user-select: none
+            user-select: none;
+            cursor: pointer
         }
 
         .meteor.active {
@@ -410,22 +411,6 @@
             font-size: 1.2em
         }
 
-        .claim-btn {
-            margin-top: 1em;
-            padding: .6em 1.4em;
-            font-size: 1.1em;
-            background: #27ae60;
-            color: #fff;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer
-        }
-
-        .claim-btn:disabled {
-            background: #555;
-            cursor: default
-        }
-
         .back-link {
             display: inline-block;
             margin-top: .8em;
@@ -456,6 +441,23 @@
             border: 1px solid #e6a800
         }
 
+        .claiming {
+            font-size: .95em;
+            color: #aac4ff;
+            margin-top: .8em
+        }
+
+        .retry-btn {
+            margin-top: .5em;
+            padding: .35em .9em;
+            font-size: .95em;
+            background: #4a90d9;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer
+        }
+
         .error-screen p {
             max-width: 320px;
             line-height: 1.5
@@ -475,10 +477,10 @@
         const EARN_FRACTION = 0.70;
         const MAX_METEORS = 3;
         const SPEED_TIERS = [
-            { upTo: 5, fallS: 8 },
-            { upTo: 10, fallS: 7 },
-            { upTo: 20, fallS: 6 },
-            { upTo: Infinity, fallS: 5 }
+            { upTo: 5, fallS: 12 },
+            { upTo: 10, fallS: 11 },
+            { upTo: 20, fallS: 10 },
+            { upTo: Infinity, fallS: 9 }
         ];
 
         /* ---- url params ---- */
@@ -578,27 +580,39 @@
             el.style.left = m.leftPct + '%';
             el.style.top = '-50px';
             el.textContent = m.prob.question;
+            /* Tap/click a meteor to make it the active (targeted) one. */
+            el.addEventListener('click', () => {
+                if (gameState === 'playing') {
+                    answerText = '';
+                    updateAnswerDisplay();
+                    setActiveMeteor(m.id);
+                }
+            });
             area.appendChild(el);
         }
 
+        function setActiveMeteor(id) {
+            if (id === activeMeteorId) return;
+            if (activeMeteorId) {
+                const old = document.getElementById('meteor-' + activeMeteorId);
+                if (old) old.classList.remove('active');
+            }
+            activeMeteorId = id;
+            if (activeMeteorId) {
+                const el = document.getElementById('meteor-' + activeMeteorId);
+                if (el) el.classList.add('active');
+            }
+        }
+
         function refreshActiveMetor() {
-            /* Active = lowest-falling (highest topPx) */
+            /* Keep the current active meteor if it is still alive. */
+            if (activeMeteorId && meteors.some(m => m.id === activeMeteorId)) return;
+            /* Active is gone — auto-select the lowest-falling (highest topPx). */
             let best = null, bestTop = -9999;
             for (const m of meteors) {
                 if (m.topPx > bestTop) { bestTop = m.topPx; best = m; }
             }
-            const newId = best ? best.id : null;
-            if (newId !== activeMeteorId) {
-                if (activeMeteorId) {
-                    const old = document.getElementById('meteor-' + activeMeteorId);
-                    if (old) old.classList.remove('active');
-                }
-                activeMeteorId = newId;
-                if (activeMeteorId) {
-                    const el = document.getElementById('meteor-' + activeMeteorId);
-                    if (el) el.classList.add('active');
-                }
-            }
+            setActiveMeteor(best ? best.id : null);
         }
 
         function destroyMeteor(id, correct) {
@@ -802,19 +816,17 @@
                 html += '<p class="stat">You solved <b>' + solved + ' / ' + targetProblems + '</b></p>';
             }
             html += '<p class="stat">Credits earned: <b>' + formatHMS(submitCredit) + '</b></p>';
-            html += '<button class="claim-btn" id="claim-btn">Claim Credits</button>';
-            html += '<div id="banner-area"></div>';
+            html += '<div id="banner-area"><p class="claiming">Saving your credits\u2026</p></div>';
             html += '<a class="back-link" href="/dyn">\u2190 Back to Games</a>';
             html += '</div>';
 
             document.getElementById('screen').innerHTML = html;
-            document.getElementById('claim-btn').addEventListener('click', () => claimCredits(submitCredit));
+            /* Auto-submit — no button required. */
+            claimCredits(submitCredit);
         }
 
         /* ---- credit claim ---- */
         function claimCredits(submitCredit) {
-            const btn = document.getElementById('claim-btn');
-            if (btn) btn.disabled = true;
             fetch('/api/activities/credit', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -830,17 +842,27 @@
                 if (r.ok) return r.json().then(d => showBanner('ok', '\ud83c\udf89 Credits added! Counter: ' + (d.new_counter_hms || '')));
                 if (r.status === 403) { showBanner('err', '\u26d4 Not authorised \u2014 please go back and start a new game.'); return; }
                 if (r.status === 429) { showBanner('warn', '\u23f0 Daily limit reached \u2014 come back tomorrow!'); return; }
-                showBanner('err', 'Network error (HTTP ' + r.status + ') \u2014 please try again.');
-                if (btn) btn.disabled = false;
+                /* Retriable error — offer a retry button. */
+                showBannerRetry('Network error (HTTP ' + r.status + ') \u2014', submitCredit);
             }).catch(() => {
-                showBanner('err', 'Network error \u2014 please try again.');
-                if (btn) btn.disabled = false;
+                showBannerRetry('Network error \u2014', submitCredit);
             });
         }
 
         function showBanner(type, msg) {
             const area = document.getElementById('banner-area');
             if (area) area.innerHTML = '<div class="banner ' + type + '">' + msg + '</div>';
+        }
+
+        function showBannerRetry(msg, submitCredit) {
+            const area = document.getElementById('banner-area');
+            if (!area) return;
+            area.innerHTML = '<div class="banner err">' + msg + ' please try again.' +
+                '<br><button class="retry-btn" id="retry-btn">Try again</button></div>';
+            document.getElementById('retry-btn').addEventListener('click', () => {
+                area.innerHTML = '<p class="claiming">Saving your credits\u2026</p>';
+                claimCredits(submitCredit);
+            });
         }
 
         /* ---- end game ---- */
@@ -873,12 +895,12 @@
 
             renderPlaying();
 
-            /* Stagger first 3 meteors by ~1/3 of the initial fall duration (8 s),
+            /* Stagger first 3 meteors by ~1/3 of the initial fall duration (12 s),
                so each appears roughly 1/3 of the screen height below the previous one.
                This gives the child time to read and answer before the next arrives. */
             spawnMeteor();
-            setTimeout(spawnMeteor, 2700);
-            setTimeout(spawnMeteor, 5400);
+            setTimeout(spawnMeteor, 4000);
+            setTimeout(spawnMeteor, 8000);
 
             rafId = requestAnimationFrame(rafLoop);
             tickId = setInterval(onTick, 1000);
