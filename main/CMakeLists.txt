@@ -5,6 +5,20 @@
 file(GLOB DYN_ACT_HTMLS
      "${CMAKE_CURRENT_SOURCE_DIR}/dyn_activities/*.html")
 
+# Verify that gzip is available on the host (required for compression).
+find_program(_GZIP_EXEC gzip REQUIRED)
+if(NOT _GZIP_EXEC)
+    message(FATAL_ERROR "gzip not found on PATH. Install gzip to build this project.")
+endif()
+
+# Directory that receives the compressed .html.gz artefacts (build tree only).
+set(_DYN_GZ_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/gz")
+file(MAKE_DIRECTORY "${_DYN_GZ_DIR}")
+
+# Files listed here (basenames only, e.g. "dyn_activity1.html") are embedded
+# uncompressed.  All other HTML files in dyn_activities/ are gzip-compressed.
+set(DYN_ACT_NO_COMPRESS "")
+
 # Auto-generate dyn_act_registry.c into the build directory so the source
 # tree is not modified.
 set(_DYN_REG_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -16,19 +30,46 @@ string(APPEND _REG "#include \"dyn_act_registry.h\"\n\n")
 set(_EXT  "")
 set(_TBL  "")
 set(_CNT  0)
+set(_EMBED_LIST "")
 
 foreach(_HTML ${DYN_ACT_HTMLS})
-    get_filename_component(_FNAME     "${_HTML}" NAME_WE)  # e.g. dyn_activity1
-    get_filename_component(_FNAME_FULL "${_HTML}" NAME)    # e.g. dyn_activity1.html
-    # ESP-IDF derives EMBED_FILES symbol names from the FILENAME only (not path).
-    string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" _SYM "${_FNAME_FULL}")  # => dyn_activity1_html
+    get_filename_component(_FNAME_FULL "${_HTML}" NAME)      # e.g. dyn_activity1.html
+    get_filename_component(_FNAME      "${_HTML}" NAME_WE)   # e.g. dyn_activity1
+
+    list(FIND DYN_ACT_NO_COMPRESS "${_FNAME_FULL}" _NO_COMPRESS_IDX)
+
+    if(_NO_COMPRESS_IDX EQUAL -1)
+        # --- compressed (default) ---
+        set(_GZ_OUT "${_DYN_GZ_DIR}/${_FNAME_FULL}.gz")
+        execute_process(
+            COMMAND "${_GZIP_EXEC}" -9 -c "${_HTML}"
+            OUTPUT_FILE "${_GZ_OUT}"
+            RESULT_VARIABLE _GZIP_RESULT)
+        if(NOT _GZIP_RESULT EQUAL 0)
+            message(FATAL_ERROR "gzip failed for ${_HTML} (exit code ${_GZIP_RESULT})")
+        endif()
+        list(APPEND _EMBED_LIST "${_GZ_OUT}")
+        set(_EMBED_FILE "${_GZ_OUT}")
+        set(_B_GZIP "1")
+    else()
+        # --- uncompressed (opt-out) ---
+        list(APPEND _EMBED_LIST "${_HTML}")
+        set(_EMBED_FILE "${_HTML}")
+        set(_B_GZIP "0")
+    endif()
+
+    # Derive ESP-IDF EMBED_FILES symbol name from the filename only.
+    get_filename_component(_EMBED_FNAME "${_EMBED_FILE}" NAME)
+    string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" _SYM "${_EMBED_FNAME}")
+
     string(APPEND _EXT
         "extern const uint8_t _binary_${_SYM}_start[];\n"
         "extern const uint8_t _binary_${_SYM}_end[];\n")
     string(APPEND _TBL
         "    { \"${_FNAME}\","
         " _binary_${_SYM}_start,"
-        " _binary_${_SYM}_end },\n")
+        " _binary_${_SYM}_end,"
+        " ${_B_GZIP}U },\n")
     math(EXPR _CNT "${_CNT} + 1")
 endforeach()
 
@@ -83,7 +124,7 @@ idf_component_register(
         "src/http_server_dyn.c"
         "src/dyn_nonce.c"
         "${_DYN_REG_C}"
-    EMBED_FILES ${DYN_ACT_HTMLS}
+    EMBED_FILES ${_EMBED_LIST}
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror)
