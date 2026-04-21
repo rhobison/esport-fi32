@@ -21,6 +21,16 @@
 - [Phase A1.1 — Game Design & UI Specification](#phase-a11--game-design--ui-specification)
 - [Phase A1.2 — HTML/JS/CSS Implementation](#phase-a12--htmljscss-implementation)
 - [Phase A1.3 — Integration & Verification](#phase-a13--integration--verification)
+- [Activity 2 — Clown Fish Bubble Burst](#activity-2--clown-fish-bubble-burst)
+  - [Concept](#concept-1)
+  - [Math Problem Rules](#math-problem-rules-1)
+  - [Timing & Scoring Model](#timing--scoring-model-1)
+  - [Credit Calculation](#credit-calculation-1)
+  - [URL Parameters & API Integration](#url-parameters--api-integration-1)
+  - [Security Considerations](#security-considerations-1)
+- [Phase A2.1 — Game Design & UI Specification](#phase-a21--game-design--ui-specification)
+- [Phase A2.2 — HTML/JS/CSS Implementation](#phase-a22--htmljscss-implementation)
+- [Phase A2.3 — Integration & Verification](#phase-a23--integration--verification)
 - [Dependency Notes](#dependency-notes)
 - [Summary of Design Decisions](#summary-of-design-decisions)
 
@@ -49,6 +59,7 @@ code changes are required.
 | # | Name | File | Status | Phases |
 | - | ---- | ---- | ------ | ------ |
 | 1 | Space Meteor Shower | `space_math.html` | Specified | A1.1, A1.2, A1.3 |
+| 2 | Clown Fish Bubble Burst | `fish_math.html` | Specified | A2.1, A2.2, A2.3 |
 
 > To add a new activity: assign it the next available number, add a row to this table,
 > and create its own `## Activity N` section followed by phases `AN.1` (Design),
@@ -68,6 +79,7 @@ must fit within the partition table allocation.
 | Activity | File | Uncompressed target | Uncompressed maximum | Compressed estimate |
 | -------- | ---- | ------------------- | -------------------- | ------------------- |
 | 1        | `space_math.html` | < 40 KB | < 80 KB | ~ 10–15 KB |
+| 2        | `fish_math.html`  | < 40 KB | < 80 KB | ~ 10–15 KB |
 
 > **Note**: the size targets and hard maximum apply to the **uncompressed source file**
 > in the repository.  The figure that directly determines flash consumption is the
@@ -406,7 +418,7 @@ Pure CSS animated star field:
 
 ```
 ┌──────────────────────────────┐
-│   🌟  YOU WIN!  🌟           │
+│   🌟  YOU WIN!  🌟            │
 │                              │
 │  You solved 18 / 16          │
 │  (+2 BONUS problems!)        │
@@ -706,16 +718,522 @@ test device, and verify the complete play-through flow end-to-end.
 
 ---
 
+## Activity 2 — Clown Fish Bubble Burst
+
+### Concept
+
+The player helps **Nemo**, a cute clown fish, defend the reef from math bubbles rising
+from the sea floor.  Each bubble carries a math problem that must be solved before the
+bubble floats off the top of the screen.
+
+- Answering correctly **pops** the bubble with a sparkling white splash animation (CSS keyframe).
+- A wrong answer wobbles the bubble and flashes it red, deducting 1 second from the
+  countdown timer as a penalty.
+- If a bubble reaches the top without a correct answer it drifts away silently; no life
+  is lost — the problem is simply missed (counts as unsolved).
+
+The clown fish character is displayed as a cute inline SVG at the bottom-centre of the
+play area, gently bobbing.  On a correct answer it does a happy jump; on a wrong answer
+it briefly shakes.
+
+Engagement hooks:
+- Animated CSS/SVG bubbles float upward at varying speeds (progressively faster as
+  problems are solved correctly).
+- An animated underwater background: deep-blue ocean gradient, swaying seaweed, and
+  small rising background bubbles (pure CSS).
+- A clown fish character (orange/white/black inline SVG) with idle swim, happy-jump,
+  and wrong-shake CSS animations.
+- A visible countdown bar plus a large numeric timer.
+- Celebratory "AMAZING! You helped Nemo!" screen with a reef-glow animation on WIN.
+- "TIME'S UP!" screen with proportional credit display on GAME OVER.
+- Sound is NOT used (avoids permission issues and distraction in shared spaces).
+
+Size budget: target < 40 KB, hard maximum 80 KB (uncompressed HTML file).
+See [Flash Storage Constraints](#flash-storage-constraints).  All assets are CSS/SVG — no
+binary images or external resources.
+
+---
+
+### Math Problem Rules
+
+Identical to Activity 1:
+
+| Type           | Operand ranges                                 | Result constraint | Example         |
+| -------------- | ---------------------------------------------- | ----------------- | --------------- |
+| Addition       | Both operands 1–49                             | Sum ≤ 99          | `23 + 41 = ?`   |
+| Subtraction    | Minuend 10–99, subtrahend 1–(minuend-1)        | Result ≥ 1        | `54 − 17 = ?`   |
+| Multiplication | Both factors 1–9 (single-digit × single-digit) | Product ≤ 81      | `7 × 6 = ?`     |
+
+- No division.
+- All answers are positive integers.
+- Problems are generated pseudo-randomly on the client side using `Math.random()`.  The
+  type is chosen uniformly at random from the three categories.
+- A given problem is never repeated within the same game session (de-dup buffer of the
+  last 10 problems).
+
+---
+
+### Timing & Scoring Model
+
+Identical to Activity 1:
+
+| Constant           | Value | Rationale          |
+| ------------------ | ----- | ------------------ |
+| `SECS_PER_PROBLEM` | 5     | Same as Activity 1 |
+| `EARN_FRACTION`    | 0.70  | Same as Activity 1 |
+
+```
+targetProblems = Math.floor(time_limit_s * EARN_FRACTION / SECS_PER_PROBLEM)
+```
+
+Minimum `targetProblems` = 3.  Bonus problems continue after the target is reached.
+
+---
+
+### Credit Calculation
+
+Identical to Activity 1:
+
+```
+solved       = number of bubbles popped correctly
+earnedCredit = Math.floor(credit_s * solved / targetProblems)
+submitCredit = Math.min(earnedCredit, credit_s)   // server will cap anyway
+```
+
+---
+
+### URL Parameters & API Integration
+
+Identical to Activity 1 — same six URL parameters (`pin`, `device_idx`, `act_id`,
+`credits_s`, `time_limit_s`, `token`), same `POST /api/activities/credit` contract,
+and same response handling.
+
+Launch URL:
+
+```
+/dyn_activities/fish_math?pin=<PIN>&device_idx=<N>&act_id=<ID>&credits_s=<CREDIT_S>&time_limit_s=<N>&token=<TOKEN>
+```
+
+---
+
+### Security Considerations
+
+Identical to Activity 1 — same API contract, same security properties, same reasoning
+about `time_limit_s` being informational only.
+
+---
+
+## Phase A2.1 — Game Design & UI Specification (Activity 2)
+
+### Goal
+
+Define the full visual layout, animation behaviour, screen states, and input method for
+`fish_math.html` so that Phase A2.2 can proceed without ambiguity.
+
+### Screen States
+
+| State     | Trigger                                       | Description                                               |
+| --------- | --------------------------------------------- | --------------------------------------------------------- |
+| `LOADING` | Page load                                     | Validates URL params; transitions to `PLAYING` or `ERROR` |
+| `ERROR`   | Missing/invalid URL params                    | Shows error message + back link                           |
+| `PLAYING` | After `LOADING` succeeds                      | Main game loop                                            |
+| `END`     | Timer reaches 0 OR `solved >= targetProblems` | WIN or GAME OVER result; credit claim auto-triggered      |
+
+Same single `<div id="screen">` swap pattern as Activity 1.
+
+### PLAYING State Layout
+
+The game uses the same **responsive two-layout design** as Activity 1.
+
+**Portrait layout** (default — phone or tablet upright):
+
+```
+┌─────────────────────────────────────┐
+│ 🐠 Fish Math  ⏱ 01:52  [====    ]   │  ← header bar
+├─────────────────────────────────────┤
+│  [bubble 8×6=?]   [bubble 27+34=?]  │  ← bubbles floating UP
+│                                     │
+│       [bubble 71-29=?]              │  ← (newer bubbles spawn below)
+│                                     │
+│       ><(((°>  (Nemo)               │  ← decorative fish at bottom
+├─────────────────────────────────────┤
+│  Popped: 5 / 16       Wrong: 2      │  ← stats bar
+├─────────────────────────────────────┤
+│       [  _ _ _  ]  [✓ OK]           │  ← answer input + submit
+│   [ 1 ][ 2 ][ 3 ]                   │
+│   [ 4 ][ 5 ][ 6 ]                   │  ← on-screen keypad
+│   [ 7 ][ 8 ][ 9 ]                   │
+│        [ 0 ][ ← ]                   │
+└─────────────────────────────────────┘
+```
+
+**Landscape layout** (`@media (orientation: landscape)` — two-column split):
+
+Identical structure to Activity 1 — keypad occupies the right 200 px column; the game
+area fills all remaining width.
+
+**Active bubble selection**: auto-selects the bubble closest to escaping (smallest
+`topPx` — nearest to the top of the screen).  The player can tap or click any bubble to
+make it the active target; switching clears the answer input.
+
+**Answer input**: identical to Activity 1 — `<input type="text" inputmode="numeric"
+pattern="[0-9]*" maxlength="2">`, on-screen keypad + physical keyboard.
+
+### Bubble Visual Specification
+
+Each bubble is a `<div>` absolutely positioned inside the game area:
+- Shape: CSS circle (`border-radius: 50%`), `70 × 70 px`.
+- Fill: translucent ocean-blue with a glossy highlight:
+  `background: radial-gradient(circle at 30% 30%, rgba(180,240,255,0.85), rgba(20,100,180,0.65))`.
+- Border: `2px solid rgba(150,230,255,0.7)` (translucent light-blue rim).
+- Text: problem string centred in bold white, `font-size: 1em`,
+  `text-shadow: 0 1px 3px rgba(0,0,80,0.8)`.
+- Movement: bubbles move **upward** — `topPx` decreases each RAF frame.
+- Active bubble: `box-shadow: 0 0 14px 5px rgba(255,154,60,0.9)` pulsing warm-orange glow
+  (clown fish colours).
+- Correct pop: CSS `@keyframes bubblePop` — scale up + fade out (white radial burst,
+  400 ms); bubble removed from DOM.
+- Wrong answer: CSS `@keyframes bubbleWobble` — horizontal shake + red border flash,
+  300 ms.
+- Escapes top: CSS `@keyframes bubbleEscape` — fade-out with slight upward drift, 300 ms.
+
+### Bubble Spawn & Speed Rules
+
+- Maximum 3 bubbles on screen simultaneously.
+- A new bubble is spawned:
+  - At game start: first bubble immediately, second after 4 000 ms, third after 8 000 ms.
+  - After a bubble is popped or escapes: next bubble spawns immediately; multiple empty
+    slots refilled with 800 ms between each spawn.
+- Bubbles spawn at the **bottom** of the game area (`topPx = gameAreaH + 10`), rising
+  upward through the seaweed and past the fish character.
+- **Escape check**: `topPx <= −70` (bubble's top edge is 70 px above the game area).
+- Rise duration (same 4-tier system as Activity 1):
+  - Problems 1–5: 12 s per bubble.
+  - Problems 6–10: 11 s per bubble.
+  - Problems 11–20: 10 s per bubble.
+  - Problems 21+: 9 s per bubble (minimum).
+- Horizontal start position: random `left` between 5 % and 72 % of the game area width,
+  with a minimum 24 % separation from any other bubble already on screen (same rule as
+  Activity 1).
+
+### Clown Fish Character
+
+The fish is an inline SVG displayed at the bottom-centre of `.game-area`:
+- Positioned absolutely: `bottom: 18px; left: 50%; transform: translateX(-50%)`.
+- Rendered size: `88 × 52 px` (`viewBox="0 0 110 65"`).
+- Visual design (all SVG primitives, no external assets):
+  - Orange body: `<ellipse>` `fill="#ff6a00"`.
+  - Tail fin: `<path>` triangle pointing right, `fill="#e65800"`.
+  - Three white bands: `<rect rx="7">` elements clipped to the body with `<clipPath id="bc">`;
+    black outlines `stroke="#1a0000"`.
+  - Body outline redrawn on top of the clip group: `fill="none" stroke="#1a0000"`.
+  - Pectoral fin: `<ellipse>` below the body, `fill="#ff8c3a"`, slightly rotated.
+  - Dorsal fin: `<path>` curved arc above the body, `stroke="#e65800" stroke-width="5"`.
+  - Eye: white `<circle>` (sclera), green iris `<circle>`, black pupil `<circle>`, white
+    specular highlight `<circle>`.
+  - Smile: `<path>` with a quadratic bézier curve below the eye.
+- CSS animations on `.fish-char`:
+  - **Idle**: `@keyframes swim` — `translateY(0)` ↔ `translateY(-6px)`, 2 s ease-in-out
+    infinite.
+  - **Happy** (correct answer): `@keyframes fishHappy` — jump to `translateY(-14px)
+    scale(1.12)` and back, 400 ms; JS removes `happy` class after 420 ms to restore idle.
+  - **Wrong** (wrong answer): `@keyframes fishWrong` — `translateX ±8 px` shake, 350 ms;
+    JS removes `wrong` class after 360 ms to restore idle.
+
+### Background
+
+Underwater ocean scene (pure CSS, no images):
+- Body background: `linear-gradient(180deg, #001428 0%, #003d5c 60%, #004830 100%)`.
+- `.game-area` inherits the same gradient.
+- 3 background rising-bubble layers (`.bub-layer`): `radial-gradient(circle, rgba(...) 1.5px,
+  transparent 1.5px)` repeating; each layer animated upward at different speeds (`@keyframes
+  rise1/2/3`, 8 s / 13 s / 18 s) replacing the `.star-layer` concept from Activity 1.
+- Sea floor: `.sea-floor` — `position: absolute; bottom: 0; height: 18px`;
+  `background: linear-gradient(#3a2e14, #6a5428)`;
+  `border-radius: 50% 50% 0 0 / 14px 14px 0 0`.
+- Seaweed: 5 `.seaweed` `<div>`s at varied `left` positions (8 %, 17 %, 50 %, 75 %,
+  84 %), heights 24–36 px; `background: #1a6b3a`; `border-radius: 4px 4px 0 0`;
+  `transform-origin: bottom center`; each sways with `@keyframes sway` (±8 °, 2.7–3.4 s,
+  `animation-direction: alternate`, staggered `animation-delay`).
+
+### WIN State Layout
+
+```
+┌──────────────────────────────┐
+│   🐠  AMAZING!               │
+│                              │
+│  You helped Nemo! 🐠          │
+│  You popped 18 / 16 bubbles  │
+│  (+2 BONUS bubbles! 🏆)       │
+│                              │
+│  Credits earned: 0:10:00     │
+│                              │
+│  Saving your credits…        │
+│  ← Back to Games             │
+└──────────────────────────────┘
+```
+
+WIN title colour: `#ff9a3c` (clown fish orange) with matching `text-shadow` glow.
+WIN background: `@keyframes reefBurst` — subtle animated gradient pulse.
+
+### GAME OVER State Layout
+
+```
+┌──────────────────────────────┐
+│   ⏱  TIME'S UP!             │
+│                              │
+│  You popped 11 / 16 bubbles  │
+│  Credits earned: 0:06:53     │
+│                              │
+│  Saving your credits…        │
+│  ← Back to Games             │
+└──────────────────────────────┘
+```
+
+### Responsiveness and Orientation
+
+Identical to Activity 1 — same breakpoints, same safe-area-inset handling, same landscape
+two-column layout (keypad right 200 px column), same font-size media queries, same
+`100dvh`/`100vh` fallback pattern.
+
+---
+
+## Phase A2.2 — HTML/JS/CSS Implementation (Activity 2)
+
+### Goal
+
+Implement `main/dyn_activities/fish_math.html` as a single self-contained HTML5 file
+following all rules from Phase A2.1 and the esport-fi32 dynamic activity interface contract.
+
+### Inputs
+
+- Phase A2.1 (this document).
+- `main/dyn_activities/space_math.html` — reference implementation for code structure,
+  input handling, timer, credit-claim POST flow, and screen swap pattern.
+- `docs/1-specification.md` §6.9 (credit API), §6.10 (dynamic activities URL contract).
+
+### File
+
+`main/dyn_activities/fish_math.html`
+
+### Required URL Query Parameters
+
+| Parameter      | Type   | Description                                              |
+| -------------- | ------ | -------------------------------------------------------- |
+| `pin`          | string | 8-char device PIN from `GET /api/dyn`                    |
+| `device_idx`   | int    | Device slot index (0–3)                                  |
+| `act_id`       | int    | Activity ID                                              |
+| `credits_s`    | int    | Reference credit in seconds (`activity.credit_s`)        |
+| `time_limit_s` | int    | Activity time limit in seconds (`activity.time_limit_s`) |
+| `token`        | string | One-time nonce from `GET /api/dyn`                       |
+
+If any required parameter is absent, zero (for numeric params), or fails to parse, the
+game must show the `ERROR` screen immediately before any game logic runs.
+
+### Structural Requirements
+
+1–10: all identical to Activity 1, except:
+- **`<title>Fish Math: Bubble Reef</title>`**.
+- **Underwater theme**: body background `linear-gradient(180deg, #001428, #003d5c)`.
+- **Bubbles move upward**: `topPx` decreases each RAF frame; escape check `topPx <= −70`.
+- **Active bubble auto-selection**: bubble with the minimum `topPx` (closest to escaping).
+- **Inline clown fish SVG** character in the game area (see Phase A2.1).
+- **Stat label** uses "Popped" instead of "Solved" for thematic consistency.
+
+### JavaScript Architecture
+
+```
+┌─ Constants (SECS_PER_PROBLEM, EARN_FRACTION, MAX_BUBBLES, speed tiers)
+├─ State variables
+│   ├─ pin, deviceIdx, actId, creditsS, timeLimitS, token  (from URL params)
+│   ├─ targetProblems, solved, wrong, elapsedS
+│   ├─ gameState: 'loading' | 'playing' | 'end'
+│   ├─ bubbles[]  (array of active bubble objects)
+│   ├─ activeBubbleId  (id of the currently-targeted bubble)
+│   └─ fishHappyTimer, fishWrongTimer  (timeout handles for fish animation reset)
+├─ Problem generator
+│   └─ generateProblem()  (identical to Activity 1)
+├─ Bubble lifecycle
+│   ├─ spawnBubble()
+│   ├─ rafLoop(now)          ← moves bubbles upward; detects escape at topPx <= -70
+│   ├─ destroyBubble(id, correct)
+│   └─ spawnBubblesIfNeeded()
+├─ Fish reactions
+│   ├─ triggerFishHappy()   ← adds .happy class; auto-removes after 420 ms
+│   └─ triggerFishWrong()   ← adds .wrong class; auto-removes after 360 ms
+├─ Input handling  (identical to Activity 1)
+├─ Timer  (identical to Activity 1)
+├─ Screen renderers
+│   ├─ renderPlaying()      ← builds game HTML once; injects FISH_SVG constant
+│   ├─ renderEnd(win)       ← same layout/style as Activity 1 END screen
+│   └─ renderError(msg)
+└─ Credit claim  (identical to Activity 1)
+```
+
+### CSS Architecture
+
+```
+:root           → colour variables (--bg1 #001428, --bg2 #003d5c, --bubble-fill,
+                  --active-glow #ff9a3c, --win-gold #ff9a3c, ...)
+body            → ocean gradient; portrait: flex column; landscape: flex row
+.game-col       → flex: 1 1 0; same structure as Activity 1
+.control-col    → same as Activity 1
+.header-bar     → same structure as Activity 1
+.game-area      → position: relative; overflow: hidden; ocean gradient background
+.bub-layer      → rising background dots (replaces .star-layer)
+.sea-floor      → absolute bottom strip; sandy gradient
+.seaweed        → 5 instances; sway animation
+.fish-char      → absolute bottom-centre; idle swim animation
+.bubble         → position: absolute; CSS circle; translucent teal-blue
+.bubble.active  → pulsing orange glow animation
+.bubble.wrong   → horizontal wobble/shake animation
+.pop            → CSS keyframe burst (white radial → transparent, scale+fade)
+.pop.escape     → CSS fade-up (opacity + translateY)
+.stats-bar      → same as Activity 1
+.input-row      → same as Activity 1
+.keypad         → same as Activity 1
+.end-screen     → centred; reef-burst glow animation on WIN
+```
+
+### Acceptance Criteria
+
+- [ ] File is a valid HTML5 document with no external resource references.
+- [ ] File size ≤ 40 KB uncompressed (target); must not exceed 80 KB under any circumstances.
+- [ ] Source code is human-readable; no minification, no obfuscation.
+- [ ] `<title>` is "Fish Math: Bubble Reef".
+- [ ] Missing/zero URL params → ERROR screen shown; game does not start.
+- [ ] `targetProblems = floor(time_limit_s * 0.70 / 5)`, minimum 3.
+- [ ] Bubbles move **upward**; escape check at `topPx <= −70`.
+- [ ] Active bubble = bubble with minimum `topPx` (closest to escaping); auto-updated.
+- [ ] Tapping/clicking a bubble makes it the active target; answer input is cleared.
+- [ ] Maximum 3 bubbles on screen simultaneously.
+- [ ] On-screen keypad digits append; Backspace removes last digit; Enter/OK submits.
+- [ ] Physical keyboard (digits, Enter, Backspace) also works for answer entry.
+- [ ] Answer `maxlength` prevents entry longer than 2 digits.
+- [ ] Correct answer → white splash pop animation (scale + fade); bubble removed from DOM.
+- [ ] Correct answer → clown fish happy-jump animation triggered.
+- [ ] Wrong answer → bubble wobbles red; timer loses 1 second.
+- [ ] Wrong answer → clown fish wrong-shake animation triggered.
+- [ ] Bubble escapes top → fade-up animation; no life lost; `solved` count unchanged.
+- [ ] Clown fish SVG visible at bottom-centre of game area during PLAYING state.
+- [ ] Clown fish idle swim animation runs continuously during PLAYING state.
+- [ ] Seaweed sway animation visible at bottom of game area.
+- [ ] Background rising-bubble layers animate continuously.
+- [ ] Countdown timer decrements every second and is displayed as `MM:SS`.
+- [ ] Progress bar reflects `solved / targetProblems` (capped at 100 %).
+- [ ] `solved >= targetProblems` before timer → WIN screen immediately; bonus count shown.
+- [ ] Timer reaches 0 → GAME OVER screen; partial credit shown.
+- [ ] WIN screen: title "AMAZING!" in orange-gold; popped/target/bonus counts; credits.
+- [ ] GAME OVER screen: "TIME'S UP!"; popped/target counts; credits formatted as h:mm:ss.
+- [ ] Credits submitted automatically on END screen; "Saving your credits…" shown.
+- [ ] HTTP 200 → green banner "Credits added! Counter: …"; no retry button.
+- [ ] HTTP 403 → red non-retriable banner; button stays disabled.
+- [ ] HTTP 429 → orange non-retriable banner; button stays disabled.
+- [ ] Other HTTP or network error → red banner with **Try again** button (retriable).
+- [ ] `<meta name="viewport">` includes `maximum-scale=1.0` and `user-scalable=no`.
+- [ ] Portrait: keypad panel appears below the game area.
+- [ ] Landscape: keypad occupies the right 200 px column; game area expands to fill remaining width.
+- [ ] No horizontal scrollbar at 320 px wide (portrait) or 568 × 320 px (landscape phone).
+- [ ] `env(safe-area-inset-*)` padding applied to `body`.
+- [ ] No `var`, no `eval()`, no `alert()/confirm()`, no external resources.
+
+### Required `POST /api/activities/credit` Fields
+
+```javascript
+{
+  device_idx:        deviceIdx,    // int
+  act_id:            actId,        // int
+  credits_s:         submitCredit, // Math.floor(creditsS * solved / targetProblems), capped at creditsS
+  completion_time_s: elapsedS,     // seconds elapsed since game start
+  pin:               pin,          // string from URL
+  token:             token         // string from URL
+}
+```
+
+---
+
+## Phase A2.3 — Integration & Verification (Activity 2)
+
+### Goal
+
+Register `fish_math.html` as a dynamic activity, wire it to a test device, and verify
+the complete play-through flow end-to-end.
+
+### Inputs
+
+- Phase A2.2 output: `main/dyn_activities/fish_math.html`.
+- Existing Feature 8 infrastructure (Phases 8.1–8.5 must be complete).
+
+### Tasks
+
+1. **Build**: run `idf.py reconfigure && idf.py build`.  The CMake glob picks up
+   `fish_math.html` automatically; `g_dyn_act_count` increments by 1.
+
+2. **Create activity via admin UI**:
+   - Navigate to `/activities/manage`.
+   - Tick "Dynamic activity".
+   - Select `fish_math` from the combobox.
+   - Set **Credit** to `0:10:00` (600 s) and **Time Limit** to `0:02:00` (120 s),
+     **Daily Limit** to `2`.
+   - Submit → HTTP 303 redirect.
+
+3. **Assign to device** via the same manage page.
+
+4. **Kid workflow test**:
+   - Navigate to `/dyn` from the assigned device's browser.
+   - Verify device nickname and the `fish_math` button appear.
+   - Click the button; confirm URL contains `pin`, `device_idx`, `act_id`,
+     `credits_s=600`, `time_limit_s=120`, `token`.
+   - Game loads; verify `targetProblems = floor(120 × 0.70 / 5) = 16`.
+   - Play to WIN (pop ≥ 16 bubbles before 2 min expire).
+   - Verify green "Credits added!" banner and `new_counter_hms`.
+
+5. **Repeat for GAME OVER path** (let timer expire with < 16 bubbles popped).
+
+6. **Replay attack test**: after claiming, re-submit the same POST (same `token`);
+   server must return HTTP 403.
+
+7. **Daily limit test**: claim twice (daily limit = 2); third attempt → HTTP 429 banner.
+
+8. **Tampered `time_limit_s` test**: manually load URL with `time_limit_s=5`; verify
+   `targetProblems` clamps to minimum 3; game is playable; credit cap still applies.
+
+9. **Responsiveness test**: load game on a 320 px viewport (browser DevTools mobile
+   emulation); keypad, bubbles, fish character, and timer must all be visible without
+   horizontal scroll.
+
+10. **Build artefact check**: `g_dyn_act_registry` must include an entry with
+    `p_name == "fish_math"`.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and zero warnings.
+- [ ] `g_dyn_act_count` increases by 1 compared to pre-game build.
+- [ ] `GET /dyn_activities/fish_math` returns HTTP 200 with `Content-Type: text/html`.
+- [ ] `GET /dyn_activities/fish_math.html` returns HTTP 200 (`.html` extension handled).
+- [ ] `/dyn` page shows `fish_math` button for registered device.
+- [ ] Launch URL contains all 6 required parameters including `time_limit_s`.
+- [ ] WIN flow: `POST /api/activities/credit` returns 200; counter incremented correctly.
+- [ ] GAME OVER flow: proportional credits posted and accepted.
+- [ ] Replay of consumed token → HTTP 403.
+- [ ] Third daily claim → HTTP 429 banner shown in game.
+- [ ] `time_limit_s=5` → `targetProblems == 3` (minimum clamp enforced).
+- [ ] No regression in existing Activity 1 tests or Phases 8.1–8.5 criteria.
+
+---
+
 ## Dependency Notes
 
-- Feature 8, Phases 8.1–8.5 must be complete before Phase A1.3 can run.
-- Phase A1.2 (HTML file) is independent of Phase A1.3 and can be developed and reviewed
-  on a desktop browser without firmware.
+- Feature 8, Phases 8.1–8.5 must be complete before Phases A1.3 and A2.3 can run.
+- Phases A1.2 and A2.2 (HTML files) are independent of their respective integration
+  phases and can be developed and reviewed on a desktop browser without firmware.
 - The `/dyn` page launch URL must include `time_limit_s` (Option A, Phase A1.1 §URL
   Parameters).  This requires a **one-line change** in `http_server_dyn.c` Phase 8.4
   task 2b: append `&time_limit_s=%lu` with `act_entry.time_limit_s` to the JS
-  `navigateTo` URL string.  This change should be tracked as part of Phase A1.3 task 1
-  (or retrofitted into Phase 8.4 if that phase has not yet been implemented).
+  `navigateTo` URL string.  This change applies to both activities and should be tracked
+  as part of Phase A1.3 task 1 (or retrofitted into Phase 8.4 if not yet implemented).
+- Phase A2.2 (`fish_math.html`) shares the same infrastructure as Phase A1.2 and can be
+  developed independently or in parallel with Activity 1 phases.
 
 ---
 
@@ -738,5 +1256,12 @@ test device, and verify the complete play-through flow end-to-end.
 | Graphics | Pure CSS/SVG | No external assets; keeps file size small |
 | Credit submission | Automatic on game end; retry button for network errors only | Eliminates the risk of a child missing the "Claim Credits" button |
 | Active meteor selection | Auto (lowest falling) + tap/click any meteor to switch | Lets the player skip a hard problem and solve an easier one first |
+| **Activity 2** | | |
+| Bubbles float upward | Direction reversed vs Activity 1 meteors | Visual novelty; thematically consistent with underwater setting; re-uses same spawn/speed logic |
+| Clown fish SVG character | Inline SVG with CSS idle/happy/wrong animations | Zero flash overhead; adds engagement for the target age group without external assets |
+| Fish reactions | Happy jump on correct, shake on wrong | Immediate expressive feedback; reinforces correct answers without distracting text overlays |
+| Active bubble auto-selection | Bubble with minimum `topPx` (closest to top/escaping) | Same intuition as Activity 1 "lowest meteor" but direction-appropriate |
+| Underwater background | Ocean gradient + rising CSS bubble layers + seaweed | Consistent with game theme; pure CSS; no image assets; replaces star-layer pattern from Activity 1 |
+| Stat label | "Popped" instead of "Solved" | Thematically appropriate for bubble-popping; visually distinct from Activity 1 |
 
 /*** end of file ***/
