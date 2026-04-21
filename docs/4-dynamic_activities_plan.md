@@ -376,14 +376,19 @@ Each meteor is a `<div>` absolutely positioned inside the game area:
 
 - Maximum 3 meteors on screen simultaneously.
 - A new meteor is spawned:
-  - Immediately at game start (first 3 problems spawned at t=0, staggered by 200 ms).
-  - After a meteor is destroyed or reaches the bottom.
+  - At game start: first meteor immediately, second after 2 700 ms, third after 5 400 ms.
+    This spaces the initial three meteors ~1/3 of the screen height apart so the child can
+    focus on one problem at a time before the next appears.
+  - After a meteor is destroyed or reaches the bottom: next meteor spawns immediately;
+    if multiple slots are empty they are refilled with 800 ms between each spawn.
 - Fall duration (time from top to bottom of game area):
   - Problems 1–5: 8 s per meteor.
   - Problems 6–10: 7 s per meteor.
   - Problems 11–20: 6 s per meteor.
   - Problems 21+: 5 s per meteor (minimum).
-- Horizontal start position: random `left` between 5% and 75% of the game area width.
+- Horizontal start position: random `left` between 5 % and 72 % of the game area width,
+  with a minimum 24 % separation from any other meteor already on screen to prevent
+  visual overlap (meteors are ~80 px wide; 24 % covers the width on typical phone screens).
 
 ### Background
 
