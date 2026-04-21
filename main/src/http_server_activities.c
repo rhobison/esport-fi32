@@ -269,8 +269,9 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
 
     APPEND("</div>");
     APPEND("<div style='margin-top:1.5em'>"
-           "<a class='btn' href='/activities'>Back to Activities</a>"
-           "<a class='btn' href='/config'>Back to Config</a>"
+           "<a class='btn' href='/'>Dashboard</a>"
+           "<a class='btn' href='/activities'>Activities</a>"
+           "<a class='btn' href='/config'>Config</a>"
            "</div>");
     APPEND("</body></html>");
 
@@ -671,6 +672,7 @@ esp_err_t http_srv_activities_get_handler(httpd_req_t * p_req)
         "</script>\n");
 
     APPEND("<div style='margin-top:1.5em'>"
+           "<a class='btn' href='/'>Dashboard</a>"
            "<a class='btn' href='/activities/manage'>Manage Activities</a>"
            "<a class='btn' href='/config'>Config</a>"
            "</div>");

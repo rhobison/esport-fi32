@@ -66,3 +66,31 @@ This should allow in the future that certain activities are like games, where th
 - The logic for listing activities in the `activities` page must be changed as follows: instead of filter out the activities with credit = 0, we should filter out (not display) activities that are `dynamic activity`.
 - A new page should be created, accessible by the users. This page should list the dynamic_activities as buttons, one button per row. Only the activities associated to that user should be shown (the MAC address of the device can be used to identify the user and filter out the dynamic_activities from other users). When the button is clicked, the html page for the dynamic activity should be displayed.
 - As a proof of concept, let's create 2 demo html files called `dyn_activity1.html` and `dyn_activity2.html`. Those pages should contain just a button that when clicked, request the credits to be inserted for the user (testing the API). -- planned
+9. Implement compressed dynamic activities. The dynamic activities should be compressed with gzip. The server should send the activities compressed, setting the gzip flag in the header.
+
+
+# Dynamic Activities
+
+1. Implement a dynamic activity as a math game for a kid which is 8 years old.
+Theme & Gameplay
+The player is a space pilot defending their planet from falling meteors.
+Each meteor has a math problem (addition, subtraction, or multiplication) written on it.
+Meteors fall from the top of the screen toward the bottom at varying speeds.
+The player must quickly solve the problem on a meteor and enter the answer before it hits the ground.
+When the correct answer is entered, the meteor is destroyed with a fun animation (e.g., explosion or sparkle).
+If a meteor reaches the ground, the player loses a life (or the game ends, depending on difficulty).
+Solving all problems within the time limit earns bonus credits.
+Input Method
+To minimize typing, present a numeric keypad (0–9, backspace, enter) on-screen for answer entry.
+Optionally, allow clicking/tapping the meteor to select it, then enter the answer.
+Only one meteor can be answered at a time (to keep it simple).
+Math Problem Types
+Addition and subtraction (operands and results below 100).
+Multiplication (single-digit × single-digit, e.g., 2×7, 8×6).
+No division.
+Fun & Engagement
+Simple animations: meteors move, explode, or sparkle when solved.
+Sound effects (if supported).
+Increasing difficulty: meteors fall faster as the game progresses.
+Score and time bar at the top.
+Friendly feedback: “Great job!”, “Try again!” etc.
