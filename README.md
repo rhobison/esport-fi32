@@ -293,6 +293,15 @@ PIN-authenticated credit calls cannot exceed the activity's reference credit val
 3. Rebuild and reflash.
 4. The filename (without `.html`) becomes the logical name shown in the admin dropdown and used in URLs.
 
+**Automatic gzip compression**: every HTML file in `main/dyn_activities/` is
+gzip-compressed by CMake at configure time before being embedded in the firmware binary.
+No manual compression step is needed.  The HTTP server sends the compressed bytes
+with `Content-Encoding: gzip`; all modern browsers decompress transparently.
+
+To embed a specific file uncompressed (edge cases only), add its basename (e.g.
+`"my_activity.html"`) to the `DYN_ACT_NO_COMPRESS` list variable near the top of
+`main/CMakeLists.txt` before running `idf.py reconfigure`.
+
 For full technical detail see §5.13, §5.14, §6.10 in [docs/1-specification.md](docs/1-specification.md).
 
 ---

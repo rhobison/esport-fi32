@@ -4967,3 +4967,447 @@ Documentation:
 - Update README.md with "Dynamic Activities (Mini-Games)" section.
 - Update Module Prefix Table in docs/2-development_plan.md.
 ```
+
+---
+
+## Feature 9 — Gzip Compression of Embedded Dynamic Activity Files
+
+### Overview
+
+Feature 9 reduces the flash footprint of dynamic activity HTML files by gzip-compressing
+them at CMake configure time and embedding the compressed blobs in the firmware binary
+instead of the raw source.  The HTTP server sends the compressed bytes directly to the
+browser with a `Content-Encoding: gzip` response header; the browser decompresses
+transparently.
+
+The feature is entirely backward-compatible: files listed in a CMakeLists opt-out variable
+are embedded uncompressed, and the HTTP handler always checks a per-entry flag to decide
+which response header to send.
+
+Key changes:
+
+- **CMake build** — at configure time, each HTML file is compressed to a `.html.gz` sibling
+  in `${CMAKE_CURRENT_BINARY_DIR}/generated/gz/`.  If the gzip binary is unavailable, the
+  build aborts with a clear error message.  An opt-out list (`DYN_ACT_NO_COMPRESS`) lets
+  individual files be excluded from compression and embedded raw.
+- **`dyn_act_registry.h`** — add a `b_gzip` flag to `dyn_act_entry_t` so the HTTP handler
+  knows which entries are compressed.
+- **`http_server_dyn.c`** — `http_srv_dyn_file_get_handler()` sets
+  `Content-Encoding: gzip` before calling `httpd_resp_send()` when `b_gzip == 1`; no
+  header is added for uncompressed entries.
+- **Documentation** — update `README.md` and `docs/4-dynamic_activities_plan.md`.
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+| -------- | ------ | --------- |
+| Compression tool | `gzip` (host system, required) | Present on all Linux and macOS build hosts; no CMake module or Python dependency needed |
+| Compressed file location | `${CMAKE_CURRENT_BINARY_DIR}/generated/gz/` | Keeps compressed artefacts inside the build tree; never committed to source control |
+| `Content-Encoding` check | Always send `Content-Encoding: gzip` for compressed entries; no `Accept-Encoding` inspection | All browsers on the home LAN support gzip; avoids heap allocation for decompression |
+| Opt-out mechanism | `DYN_ACT_NO_COMPRESS` list variable in `main/CMakeLists.txt` | Explicit; visible in one place; easy to extend |
+| `b_gzip` flag | `uint8_t` in `dyn_act_entry_t` | Zero-cost struct addition; allows mixed compressed/uncompressed registry at runtime |
+| `Content-Type` | Always `text/html` regardless of compression | `Content-Encoding` describes the transfer encoding, not the media type |
+
+### Modified Files
+
+| File | Change |
+| ---- | ------ |
+| `main/CMakeLists.txt` | Add gzip step; populate compressed or raw into `EMBED_FILES`; update registry codegen to emit `b_gzip` |
+| `main/inc/dyn_act_registry.h` | Add `uint8_t b_gzip` to `dyn_act_entry_t` |
+| `main/src/http_server_dyn.c` | Set `Content-Encoding: gzip` header when `b_gzip == 1` |
+| `README.md` | Note compression in "Adding new mini-games" section |
+| `docs/4-dynamic_activities_plan.md` | Update Flash Storage Constraints to reflect compressed sizes |
+
+---
+
+### Phase 9.1 — CMake Build Infrastructure
+
+#### Goal
+
+Extend `main/CMakeLists.txt` to compress each HTML file with `gzip` at configure time,
+store the `.html.gz` output in the build tree, embed the compressed blobs via
+`EMBED_FILES`, and update the auto-generated `dyn_act_registry.c` to set `b_gzip = 1`
+for compressed entries and `b_gzip = 0` for uncompressed ones.
+
+#### Inputs
+
+- `main/CMakeLists.txt` (Feature 8 output)
+- `main/dyn_activities/*.html` (existing HTML files)
+
+#### Tasks
+
+1. **Verify `gzip` availability** — add the following block immediately after the
+   existing `file(GLOB DYN_ACT_HTMLS ...)` call:
+
+   ```cmake
+   find_program(_GZIP_EXEC gzip REQUIRED)
+   if(NOT _GZIP_EXEC)
+       message(FATAL_ERROR "gzip not found on PATH. Install gzip to build this project.")
+   endif()
+   ```
+
+   `find_program(... REQUIRED)` is supported in CMake ≥ 3.18 (ESP-IDF 5.x ships ≥ 3.20).
+
+2. **Create the compressed-output directory**:
+
+   ```cmake
+   set(_DYN_GZ_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/gz")
+   file(MAKE_DIRECTORY "${_DYN_GZ_DIR}")
+   ```
+
+3. **Define the opt-out list** — place this immediately before the `foreach` loop so
+   it is easy to locate and extend:
+
+   ```cmake
+   # Files listed here (basenames only, e.g. "dyn_activity1.html") are embedded
+   # uncompressed.  All other HTML files in dyn_activities/ are gzip-compressed.
+   set(DYN_ACT_NO_COMPRESS "")
+   ```
+
+4. **Replace the existing `foreach` loop** with the new version that handles both
+   compressed and uncompressed files.  The loop must:
+
+   a. For each `_HTML` in `DYN_ACT_HTMLS`:
+      - Get `_FNAME_FULL` (e.g. `dyn_activity1.html`) and `_FNAME` (e.g. `dyn_activity1`).
+      - Check whether `_FNAME_FULL` appears in `DYN_ACT_NO_COMPRESS`.
+      - **Compressed path** (default): set `_GZ_OUT` to
+        `"${_DYN_GZ_DIR}/${_FNAME_FULL}.gz"`, run
+        `execute_process(COMMAND gzip -9 -c "${_HTML}" OUTPUT_FILE "${_GZ_OUT}")`,
+        derive the ESP-IDF symbol name from `_FNAME_FULL.gz`, append the embedded
+        file path to `_EMBED_LIST`, emit `b_gzip = 1` in the registry entry.
+      - **Uncompressed path** (opt-out): use `_HTML` directly; derive symbol from
+        `_FNAME_FULL`; emit `b_gzip = 0`.
+
+   Full CMake snippet for the loop:
+
+   ```cmake
+   set(_EMBED_LIST "")
+
+   foreach(_HTML ${DYN_ACT_HTMLS})
+       get_filename_component(_FNAME_FULL "${_HTML}" NAME)      # dyn_activity1.html
+       get_filename_component(_FNAME      "${_HTML}" NAME_WE)   # dyn_activity1
+
+       list(FIND DYN_ACT_NO_COMPRESS "${_FNAME_FULL}" _NO_COMPRESS_IDX)
+
+       if(_NO_COMPRESS_IDX EQUAL -1)
+           # --- compressed ---
+           set(_GZ_OUT "${_DYN_GZ_DIR}/${_FNAME_FULL}.gz")
+           execute_process(
+               COMMAND "${_GZIP_EXEC}" -9 -c "${_HTML}"
+               OUTPUT_FILE "${_GZ_OUT}"
+               RESULT_VARIABLE _GZIP_RESULT)
+           if(NOT _GZIP_RESULT EQUAL 0)
+               message(FATAL_ERROR "gzip failed for ${_HTML} (exit code ${_GZIP_RESULT})")
+           endif()
+           list(APPEND _EMBED_LIST "${_GZ_OUT}")
+           set(_EMBED_FILE "${_GZ_OUT}")
+           set(_B_GZIP "1")
+       else()
+           # --- uncompressed (opt-out) ---
+           list(APPEND _EMBED_LIST "${_HTML}")
+           set(_EMBED_FILE "${_HTML}")
+           set(_B_GZIP "0")
+       endif()
+
+       # Derive ESP-IDF EMBED_FILES symbol name from the filename only.
+       get_filename_component(_EMBED_FNAME "${_EMBED_FILE}" NAME)
+       string(REGEX REPLACE "[^a-zA-Z0-9_]" "_" _SYM "${_EMBED_FNAME}")
+
+       string(APPEND _EXT
+           "extern const uint8_t _binary_${_SYM}_start[];\n"
+           "extern const uint8_t _binary_${_SYM}_end[];\n")
+       string(APPEND _TBL
+           "    { \"${_FNAME}\","
+           " _binary_${_SYM}_start,"
+           " _binary_${_SYM}_end,"
+           " ${_B_GZIP}U },\n")
+       math(EXPR _CNT "${_CNT} + 1")
+   endforeach()
+   ```
+
+5. **Update `idf_component_register(...)`** — replace `EMBED_FILES ${DYN_ACT_HTMLS}` with
+   `EMBED_FILES ${_EMBED_LIST}`.  No other changes to this call are needed.
+
+#### Notes
+
+> `execute_process()` runs at CMake **configure** time, so the compressed files exist
+> before the compiler is invoked.  No `add_custom_command` or `add_custom_target` is
+> needed.
+
+> The compressed output files live under `${CMAKE_CURRENT_BINARY_DIR}/generated/gz/`,
+> which is already inside the build tree and therefore covered by the `.gitignore` entry
+> for `build/`.
+
+> `gzip -9 -c` writes to stdout; the output is redirected via `OUTPUT_FILE`.  The `-c`
+> flag leaves the source file untouched.
+
+> **Re-compression on source change**: `execute_process()` runs unconditionally on every
+> CMake configure.  In normal development this is triggered by `idf.py reconfigure`, which
+> the developer already runs after adding or modifying activity files.  For full
+> incremental compression (re-run only when the source changes), a `add_custom_command`
+> approach would be needed; this is out of scope for the current feature.
+
+> If a `.html.gz` file already exists from a previous configure, `execute_process` with
+> `OUTPUT_FILE` silently overwrites it — this is the desired behaviour.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py reconfigure && idf.py build` succeed with zero errors and zero warnings.
+- [ ] `${CMAKE_CURRENT_BINARY_DIR}/generated/gz/dyn_activity1.html.gz` and
+      `dyn_activity2.html.gz` exist after configure.
+- [ ] Each `.html.gz` file is a valid gzip stream (`file dyn_activity1.html.gz` reports
+      `gzip compressed data`).
+- [ ] `EMBED_FILES` contains the `.html.gz` paths (not the raw `.html` paths) for
+      compressed entries.
+- [ ] A file listed in `DYN_ACT_NO_COMPRESS` is embedded as the raw `.html`; its
+      registry entry has `b_gzip = 0`.
+- [ ] Removing an HTML file and running `idf.py reconfigure` removes it from the registry.
+- [ ] Build fails with `FATAL_ERROR` if `gzip` is not on the `PATH`.
+
+---
+
+### Phase 9.2 — Registry Header Update
+
+#### Goal
+
+Add a `b_gzip` field to `dyn_act_entry_t` in `main/inc/dyn_act_registry.h` so the HTTP
+handler can inspect it at runtime without hard-coding knowledge of which files are
+compressed.
+
+#### Inputs
+
+- `main/inc/dyn_act_registry.h` (Feature 8 output)
+
+#### Tasks
+
+1. **Add `uint8_t b_gzip`** to `dyn_act_entry_t`:
+
+   ```c
+   typedef struct dyn_act_entry_tag
+   {
+       const char *    p_name; /**< Logical name (filename without path or extension). */
+       const uint8_t * p_data; /**< Pointer to the first byte of the embedded data.    */
+       const uint8_t * p_end;  /**< Pointer one past the last byte (size = p_end - p_data). */
+       uint8_t         b_gzip; /**< Non-zero if the embedded data is gzip-compressed.  */
+   } dyn_act_entry_t;
+   ```
+
+2. **Update the file-level Doxygen comment** to mention that `b_gzip` is set by the
+   CMake code generator and that the HTTP handler uses it to decide the
+   `Content-Encoding` response header.
+
+3. No other changes to this file are required.
+
+#### Acceptance Criteria
+
+- [ ] `dyn_act_entry_t` has four fields: `p_name`, `p_data`, `p_end`, `b_gzip`.
+- [ ] `idf.py build` succeeds; the auto-generated `dyn_act_registry.c` compiles without
+      warnings (`b_gzip` initialiser present for every entry).
+- [ ] No other source file needs modification solely because of this struct change
+      (the only consumer of the struct besides the registry itself is `http_server_dyn.c`,
+      updated in Phase 9.3).
+
+---
+
+### Phase 9.3 — HTTP Handler Update
+
+#### Goal
+
+Update `http_srv_dyn_file_get_handler()` in `main/src/http_server_dyn.c` to send
+`Content-Encoding: gzip` when serving a compressed entry, and send no `Content-Encoding`
+header for uncompressed entries.
+
+#### Inputs
+
+- `main/src/http_server_dyn.c` (Feature 8 output)
+- `main/inc/dyn_act_registry.h` (Phase 9.2 output)
+
+#### Tasks
+
+1. **In the registry match block**, replace the current response send sequence:
+
+   ```c
+   httpd_resp_set_type(p_req, "text/html");
+   httpd_resp_send(p_req, (const char *)g_dyn_act_registry[i].p_data,
+       (ssize_t)(g_dyn_act_registry[i].p_end - g_dyn_act_registry[i].p_data));
+   ```
+
+   with:
+
+   ```c
+   httpd_resp_set_type(p_req, "text/html");
+   if (g_dyn_act_registry[i].b_gzip != 0U)
+   {
+       httpd_resp_set_hdr(p_req, "Content-Encoding", "gzip");
+   }
+   httpd_resp_send(p_req, (const char *)g_dyn_act_registry[i].p_data,
+       (ssize_t)(g_dyn_act_registry[i].p_end - g_dyn_act_registry[i].p_data));
+   ```
+
+2. No other changes to this file are required.
+
+#### Notes
+
+> `httpd_resp_set_hdr()` must be called **before** `httpd_resp_send()` because
+> `httpd_resp_send()` flushes the complete response (headers + body) in one call.
+
+> No `Accept-Encoding` check is performed.  All browsers on the home LAN support gzip;
+> the added complexity of a fallback path is not justified.
+
+> The `Content-Type` remains `text/html` for both compressed and uncompressed files.
+> `Content-Encoding` is a transfer-encoding header, not a media-type modifier.
+
+#### Acceptance Criteria
+
+- [ ] `GET /dyn_activities/<name>` for a compressed entry returns HTTP 200 with headers:
+      `Content-Type: text/html` and `Content-Encoding: gzip`.
+- [ ] `GET /dyn_activities/<name>` for an uncompressed entry returns HTTP 200 with header:
+      `Content-Type: text/html` and **no** `Content-Encoding` header.
+- [ ] A browser can load and render a compressed activity page without errors.
+- [ ] `idf.py build` succeeds with zero errors and zero warnings.
+- [ ] No other handler or route is affected.
+
+---
+
+### Phase 9.4 — Integration & Verification
+
+#### Goal
+
+Verify the complete end-to-end flow: compressed HTML embedded in firmware, served with the
+correct headers, rendered correctly by a browser, and capable of completing a full
+credit-claim flow.
+
+#### Inputs
+
+- All Phase 9.1–9.3 outputs.
+- Existing Feature 8 infrastructure (Phases 8.1–8.5 complete).
+
+#### Tasks
+
+1. **Build**: run `idf.py reconfigure && idf.py build`.  Confirm zero errors and zero
+   warnings.
+
+2. **Verify compressed artefacts**:
+   - Check that `build/generated/gz/dyn_activity1.html.gz` exists.
+   - Run `file build/generated/gz/dyn_activity1.html.gz` → must report `gzip compressed
+     data`.
+   - Run `gzip -d -c build/generated/gz/dyn_activity1.html.gz | head -3` → must output
+     valid HTML.
+
+3. **Measure size reduction**:
+   - Compare raw `.html` size vs. `.html.gz` size for each activity file.
+   - Document ratio in a comment in `main/CMakeLists.txt` or in test results.
+
+4. **HTTP response header test**:
+   - Load `http://<AP_IP>/dyn_activities/dyn_activity1` in a browser DevTools **Network**
+     tab.
+   - Confirm `Content-Encoding: gzip` and `Content-Type: text/html` are present.
+   - Confirm the page renders correctly (no garbled text).
+
+5. **Uncompressed opt-out test**:
+   - Add `dyn_activity1.html` to `DYN_ACT_NO_COMPRESS` in `CMakeLists.txt`.
+   - Run `idf.py reconfigure && idf.py build && idf.py flash`.
+   - Load the page; confirm **no** `Content-Encoding` header; page renders correctly.
+   - Revert the change.
+
+6. **Credit claim test** (regression):
+   - Navigate to `/dyn`; launch a compressed activity; complete the credit-claim POST.
+   - Confirm HTTP 200 and correct `new_counter_hms` in the response.
+
+7. **Missing `gzip` test**:
+   - Temporarily rename `gzip` on `PATH` (or set `PATH` to exclude it).
+   - Run `idf.py reconfigure`; confirm `FATAL_ERROR` message is emitted and configure
+     stops.
+   - Restore `gzip`.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and zero warnings.
+- [ ] `build/generated/gz/*.html.gz` files exist for all non-opted-out HTML files.
+- [ ] HTTP response for a compressed activity includes `Content-Encoding: gzip` and
+      `Content-Type: text/html`.
+- [ ] HTTP response for an uncompressed (opt-out) activity omits `Content-Encoding`.
+- [ ] Page loads and renders correctly in Chrome, Firefox, and Safari (or equivalent
+      mobile browsers).
+- [ ] Full credit-claim flow works end-to-end for a compressed activity (HTTP 200, counter
+      updated).
+- [ ] Missing `gzip` on host causes `cmake` configure to abort with a clear error.
+- [ ] No regression in existing Feature 8 acceptance criteria (Phases 8.1–8.5).
+
+---
+
+### Phase 9.5 — Documentation Update
+
+#### Goal
+
+Update `README.md` and `docs/4-dynamic_activities_plan.md` to reflect that activity HTML
+files are gzip-compressed at build time before being embedded in the firmware.
+
+#### Inputs
+
+- All Phase 9.1–9.4 outputs.
+- `README.md` (Feature 8 output)
+- `docs/4-dynamic_activities_plan.md` (current)
+
+#### Tasks
+
+1. **`README.md` — "Adding new mini-games" section**:
+   - After the existing step list, add a note that files are automatically gzip-compressed
+     at build time and that no manual compression step is needed.
+   - Mention the `DYN_ACT_NO_COMPRESS` opt-out variable for edge cases.
+
+2. **`docs/4-dynamic_activities_plan.md` — Flash Storage Constraints section**:
+   - Update the per-file size budget table to show both uncompressed and expected
+     compressed sizes (adding a "Compressed target" column).
+   - Add a note that the hard-maximum figures apply to the **uncompressed** source file
+     size (the authoritative limit for firmware build-time flash use is the compressed
+     size, but the source size cap is retained to keep files readable and maintainable).
+
+3. No changes to `docs/1-specification.md` are required: compression is a build
+   infrastructure detail not visible in the HTTP API contract (from the client's
+   perspective the response is still `text/html`; `Content-Encoding` is a hop-by-hop
+   transport detail fully handled by the browser).
+
+#### Acceptance Criteria
+
+- [ ] `README.md` "Adding new mini-games" mentions automatic gzip compression and the
+      `DYN_ACT_NO_COMPRESS` opt-out.
+- [ ] `docs/4-dynamic_activities_plan.md` Flash Storage Constraints table includes a
+      compressed size column.
+- [ ] No other documentation sections contradict the compression behaviour.
+
+---
+
+### Phase 9.6 — Commit Message
+
+```
+feat: gzip-compress dynamic activity HTML files before embedding
+
+Reduces flash consumption of dynamic activity pages by compressing them
+with gzip at CMake configure time and embedding the compressed blobs in
+the firmware binary.  The HTTP server sends the compressed bytes directly
+with Content-Encoding: gzip; the browser decompresses transparently.
+
+Build:
+- main/CMakeLists.txt: find_program(gzip REQUIRED); compress each HTML
+  file to ${CMAKE_CURRENT_BINARY_DIR}/generated/gz/<name>.html.gz using
+  execute_process(COMMAND gzip -9 -c ...) at configure time.
+- DYN_ACT_NO_COMPRESS list variable allows per-file opt-out; opted-out
+  files are embedded raw (b_gzip = 0 in the registry).
+- EMBED_FILES now references the .html.gz paths for compressed entries.
+- Auto-generated dyn_act_registry.c emits b_gzip initialiser per entry.
+
+Registry:
+- dyn_act_entry_t gains a uint8_t b_gzip field (1 = compressed, 0 = raw).
+
+HTTP server:
+- http_srv_dyn_file_get_handler(): sets Content-Encoding: gzip before
+  httpd_resp_send() when b_gzip != 0; no header added for raw entries.
+- No Accept-Encoding inspection — all browsers on the home LAN support
+  gzip.
+
+Documentation:
+- README.md: note automatic compression and DYN_ACT_NO_COMPRESS opt-out.
+- docs/4-dynamic_activities_plan.md: add compressed-size column to flash
+  budget table.
+```
