@@ -319,6 +319,7 @@ esp_err_t http_srv_dyn_page_get_handler(httpd_req_t * p_req)
            "+\"&device_idx=\"+DEVICE_IDX"
            "+\"&act_id=\"+a.act_id"
            "+\"&credits_s=\"+a.credit_s"
+           "+\"&time_limit_s=\"+a.time_limit_s"
            "+\"&token=\"+a.token+\"'\\\">\"+lbl+'</button>';"
            "});"
            "div.innerHTML=html;"

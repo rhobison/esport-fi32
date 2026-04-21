@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Space Math Meteors</title>
+    <style>
+        /* reset */
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: #0a0a2e;
+            font-family: sans-serif;
+            color: #fff;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+            display: flex;
+            flex-direction: column;
+            height: 100dvh;
+            height: 100vh;
+            overflow: hidden
+        }
+
+        :root {
+            font-size: 16px;
+            --bg: #0a0a2e;
+            --star1: rgba(255, 255, 255, .6);
+            --star2: rgba(200, 220, 255, .5);
+            --star3: rgba(180, 200, 255, .4);
+            --meteor: #6a3fa0;
+            --meteor2: #8a5fc0;
+            --active-glow: #ffe94a;
+            --win-gold: #ffd700;
+            --explode1: #ff8c00;
+            --explode2: #ff4500;
+            --dmg1: #7b00d4;
+            --dmg2: #c00
+        }
+
+        /* portrait: flex-col; landscape: flex-row */
+        .game-col {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 0;
+            min-width: 0;
+            overflow: hidden
+        }
+
+        .control-col {
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0
+        }
+
+        @media(orientation:landscape) {
+            body {
+                flex-direction: row
+            }
+
+            .control-col {
+                width: 200px;
+                border-left: 1px solid #222;
+                padding: 6px
+            }
+        }
+
+        @media(orientation:portrait) {
+            .control-col {
+                width: 100%;
+                border-top: 1px solid #222;
+                padding: 6px
+            }
+        }
+
+        @media(max-width:400px) {
+            :root {
+                font-size: 13px
+            }
+        }
+
+        @media(orientation:landscape)and(max-height:500px) {
+            :root {
+                font-size: 12px
+            }
+        }
+
+        /* header */
+        .header-bar {
+            display: flex;
+            align-items: center;
+            gap: .5em;
+            padding: .3em .6em;
+            background: rgba(0, 0, 30, .7);
+            flex-shrink: 0;
+            flex-wrap: wrap
+        }
+
+        .header-title {
+            font-weight: bold;
+            font-size: 1em;
+            margin-right: auto
+        }
+
+        .timer {
+            font-size: 1.1em;
+            font-variant-numeric: tabular-nums;
+            min-width: 3.5em;
+            text-align: right
+        }
+
+        .prog-wrap {
+            flex: 1 1 60px;
+            height: .7em;
+            background: #1a1a4a;
+            border-radius: .35em;
+            overflow: hidden;
+            min-width: 40px
+        }
+
+        .prog-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4a90d9, #ffe94a);
+            transition: width .3s;
+            border-radius: .35em
+        }
+
+        /* game area */
+        .game-area {
+            position: relative;
+            overflow: hidden;
+            flex: 1 1 0;
+            min-height: 0
+        }
+
+        /* stars */
+        .star-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none
+        }
+
+        .s1 {
+            background-image: radial-gradient(circle, var(--star1) 1px, transparent 1px);
+            background-size: 60px 60px;
+            animation: scroll1 12s linear infinite
+        }
+
+        .s2 {
+            background-image: radial-gradient(circle, var(--star2) 1px, transparent 1px);
+            background-size: 100px 100px;
+            animation: scroll2 20s linear infinite
+        }
+
+        .s3 {
+            background-image: radial-gradient(circle, var(--star3) 1px, transparent 1px);
+            background-size: 150px 150px;
+            animation: scroll3 30s linear infinite
+        }
+
+        @keyframes scroll1 {
+            from {
+                background-position: 0 0
+            }
+
+            to {
+                background-position: 0 60px
+            }
+        }
+
+        @keyframes scroll2 {
+            from {
+                background-position: 0 0
+            }
+
+            to {
+                background-position: 0 100px
+            }
+        }
+
+        @keyframes scroll3 {
+            from {
+                background-position: 0 0
+            }
+
+            to {
+                background-position: 0 150px
+            }
+        }
+
+        /* meteor */
+        .meteor {
+            position: absolute;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 80px;
+            height: 50px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, var(--meteor2), var(--meteor));
+            font-size: 1em;
+            font-weight: bold;
+            text-align: center;
+            color: #fff;
+            cursor: default;
+            box-shadow: 0 0 6px 2px rgba(100, 60, 180, .6);
+            user-select: none;
+            transition: top .05s linear
+        }
+
+        .meteor.active {
+            animation: pulse 1s ease-in-out infinite alternate
+        }
+
+        @keyframes pulse {
+            from {
+                box-shadow: 0 0 8px 4px var(--active-glow)
+            }
+
+            to {
+                box-shadow: 0 0 20px 8px var(--active-glow)
+            }
+        }
+
+        .meteor.wrong {
+            animation: wrongflash .3s ease forwards
+        }
+
+        @keyframes wrongflash {
+
+            0%,
+            100% {
+                background: radial-gradient(circle at 35% 35%, var(--meteor2), var(--meteor))
+            }
+
+            50% {
+                background: radial-gradient(circle at 35% 35%, #ff6666, #cc0000)
+            }
+        }
+
+        .explode {
+            position: absolute;
+            width: 80px;
+            height: 50px;
+            border-radius: 50%;
+            pointer-events: none;
+            animation: explode .4s ease-out forwards
+        }
+
+        .explode.dmg {
+            animation: explodedmg .4s ease-out forwards
+        }
+
+        @keyframes explode {
+            0% {
+                background: radial-gradient(circle, #fff 0%, var(--explode1) 40%, transparent 70%);
+                opacity: 1;
+                transform: scale(1)
+            }
+
+            100% {
+                opacity: 0;
+                transform: scale(2.5)
+            }
+        }
+
+        @keyframes explodedmg {
+            0% {
+                background: radial-gradient(circle, #fff 0%, var(--dmg1) 40%, transparent 70%);
+                opacity: 1;
+                transform: scale(1)
+            }
+
+            100% {
+                opacity: 0;
+                transform: scale(2.5)
+            }
+        }
+
+        /* stats */
+        .stats-bar {
+            display: flex;
+            gap: 1.2em;
+            padding: .3em .6em;
+            font-size: .9em;
+            background: rgba(0, 0, 30, .5);
+            flex-shrink: 0
+        }
+
+        /* control col internals */
+        .input-row {
+            display: flex;
+            gap: .4em;
+            align-items: center;
+            padding: .3em 0
+        }
+
+        .answer-display {
+            flex: 1;
+            min-width: 0;
+            background: #111;
+            border: 2px solid #4a90d9;
+            border-radius: 4px;
+            font-size: 1.3em;
+            text-align: center;
+            padding: .2em;
+            letter-spacing: .1em;
+            min-height: 1.8em
+        }
+
+        .ok-btn {
+            padding: .4em .8em;
+            font-size: 1.1em;
+            background: #4a90d9;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            min-width: 48px;
+            min-height: 48px
+        }
+
+        .ok-btn:active {
+            background: #3a7fc9
+        }
+
+        /* keypad */
+        .keypad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            padding: .2em 0
+        }
+
+        .kbtn {
+            min-height: 48px;
+            font-size: 1.1em;
+            background: #1a1a6a;
+            color: #fff;
+            border: 1px solid #333;
+            border-radius: 4px;
+            cursor: pointer;
+            user-select: none
+        }
+
+        .kbtn:active {
+            background: #2a2a9a
+        }
+
+        .kbtn.bksp {
+            grid-column: 3
+        }
+
+        /* end / error screens */
+        .end-screen,
+        .error-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100dvh;
+            min-height: 100vh;
+            text-align: center;
+            padding: 1em
+        }
+
+        .win-screen {
+            background: radial-gradient(ellipse at center, #1a2a5a 0%, #0a0a2e 70%);
+            animation: starburst 2s ease infinite alternate
+        }
+
+        @keyframes starburst {
+            from {
+                box-shadow: inset 0 0 60px #0a0a2e
+            }
+
+            to {
+                box-shadow: inset 0 0 60px #2a2a6e
+            }
+        }
+
+        .end-screen h1 {
+            font-size: 2em;
+            margin-bottom: .5em
+        }
+
+        .end-screen .win-title {
+            color: var(--win-gold);
+            text-shadow: 0 0 20px var(--win-gold)
+        }
+
+        .end-screen .stat {
+            font-size: 1.1em;
+            margin: .3em 0
+        }
+
+        .end-screen .bonus {
+            color: var(--win-gold);
+            font-size: 1.2em
+        }
+
+        .claim-btn {
+            margin-top: 1em;
+            padding: .6em 1.4em;
+            font-size: 1.1em;
+            background: #27ae60;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer
+        }
+
+        .claim-btn:disabled {
+            background: #555;
+            cursor: default
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: .8em;
+            color: #4a90d9;
+            text-decoration: none
+        }
+
+        .banner {
+            margin-top: .8em;
+            padding: .5em 1em;
+            border-radius: 4px;
+            font-size: .95em;
+            max-width: 340px
+        }
+
+        .banner.ok {
+            background: #1a5c2e;
+            border: 1px solid #27ae60
+        }
+
+        .banner.err {
+            background: #5c1a1a;
+            border: 1px solid #cc0000
+        }
+
+        .banner.warn {
+            background: #5c4a00;
+            border: 1px solid #e6a800
+        }
+
+        .error-screen p {
+            max-width: 320px;
+            line-height: 1.5
+        }
+
+        .error-screen .back-link {
+            margin-top: 1em
+        }
+    </style>
+</head>
+
+<body>
+    <div id="screen"></div>
+    <script>
+        /* ---- constants ---- */
+        const SECS_PER_PROBLEM = 5;
+        const EARN_FRACTION = 0.70;
+        const MAX_METEORS = 3;
+        const SPEED_TIERS = [
+            { upTo: 5, fallS: 8 },
+            { upTo: 10, fallS: 7 },
+            { upTo: 20, fallS: 6 },
+            { upTo: Infinity, fallS: 5 }
+        ];
+
+        /* ---- url params ---- */
+        const _p = new URLSearchParams(location.search);
+        const pin = _p.get('pin') || '';
+        const deviceIdx = parseInt(_p.get('device_idx') || '0', 10);
+        const actId = parseInt(_p.get('act_id') || '0', 10);
+        const creditsS = parseInt(_p.get('credits_s') || '0', 10);
+        const timeLimitS = parseInt(_p.get('time_limit_s') || '0', 10);
+        const token = _p.get('token') || '';
+
+        /* ---- state ---- */
+        let gameState = 'loading';
+        let targetProblems = 3;
+        let solved = 0, wrong = 0, elapsedS = 0;
+        let timeRemaining = 0;
+        let meteors = [];
+        let activeMeteorId = null;
+        let meteorIdCounter = 0;
+        let totalSolvedEver = 0;
+        let recentProblems = [];
+        let rafId = null;
+        let tickId = null;
+        let lastRafTime = null;
+        let gameAreaH = 0, gameAreaW = 0;
+        let answerText = '';
+
+        /* ---- problem generator ---- */
+        function rand(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+        function generateProblem() {
+            let prob, attempt = 0;
+            do {
+                const t = rand(0, 2);
+                let q, ans;
+                if (t === 0) {
+                    const a = rand(1, 49), b = rand(1, 49 - a + 1);
+                    q = a + '+' + b; ans = a + b;
+                } else if (t === 1) {
+                    const a = rand(10, 99), b = rand(1, a - 1);
+                    q = a + '-' + b; ans = a - b;
+                } else {
+                    const a = rand(1, 9), b = rand(1, 9);
+                    q = a + 'x' + b; ans = a * b;
+                }
+                prob = { question: q + '=?', answer: ans };
+                attempt++;
+            } while (attempt < 20 && recentProblems.includes(prob.question));
+            recentProblems.push(prob.question);
+            if (recentProblems.length > 10) recentProblems.shift();
+            return prob;
+        }
+
+        /* ---- fall speed ---- */
+        function fallDuration() {
+            const n = totalSolvedEver + 1;
+            for (const t of SPEED_TIERS) { if (n <= t.upTo) return t.fallS; }
+            return 5;
+        }
+
+        /* ---- meteor lifecycle ---- */
+        function spawnMeteor() {
+            if (meteors.length >= MAX_METEORS) return;
+            const prob = generateProblem();
+            const id = ++meteorIdCounter;
+            const left = rand(5, 75);
+            const dur = fallDuration();
+            meteors.push({ id, prob, leftPct: left, topPx: -50, dur, startTime: performance.now(), wrongAnim: false });
+            renderMeteorEl(meteors[meteors.length - 1]);
+            refreshActiveMetor();
+        }
+
+        function renderMeteorEl(m) {
+            const area = document.getElementById('game-area');
+            if (!area) return;
+            const el = document.createElement('div');
+            el.className = 'meteor';
+            el.id = 'meteor-' + m.id;
+            el.style.left = m.leftPct + '%';
+            el.style.top = '-50px';
+            el.textContent = m.prob.question;
+            area.appendChild(el);
+        }
+
+        function refreshActiveMetor() {
+            /* Active = lowest-falling (highest topPx) */
+            let best = null, bestTop = -9999;
+            for (const m of meteors) {
+                if (m.topPx > bestTop) { bestTop = m.topPx; best = m; }
+            }
+            const newId = best ? best.id : null;
+            if (newId !== activeMeteorId) {
+                if (activeMeteorId) {
+                    const old = document.getElementById('meteor-' + activeMeteorId);
+                    if (old) old.classList.remove('active');
+                }
+                activeMeteorId = newId;
+                if (activeMeteorId) {
+                    const el = document.getElementById('meteor-' + activeMeteorId);
+                    if (el) el.classList.add('active');
+                }
+            }
+        }
+
+        function destroyMeteor(id, correct) {
+            const idx = meteors.findIndex(m => m.id === id);
+            if (idx < 0) return;
+            const m = meteors[idx];
+            meteors.splice(idx, 1);
+
+            const el = document.getElementById('meteor-' + id);
+            if (el) {
+                /* explosion in place */
+                const ex = document.createElement('div');
+                ex.className = correct ? 'explode' : 'explode dmg';
+                ex.style.left = el.style.left;
+                ex.style.top = el.style.top;
+                el.parentNode.appendChild(ex);
+                el.remove();
+                setTimeout(() => ex.remove(), 420);
+            }
+
+            if (id === activeMeteorId) activeMeteorId = null;
+            refreshActiveMetor();
+            updateHUD();
+            if (gameState === 'playing') spawnMetorsIfNeeded();
+        }
+
+        function spawnMetorsIfNeeded() {
+            while (meteors.length < MAX_METEORS && gameState === 'playing') spawnMeteor();
+        }
+
+        /* ---- RAF loop ---- */
+        function rafLoop(now) {
+            if (gameState !== 'playing') return;
+            rafId = requestAnimationFrame(rafLoop);
+            const area = document.getElementById('game-area');
+            if (!area) return;
+            gameAreaH = area.clientHeight;
+            gameAreaW = area.clientWidth;
+
+            const dt = lastRafTime ? (now - lastRafTime) / 1000 : 0;
+            lastRafTime = now;
+
+            const toRemove = [];
+            for (const m of meteors) {
+                m.topPx += (gameAreaH + 60) * dt / m.dur;
+                const el = document.getElementById('meteor-' + m.id);
+                if (el) el.style.top = m.topPx + 'px';
+                if (m.topPx >= gameAreaH) toRemove.push(m.id);
+            }
+            for (const id of toRemove) destroyMeteor(id, false);
+        }
+
+        /* ---- input ---- */
+        function appendDigit(d) {
+            if (answerText.length >= 2) return;
+            answerText += d;
+            updateAnswerDisplay();
+        }
+        function backspace() {
+            if (answerText.length > 0) { answerText = answerText.slice(0, -1); updateAnswerDisplay(); }
+        }
+        function submitAnswer() {
+            if (!activeMeteorId || answerText === '') return;
+            const m = meteors.find(x => x.id === activeMeteorId);
+            if (!m) return;
+            const guess = parseInt(answerText, 10);
+            answerText = '';
+            updateAnswerDisplay();
+            if (guess === m.prob.answer) {
+                solved++;
+                totalSolvedEver++;
+                destroyMeteor(m.id, true);
+                updateHUD();
+                if (solved >= targetProblems) {
+                    endGame(true);
+                    return;
+                }
+            } else {
+                wrong++;
+                timeRemaining = Math.max(0, timeRemaining - 1);
+                const el = document.getElementById('meteor-' + m.id);
+                if (el) {
+                    el.classList.add('wrong');
+                    setTimeout(() => el && el.classList.remove('wrong'), 320);
+                }
+                updateHUD();
+            }
+        }
+
+        function updateAnswerDisplay() {
+            const el = document.getElementById('answer-display');
+            if (el) el.textContent = answerText || '\u00a0';
+        }
+
+        /* ---- timer ---- */
+        function onTick() {
+            if (gameState !== 'playing') return;
+            elapsedS++;
+            timeRemaining = Math.max(0, timeRemaining - 1);
+            updateHUD();
+            if (timeRemaining <= 0) endGame(false);
+        }
+
+        function updateHUD() {
+            const tEl = document.getElementById('hud-timer');
+            if (tEl) {
+                const m = Math.floor(timeRemaining / 60);
+                const s = timeRemaining % 60;
+                tEl.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+            }
+            const pbar = document.getElementById('hud-progbar');
+            if (pbar) {
+                const pct = Math.min(100, Math.round(solved / targetProblems * 100));
+                pbar.style.width = pct + '%';
+            }
+            const solEl = document.getElementById('hud-solved');
+            if (solEl) solEl.textContent = 'Solved: ' + solved + ' / ' + targetProblems;
+            const wrEl = document.getElementById('hud-wrong');
+            if (wrEl) wrEl.textContent = 'Wrong: ' + wrong;
+        }
+
+        /* ---- screens ---- */
+        function formatHMS(s) {
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+        }
+
+        function renderError(msg) {
+            document.getElementById('screen').innerHTML =
+                '<div class="error-screen"><p>' + msg + '</p>' +
+                '<a class="back-link" href="/dyn">\u2190 Back to Games</a></div>';
+        }
+
+        function renderPlaying() {
+            document.getElementById('screen').innerHTML =
+                '<div class="game-col">' +
+                '<div class="header-bar">' +
+                '<span class="header-title">&#9733; Space Math</span>' +
+                '<span class="timer" id="hud-timer">--:--</span>' +
+                '<div class="prog-wrap"><div class="prog-bar" id="hud-progbar" style="width:0%"></div></div>' +
+                '</div>' +
+                '<div class="game-area" id="game-area">' +
+                '<div class="star-layer s1"></div>' +
+                '<div class="star-layer s2"></div>' +
+                '<div class="star-layer s3"></div>' +
+                '</div>' +
+                '<div class="stats-bar"><span id="hud-solved">Solved: 0 / ' + targetProblems + '</span>' +
+                '<span id="hud-wrong">Wrong: 0</span></div>' +
+                '</div>' +
+                '<div class="control-col">' +
+                '<div class="input-row">' +
+                '<div class="answer-display" id="answer-display">\u00a0</div>' +
+                '<button class="ok-btn" id="ok-btn">OK</button>' +
+                '</div>' +
+                '<div class="keypad" id="keypad">' +
+                '<button class="kbtn" data-d="1">1</button>' +
+                '<button class="kbtn" data-d="2">2</button>' +
+                '<button class="kbtn" data-d="3">3</button>' +
+                '<button class="kbtn" data-d="4">4</button>' +
+                '<button class="kbtn" data-d="5">5</button>' +
+                '<button class="kbtn" data-d="6">6</button>' +
+                '<button class="kbtn" data-d="7">7</button>' +
+                '<button class="kbtn" data-d="8">8</button>' +
+                '<button class="kbtn" data-d="9">9</button>' +
+                '<button class="kbtn" data-d="0" style="grid-column:1">0</button>' +
+                '<button class="kbtn bksp" id="bksp-btn">\u232b</button>' +
+                '</div>' +
+                '</div>';
+
+            document.getElementById('ok-btn').addEventListener('click', submitAnswer);
+            document.getElementById('bksp-btn').addEventListener('click', backspace);
+            document.getElementById('keypad').addEventListener('click', e => {
+                const d = e.target.dataset.d;
+                if (d !== undefined) appendDigit(d);
+            });
+
+            updateHUD();
+        }
+
+        function renderEnd(win) {
+            stopGame();
+            const earned = Math.floor(creditsS * solved / targetProblems);
+            const submitCredit = Math.min(earned, creditsS);
+            const bonus = Math.max(0, solved - targetProblems);
+
+            let html = '<div class="end-screen ' + (win ? 'win-screen' : '') + '">';
+            if (win) {
+                html += '<h1 class="win-title">YOU WIN!</h1>';
+                html += '<p class="stat">You solved <b>' + solved + ' / ' + targetProblems + '</b></p>';
+                if (bonus > 0) html += '<p class="bonus">(+' + bonus + ' BONUS problem' + (bonus > 1 ? 's' : '') + '!)</p>';
+            } else {
+                html += '<h1>TIME\'S UP!</h1>';
+                html += '<p class="stat">You solved <b>' + solved + ' / ' + targetProblems + '</b></p>';
+            }
+            html += '<p class="stat">Credits earned: <b>' + formatHMS(submitCredit) + '</b></p>';
+            html += '<button class="claim-btn" id="claim-btn">Claim Credits</button>';
+            html += '<div id="banner-area"></div>';
+            html += '<a class="back-link" href="/dyn">\u2190 Back to Games</a>';
+            html += '</div>';
+
+            document.getElementById('screen').innerHTML = html;
+            document.getElementById('claim-btn').addEventListener('click', () => claimCredits(submitCredit));
+        }
+
+        /* ---- credit claim ---- */
+        function claimCredits(submitCredit) {
+            const btn = document.getElementById('claim-btn');
+            if (btn) btn.disabled = true;
+            fetch('/api/activities/credit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    device_idx: deviceIdx,
+                    act_id: actId,
+                    credits_s: submitCredit,
+                    completion_time_s: elapsedS,
+                    pin: pin,
+                    token: token
+                })
+            }).then(r => {
+                if (r.ok) return r.json().then(d => showBanner('ok', '\ud83c\udf89 Credits added! Counter: ' + (d.new_counter_hms || '')));
+                if (r.status === 403) { showBanner('err', '\u26d4 Not authorised \u2014 please go back and start a new game.'); return; }
+                if (r.status === 429) { showBanner('warn', '\u23f0 Daily limit reached \u2014 come back tomorrow!'); return; }
+                showBanner('err', 'Network error (HTTP ' + r.status + ') \u2014 please try again.');
+                if (btn) btn.disabled = false;
+            }).catch(() => {
+                showBanner('err', 'Network error \u2014 please try again.');
+                if (btn) btn.disabled = false;
+            });
+        }
+
+        function showBanner(type, msg) {
+            const area = document.getElementById('banner-area');
+            if (area) area.innerHTML = '<div class="banner ' + type + '">' + msg + '</div>';
+        }
+
+        /* ---- end game ---- */
+        function endGame(win) {
+            gameState = 'end';
+            renderEnd(win);
+        }
+
+        function stopGame() {
+            if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+            if (tickId) { clearInterval(tickId); tickId = null; }
+        }
+
+        /* ---- keyboard ---- */
+        document.addEventListener('keydown', e => {
+            if (gameState !== 'playing') return;
+            if (e.key >= '0' && e.key <= '9') { appendDigit(e.key); e.preventDefault(); }
+            else if (e.key === 'Backspace') { backspace(); e.preventDefault(); }
+            else if (e.key === 'Enter') { submitAnswer(); e.preventDefault(); }
+        });
+
+        /* ---- init ---- */
+        function startGame() {
+            targetProblems = Math.max(3, Math.floor(timeLimitS * EARN_FRACTION / SECS_PER_PROBLEM));
+            timeRemaining = timeLimitS;
+            solved = 0; wrong = 0; elapsedS = 0; answerText = '';
+            meteors = []; activeMeteorId = null; meteorIdCounter = 0;
+            totalSolvedEver = 0; recentProblems = []; lastRafTime = null;
+            gameState = 'playing';
+
+            renderPlaying();
+
+            /* stagger first 3 meteors */
+            spawnMeteor();
+            setTimeout(spawnMeteor, 200);
+            setTimeout(spawnMeteor, 400);
+
+            rafId = requestAnimationFrame(rafLoop);
+            tickId = setInterval(onTick, 1000);
+        }
+
+        (function init() {
+            const missing = [];
+            if (!pin) missing.push('pin');
+            if (!token) missing.push('token');
+            if (!actId) missing.push('act_id');
+            if (!creditsS) missing.push('credits_s');
+            if (!timeLimitS) missing.push('time_limit_s');
+            if (!_p.has('device_idx')) missing.push('device_idx');
+            if (missing.length > 0) {
+                renderError('Oops! Missing game parameters (' + missing.join(', ') + '). Please go back to the games page.');
+                return;
+            }
+            startGame();
+        })();
+    </script>
+</body>
+
+</html>
