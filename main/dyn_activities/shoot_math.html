@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shoot Math Asteroids</title>
+    <style>
+        * { box-sizing: border-box }
+        body {
+            margin: 0; padding: 0;
+            background: #0a0a2e;
+            font-family: sans-serif;
+            color: #fff;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+            display: flex;
+            flex-direction: column;
+            height: 100vh; height: 100dvh;
+            overflow: hidden
+        }
+        #screen {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 0;
+            min-height: 0;
+            overflow: hidden
+        }
+        :root {
+            font-size: 16px;
+            --bg: #0a0a2e;
+            --accent: #4af;
+            --win-gold: #ffd700;
+            --rock-dark: #4a3520;
+            --rock-mid: #7a5a30;
+            --rock-light: #aa8050;
+            --laser-color: #4af;
+            --laser-wrong: #ff4444;
+            --thruster: #ff8c00;
+            --row-tint: rgba(255,233,74,0.08);
+            --star1: rgba(255,255,255,.6);
+            --star2: rgba(200,220,255,.5);
+            --star3: rgba(180,200,255,.4)
+        }
+
+        /* landscape: row; portrait: column (default) */
+        .game-col {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 0;
+            min-width: 0;
+            overflow: hidden
+        }
+        .control-col {
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            align-items: center
+        }
+
+        @media(orientation:landscape) {
+            #screen { flex-direction: row }
+            .control-col {
+                width: 200px;
+                border-left: 1px solid #1a1a4a;
+                padding: 8px 6px;
+                gap: 6px
+            }
+        }
+        /* LTR: mirror - control panel moves to left */
+        @media(orientation:landscape) {
+            body.ltr #screen { flex-direction: row-reverse }
+            body.ltr .control-col { border-left: none; border-right: 1px solid #1a1a4a }
+        }
+
+        @media(orientation:portrait) {
+            .control-col {
+                width: 100%;
+                border-top: 1px solid #1a1a4a;
+                padding: 6px;
+                flex-direction: row;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 6px
+            }
+        }
+        @media(max-width:400px) { :root { font-size: 13px } }
+        @media(orientation:landscape)and(max-height:500px) { :root { font-size: 12px } }
+
+        /* header */
+        .header-bar {
+            display: flex;
+            align-items: center;
+            gap: .5em;
+            padding: .3em .6em;
+            background: rgba(0,0,30,.75);
+            flex-shrink: 0;
+            flex-wrap: wrap
+        }
+        .header-title { font-weight: bold; font-size: 1em; margin-right: auto }
+        .timer {
+            font-size: 1.1em;
+            font-variant-numeric: tabular-nums;
+            min-width: 3.5em;
+            text-align: right
+        }
+        .prog-wrap {
+            flex: 1 1 60px;
+            height: .7em;
+            background: #1a1a4a;
+            border-radius: .35em;
+            overflow: hidden;
+            min-width: 40px
+        }
+        .prog-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4af, #ffe94a);
+            transition: width .3s;
+            border-radius: .35em
+        }
+
+        /* game area */
+        .game-area {
+            position: relative;
+            overflow: hidden;
+            flex: 1 1 0;
+            min-height: 0
+        }
+
+        /* star layers */
+        .star-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none
+        }
+        .s1 {
+            background-image: radial-gradient(circle, var(--star1) 1px, transparent 1px);
+            background-size: 60px 60px;
+            animation: scroll1 12s linear infinite
+        }
+        .s2 {
+            background-image: radial-gradient(circle, var(--star2) 1px, transparent 1px);
+            background-size: 100px 100px;
+            animation: scroll2 20s linear infinite
+        }
+        .s3 {
+            background-image: radial-gradient(circle, var(--star3) 1px, transparent 1px);
+            background-size: 150px 150px;
+            animation: scroll3 30s linear infinite
+        }
+        @keyframes scroll1 { from{background-position:0 0} to{background-position:0 60px} }
+        @keyframes scroll2 { from{background-position:0 0} to{background-position:0 100px} }
+        @keyframes scroll3 { from{background-position:0 0} to{background-position:0 150px} }
+
+        /* rows */
+        .row {
+            position: absolute;
+            left: 0; right: 0;
+            transition: background .15s
+        }
+        .row:not(:last-child) {
+            border-bottom: 1px dotted rgba(255,255,255,.12)
+        }
+        .row.active-row { background: var(--row-tint) }
+
+        /* asteroid */
+        .asteroid {
+            position: absolute;
+            width: 90px;
+            height: 55px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            cursor: pointer;
+            user-select: none
+        }
+        .asteroid svg.ast-svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%
+        }
+        .asteroid .ast-label {
+            position: relative;
+            z-index: 2;
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 1px 4px rgba(0,0,0,.9), 0 0 8px rgba(0,0,0,.8)
+        }
+        .asteroid.tried {
+            opacity: .5;
+            filter: drop-shadow(0 0 4px #ff4444)
+        }
+        .asteroid.tried .ast-svg ellipse { stroke: #ff4444; stroke-width: 3 }
+
+        /* fly animations — RTL (default): from far right towards left */
+        @keyframes flyRTL {
+            from { right: -110px }
+            to   { right: calc(100% + 10px) }
+        }
+        /* LTR: from far left towards right */
+        @keyframes flyLTR {
+            from { left: -110px }
+            to   { left: calc(100% + 10px) }
+        }
+
+        /* explosion */
+        .explode-el {
+            position: absolute;
+            width: 90px;
+            height: 55px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            animation: explodeAst .45s ease-out forwards
+        }
+        @keyframes explodeAst {
+            0%  { opacity:1; transform: translateY(-50%) scale(1) }
+            50% { opacity:.9; transform: translateY(-50%) scale(2) }
+            100%{ opacity:0; transform: translateY(-50%) scale(2.8) }
+        }
+
+        /* laser */
+        .laser {
+            position: absolute;
+            height: 3px;
+            top: 50%;
+            transform-origin: right;
+            transform: translateY(-50%) scaleX(0);
+            pointer-events: none;
+            border-radius: 2px;
+            animation: laserShoot .15s ease-out forwards
+        }
+        body.ltr .laser { transform-origin: left }
+        @keyframes laserShoot {
+            from { transform: translateY(-50%) scaleX(0) }
+            to   { transform: translateY(-50%) scaleX(1) }
+        }
+        .laser.ok  { background: linear-gradient(to left, var(--laser-color), transparent) }
+        .laser.bad { background: linear-gradient(to left, var(--laser-wrong), transparent) }
+        body.ltr .laser.ok  { background: linear-gradient(to right, var(--laser-color), transparent) }
+        body.ltr .laser.bad { background: linear-gradient(to right, var(--laser-wrong), transparent) }
+
+        /* rocket wrapper in game area */
+        .rocket-wrap {
+            position: absolute;
+            right: 8px;
+            pointer-events: none;
+            transition: top 0ms;
+            z-index: 10
+        }
+        body.ltr .rocket-wrap { right: auto; left: 8px }
+
+        .rocket-svg-el {
+            display: block;
+            filter: drop-shadow(0 0 6px #4af) drop-shadow(0 0 12px rgba(100,180,255,.4))
+        }
+        .rocket-wrap.correct .rocket-svg-el {
+            animation: rocketCorrect .2s ease forwards
+        }
+        .rocket-wrap.wrong .rocket-svg-el {
+            animation: rocketWrong .3s ease forwards
+        }
+        .rocket-wrap.rowpulse .rocket-svg-el {
+            animation: rocketPulse .08s ease forwards
+        }
+        @keyframes rocketCorrect {
+            0%  { filter: drop-shadow(0 0 6px #4af) brightness(1) }
+            50% { filter: drop-shadow(0 0 24px #00ff80) brightness(4) hue-rotate(120deg) }
+            100%{ filter: drop-shadow(0 0 6px #4af) brightness(1) }
+        }
+        @keyframes rocketWrong {
+            0%,100%{ transform: translateX(0) }
+            20%    { transform: translateX(-6px) }
+            40%    { transform: translateX(6px) }
+            60%    { transform: translateX(-6px) }
+            80%    { transform: translateX(6px) }
+        }
+        @keyframes rocketPulse {
+            0%  { transform: scale(1) }
+            50% { transform: scale(1.2) }
+            100%{ transform: scale(1) }
+        }
+
+        /* thruster glow */
+        @keyframes thrusterPulse {
+            0%,100%{ opacity:.7 }
+            50%    { opacity:1 }
+        }
+        .thruster-glow { animation: thrusterPulse .8s ease-in-out infinite }
+
+        /* stats in control col */
+        .stats-bar {
+            display: flex;
+            gap: 1em;
+            padding: .3em .6em;
+            font-size: .9em;
+            background: rgba(0,0,30,.5);
+            flex-shrink: 0
+        }
+
+        /* control col contents */
+        .problem-display {
+            font-size: 1.25em;
+            font-weight: bold;
+            text-align: center;
+            color: #ffe94a;
+            text-shadow: 0 0 10px rgba(255,233,74,.5);
+            padding: .3em .2em;
+            min-height: 2em;
+            flex-shrink: 0;
+            letter-spacing: .05em
+        }
+        .move-btns {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+            flex-shrink: 0
+        }
+        .move-btn {
+            width: 54px; height: 54px;
+            font-size: 1.4em;
+            background: #1a1a6a;
+            color: #4af;
+            border: 1px solid #2a2a9a;
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+            display: flex; align-items: center; justify-content: center
+        }
+        .move-btn:active { background: #2a2a9a }
+        .fire-btn {
+            min-width: 80px; min-height: 54px;
+            font-size: 1.1em;
+            background: linear-gradient(135deg, #c04000, #ff6600);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+            font-weight: bold;
+            box-shadow: 0 0 12px rgba(255,100,0,.5);
+            flex-shrink: 0
+        }
+        .fire-btn:active { background: linear-gradient(135deg, #a03000, #e05500) }
+        .ctrl-stats {
+            font-size: .85em;
+            text-align: center;
+            color: #aac4ff;
+            margin-top: auto;
+            padding: .2em 0
+        }
+
+        /* portrait control strip */
+        @media(orientation:portrait) {
+            .move-btns { flex-direction: row }
+            .ctrl-stats { display: none }
+        }
+
+        /* setup screen */
+        .setup-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh; min-height: 100dvh;
+            text-align: center;
+            padding: 1.5em;
+            gap: .9em;
+            background: #0a0a2e
+        }
+        .setup-screen h1 {
+            font-size: 1.8em;
+            color: var(--win-gold);
+            text-shadow: 0 0 16px var(--win-gold)
+        }
+        .setup-screen p { font-size: 1em; color: #aac4ff; margin: 0 }
+        .setup-opts {
+            display: flex;
+            flex-direction: column;
+            gap: .8em;
+            align-items: flex-start;
+            margin: .2em 0
+        }
+        .setup-opt {
+            display: flex;
+            align-items: center;
+            gap: .7em;
+            font-size: 1.1em;
+            cursor: pointer;
+            user-select: none
+        }
+        .setup-opt input[type=checkbox] {
+            width: 26px; height: 26px;
+            cursor: pointer;
+            accent-color: #4af
+        }
+        .direction-group {
+            display: flex;
+            flex-direction: column;
+            gap: .6em;
+            align-items: flex-start;
+            font-size: 1em;
+            color: #ccdeff
+        }
+        .direction-group label {
+            display: flex;
+            align-items: center;
+            gap: .6em;
+            cursor: pointer
+        }
+        .direction-group input[type=radio] {
+            width: 22px; height: 22px;
+            cursor: pointer;
+            accent-color: #4af
+        }
+        .setup-divider {
+            width: 100%;
+            max-width: 260px;
+            border: none;
+            border-top: 1px solid #2a2a5a;
+            margin: .2em 0
+        }
+        .start-btn {
+            margin-top: .3em;
+            padding: .6em 2em;
+            font-size: 1.2em;
+            background: #4af;
+            color: #000;
+            font-weight: bold;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            min-height: 48px
+        }
+        .start-btn:disabled { opacity: .35; cursor: not-allowed }
+        .start-btn:not(:disabled):active { filter: brightness(.85) }
+
+        /* end / error screens */
+        .end-screen, .error-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh; min-height: 100dvh;
+            text-align: center;
+            padding: 1em
+        }
+        .win-screen {
+            background: radial-gradient(ellipse at center, #1a2a5a 0%, #0a0a2e 70%);
+            animation: starburst 2s ease infinite alternate
+        }
+        @keyframes starburst {
+            from { box-shadow: inset 0 0 60px #0a0a2e }
+            to   { box-shadow: inset 0 0 60px #2a2a6e }
+        }
+        .end-screen h1 { font-size: 2em; margin-bottom: .5em }
+        .end-screen .win-title { color: var(--win-gold); text-shadow: 0 0 20px var(--win-gold) }
+        .end-screen .stat { font-size: 1.1em; margin: .3em 0 }
+        .end-screen .bonus { color: var(--win-gold); font-size: 1.2em }
+        .back-link {
+            display: inline-block;
+            margin-top: .8em;
+            color: #4af;
+            text-decoration: none
+        }
+        .banner {
+            margin-top: .8em;
+            padding: .5em 1em;
+            border-radius: 4px;
+            font-size: .95em;
+            max-width: 340px
+        }
+        .banner.ok  { background: #1a5c2e; border: 1px solid #27ae60 }
+        .banner.err { background: #5c1a1a; border: 1px solid #cc0000 }
+        .banner.warn{ background: #5c4a00; border: 1px solid #e6a800 }
+        .claiming { font-size: .95em; color: #aac4ff; margin-top: .8em }
+        .retry-btn {
+            margin-top: .5em;
+            padding: .35em .9em;
+            font-size: .95em;
+            background: #4af;
+            color: #000;
+            font-weight: bold;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer
+        }
+        .error-screen p { max-width: 320px; line-height: 1.5 }
+        .error-screen .back-link { margin-top: 1em }
+    </style>
+</head>
+
+<body>
+    <div id="screen"></div>
+    <script>
+        /* ---- constants ---- */
+        const SECS_PER_PROBLEM = 5;
+        const EARN_FRACTION = 0.70;
+        const ROWS = 3;
+        const SPEED_TIERS = [
+            { upTo: 5,        travelS: 8 },
+            { upTo: 10,       travelS: 7 },
+            { upTo: 20,       travelS: 6 },
+            { upTo: Infinity, travelS: 5 }
+        ];
+
+        /* ---- url params ---- */
+        const _p = new URLSearchParams(location.search);
+        const pin       = _p.get('pin')        || '';
+        const deviceIdx = parseInt(_p.get('device_idx')  || '0', 10);
+        const actId     = parseInt(_p.get('act_id')      || '0', 10);
+        const creditsS  = parseInt(_p.get('credits_s')   || '0', 10);
+        const timeLimitS= parseInt(_p.get('time_limit_s')|| '0', 10);
+        const token     = _p.get('token')       || '';
+
+        /* ---- state ---- */
+        let gameState    = 'loading';
+        let flyDir       = 'rtl';
+        let selectedTypes= ['mul','add','sub'];
+        let targetProblems = 3;
+        let solved = 0, wrong = 0, elapsedS = 0;
+        let timeRemaining = 0;
+        let rocketRow   = 1;
+        let currentSet  = null;   /* { problem, correctRow, answers[3], triedRows[], spawnTime, travelDuration, animStarted } */
+        let totalSolvedEver = 0;
+        let recentProblems  = [];
+        let rafId    = null;
+        let tickId   = null;
+        let lastRafTime = null;
+        let gameAreaH = 0, gameAreaW = 0;
+        let setResolved = false;
+
+        /* ---- helpers ---- */
+        function rand(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+        function travelDuration() {
+            const n = totalSolvedEver + 1;
+            for (const t of SPEED_TIERS) { if (n <= t.upTo) return t.travelS; }
+            return 5;
+        }
+
+        /* ---- problem generator ---- */
+        function generateProblem() {
+            let prob, attempt = 0;
+            do {
+                const t = selectedTypes[Math.floor(Math.random() * selectedTypes.length)];
+                let q, ans, type;
+                if (t === 'add') {
+                    const a = rand(1,49), b = rand(1, 49 - a + 1);
+                    q = a + ' + ' + b; ans = a + b; type = 'add';
+                } else if (t === 'sub') {
+                    const a = rand(10,99), b = rand(1, a - 1);
+                    q = a + ' - ' + b; ans = a - b; type = 'sub';
+                } else {
+                    const a = rand(1,9), b = rand(1,9);
+                    q = a + ' x ' + b; ans = a * b; type = 'mul';
+                }
+                prob = { question: q + ' = ?', answer: ans, type };
+                attempt++;
+            } while (attempt < 20 && recentProblems.includes(prob.question));
+            recentProblems.push(prob.question);
+            if (recentProblems.length > 10) recentProblems.shift();
+            return prob;
+        }
+
+        function generateDistractors(correct, type) {
+            const results = [];
+            for (let pass = 0; pass < 2; pass++) {
+                let d, tries = 0;
+                do {
+                    if (type === 'mul') {
+                        /* neighbour from times table */
+                        const sign = (Math.random() < .5 ? 1 : -1);
+                        d = correct + sign * (pass === 0 ? rand(6,10) : rand(12,18));
+                    } else {
+                        d = correct + (Math.random() < .5 ? 1 : -1) * rand(1, 9);
+                    }
+                    tries++;
+                } while (tries < 12 && (d <= 0 || d > 99 || d === correct || results.includes(d)));
+                if (d <= 0 || d > 99 || d === correct || results.includes(d)) {
+                    /* fallback */
+                    let fb = correct + (pass === 0 ? 10 : -10);
+                    fb = Math.max(1, Math.min(99, fb));
+                    if (fb === correct) fb = correct + 10;
+                    d = fb;
+                }
+                results.push(d);
+            }
+            return results;
+        }
+
+        /* ---- SVG assets ---- */
+        /* Rocket SVG: 60x36, points left (RTL). For LTR, scaleX(-1) applied via CSS. */
+        const ROCKET_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 36" width="60" height="36">
+  <defs>
+    <radialGradient id="rg1" cx="55%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#c8e8ff"/>
+      <stop offset="100%" stop-color="#2255aa"/>
+    </radialGradient>
+    <radialGradient id="rg2" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#aaddff"/>
+      <stop offset="100%" stop-color="#113388"/>
+    </radialGradient>
+    <radialGradient id="rg3" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#ffe080"/>
+      <stop offset="60%" stop-color="#ff6600"/>
+      <stop offset="100%" stop-color="#cc2200"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- thruster flame -->
+  <ellipse class="thruster-glow" cx="57" cy="18" rx="6" ry="3.5" fill="url(#rg3)" filter="url(#glow)"/>
+  <!-- body -->
+  <ellipse cx="26" cy="18" rx="24" ry="11" fill="url(#rg1)" stroke="#1a3a8a" stroke-width="1"/>
+  <!-- nose cone -->
+  <polygon points="2,18 16,9 16,27" fill="#3377cc" stroke="#1a3a8a" stroke-width="1"/>
+  <!-- cockpit window -->
+  <ellipse cx="30" cy="15" rx="5" ry="4" fill="url(#rg2)" stroke="#88bbff" stroke-width="1"/>
+  <ellipse cx="29" cy="14" rx="2" ry="1.5" fill="rgba(255,255,255,.6)"/>
+  <!-- top fin -->
+  <polygon points="40,7 50,7 46,14" fill="#1a4a9a" stroke="#0a2a6a" stroke-width=".8"/>
+  <!-- bottom fin -->
+  <polygon points="40,29 50,29 46,22" fill="#1a4a9a" stroke="#0a2a6a" stroke-width=".8"/>
+  <!-- engine nozzle -->
+  <rect x="48" y="14" width="8" height="8" rx="2" fill="#223" stroke="#4488cc" stroke-width=".8"/>
+  <!-- stripe -->
+  <line x1="18" y1="9" x2="18" y2="27" stroke="#88bbff" stroke-width="1.2" opacity=".5"/>
+  <line x1="24" y1="7.5" x2="24" y2="28.5" stroke="#88bbff" stroke-width=".8" opacity=".3"/>
+</svg>`;
+
+        /* Generate asteroid SVG for a given answer label */
+        function asteroidSVG(label, rowIdx) {
+            /* Different rocky colour palette per row */
+            const palettes = [
+                { c1:'#6a4020', c2:'#9a6030', c3:'#c0884a', s:'#4a2810' },
+                { c1:'#2a4a20', c2:'#3a6a2a', c3:'#5a8a3a', s:'#1a3010' },
+                { c1:'#20304a', c2:'#2a4a6a', c3:'#3a6a8a', s:'#10203a' }
+            ];
+            const p = palettes[rowIdx % 3];
+            const rx = 44, ry = 26;
+            /* polygon points for a rough rocky outline (12-sided irregular shape) */
+            const pts = [
+                [44,3],[55,8],[62,15],[63,22],[58,30],[50,34],[40,36],[30,35],
+                [20,33],[12,27],[8,19],[10,10],[18,4],[30,1]
+            ].map(([x,y])=>`${x},${y}`).join(' ');
+            return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 38" width="90" height="55" class="ast-svg">
+  <defs>
+    <radialGradient id="ag${rowIdx}" cx="38%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="${p.c3}"/>
+      <stop offset="50%" stop-color="${p.c2}"/>
+      <stop offset="100%" stop-color="${p.c1}"/>
+    </radialGradient>
+  </defs>
+  <polygon points="${pts}" fill="url(#ag${rowIdx})" stroke="${p.s}" stroke-width="1.5"/>
+  <!-- surface cracks / craters -->
+  <ellipse cx="28" cy="12" rx="4" ry="2.5" fill="${p.c1}" opacity=".6"/>
+  <ellipse cx="50" cy="26" rx="5" ry="3" fill="${p.c1}" opacity=".5"/>
+  <ellipse cx="40" cy="8" rx="2.5" ry="2" fill="${p.c1}" opacity=".4"/>
+  <line x1="20" y1="18" x2="32" y2="22" stroke="${p.s}" stroke-width="1" opacity=".5"/>
+  <line x1="44" y1="14" x2="55" y2="20" stroke="${p.s}" stroke-width="1" opacity=".4"/>
+</svg>`;
+        }
+
+        /* Explosion SVG burst */
+        function explosionSVG() {
+            return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 55" width="90" height="55">
+  <defs>
+    <radialGradient id="eg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff"/>
+      <stop offset="30%" stop-color="#ffcc00"/>
+      <stop offset="70%" stop-color="#ff4400"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="45" cy="27.5" rx="42" ry="25" fill="url(#eg)" opacity=".9"/>
+  <polygon points="45,2 50,20 68,10 55,26 72,27 55,32 65,48 46,35 42,54 40,35 22,47 34,31 18,28 35,24 24,10 42,22" fill="#ffee44" opacity=".7"/>
+</svg>`;
+        }
+
+        /* ---- rendering helpers ---- */
+        function rowTop(row) {
+            /* Returns the top % of a row in the game area */
+            return (row / ROWS * 100) + '%';
+        }
+        function rowHeight() { return (1 / ROWS * 100) + '%'; }
+
+        function updateRocketRow() {
+            const wrap = document.getElementById('rocket-wrap');
+            if (!wrap) return;
+            const area = document.getElementById('game-area');
+            gameAreaH = area ? area.clientHeight : gameAreaH;
+            const rowH = gameAreaH / ROWS;
+            const top = rocketRow * rowH + rowH / 2;
+            wrap.style.top = top + 'px';
+            wrap.style.transform = 'translateY(-50%)';
+
+            /* row highlights */
+            for (let r = 0; r < ROWS; r++) {
+                const el = document.getElementById('row-' + r);
+                if (el) {
+                    if (r === rocketRow) el.classList.add('active-row');
+                    else el.classList.remove('active-row');
+                }
+            }
+        }
+
+        function moveRocket(dir) {
+            /* dir: -1 = up (decrements row), +1 = down (increments row) */
+            rocketRow = (rocketRow + dir + ROWS) % ROWS;
+            updateRocketRow();
+            /* brief scale pulse */
+            const wrap = document.getElementById('rocket-wrap');
+            if (wrap) {
+                wrap.classList.remove('rowpulse');
+                void wrap.offsetWidth; /* reflow to restart animation */
+                wrap.classList.add('rowpulse');
+                setTimeout(() => wrap.classList.remove('rowpulse'), 120);
+            }
+        }
+
+        /* ---- set (asteroid group) lifecycle ---- */
+        function spawnSet() {
+            if (gameState !== 'playing') return;
+            setResolved = false;
+            const prob = generateProblem();
+            const distractors = generateDistractors(prob.answer, prob.type);
+            /* assign answers to rows randomly */
+            const rows = [0, 1, 2];
+            for (let i = rows.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [rows[i], rows[j]] = [rows[j], rows[i]];
+            }
+            const correctRow = rows[0];
+            const answers = [0, 1, 2];
+            answers[correctRow] = prob.answer;
+            answers[rows[1]] = distractors[0];
+            answers[rows[2]] = distractors[1];
+
+            const dur = travelDuration();
+            currentSet = {
+                problem: prob,
+                correctRow,
+                answers,
+                triedRows: [],
+                spawnTime: performance.now(),
+                travelDuration: dur * 1000
+            };
+
+            /* update problem display */
+            const pd = document.getElementById('problem-display');
+            if (pd) pd.textContent = prob.question;
+
+            /* render asteroids */
+            for (let r = 0; r < ROWS; r++) {
+                const row = document.getElementById('row-' + r);
+                if (!row) continue;
+                /* remove existing asteroid if any */
+                const old = row.querySelector('.asteroid');
+                if (old) old.remove();
+                const old2 = row.querySelector('.laser');
+                if (old2) old2.remove();
+
+                const ast = document.createElement('div');
+                ast.className = 'asteroid';
+                ast.id = 'ast-' + r;
+                ast.innerHTML = asteroidSVG(answers[r], r) +
+                    '<span class="ast-label">' + answers[r] + '</span>';
+
+                /* start CSS animation */
+                const area = document.getElementById('game-area');
+                const w = area ? area.clientWidth : 320;
+                if (flyDir === 'rtl') {
+                    ast.style.right = (-110) + 'px';
+                    ast.style.animation = `flyRTL ${dur}s linear forwards`;
+                } else {
+                    ast.style.left = (-110) + 'px';
+                    ast.style.animation = `flyLTR ${dur}s linear forwards`;
+                }
+
+                const capturedRow = r;
+                ast.addEventListener('click', () => onTapAsteroid(capturedRow));
+                row.appendChild(ast);
+            }
+        }
+
+        function resolveSet(row) {
+            if (!currentSet || setResolved) return;
+            setResolved = true;
+            const correct = (row === currentSet.correctRow);
+            if (correct) {
+                solved++;
+                totalSolvedEver++;
+                /* rocket correct flash */
+                triggerRocketAnim('correct');
+                /* explode correct asteroid */
+                explodeAsteroid(row, true);
+                /* flee others */
+                fleeAsteroids(row);
+                /* update HUD */
+                updateHUD();
+                if (gameState === 'playing' && solved >= targetProblems) {
+                    setTimeout(() => endGame(true), 500);
+                    return;
+                }
+                /* spawn next set */
+                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 500);
+            } else {
+                /* wrong collision — discard set immediately */
+                wrong++;
+                timeRemaining = Math.max(0, timeRemaining - 1);
+                triggerRocketAnim('wrong');
+                clearSet();
+                updateHUD();
+                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 400);
+            }
+        }
+
+        function onFire() {
+            if (!currentSet || setResolved || gameState !== 'playing') return;
+            /* ignore tried rows */
+            if (currentSet.triedRows.includes(rocketRow)) return;
+
+            const correct = (rocketRow === currentSet.correctRow);
+            fireLaser(rocketRow, correct);
+
+            if (correct) {
+                currentSet.triedRows.push(rocketRow);
+                setResolved = true;
+                solved++;
+                totalSolvedEver++;
+                triggerRocketAnim('correct');
+                setTimeout(() => {
+                    explodeAsteroid(rocketRow, true);
+                    fleeAsteroids(rocketRow);
+                }, 120);
+                updateHUD();
+                if (gameState === 'playing' && solved >= targetProblems) {
+                    setTimeout(() => endGame(true), 600);
+                    return;
+                }
+                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 600);
+            } else {
+                wrong++;
+                timeRemaining = Math.max(0, timeRemaining - 1);
+                currentSet.triedRows.push(rocketRow);
+                /* dim asteroid */
+                const ast = document.getElementById('ast-' + rocketRow);
+                if (ast) ast.classList.add('tried');
+                triggerRocketAnim('wrong');
+                updateHUD();
+            }
+        }
+
+        function onTapAsteroid(row) {
+            if (!currentSet || setResolved || gameState !== 'playing') return;
+            if (rocketRow !== row) {
+                rocketRow = row;
+                updateRocketRow();
+            }
+            onFire();
+        }
+
+        function fleeAsteroids(survivedRow) {
+            for (let r = 0; r < ROWS; r++) {
+                if (r === survivedRow) continue;
+                const ast = document.getElementById('ast-' + r);
+                if (!ast) continue;
+                /* cancel fly animation and apply flee */
+                ast.style.animation = 'none';
+                void ast.offsetWidth;
+                const dist = flyDir === 'rtl' ? '-150vw' : '150vw';
+                ast.style.transition = 'transform .35s ease-in';
+                ast.style.transform = 'translateY(-50%) translateX(' + dist + ')';
+                setTimeout(() => { if (ast.parentNode) ast.remove(); }, 380);
+            }
+        }
+
+        function explodeAsteroid(row, correct) {
+            const rowEl = document.getElementById('row-' + row);
+            const ast = document.getElementById('ast-' + row);
+            if (!rowEl) return;
+            /* get current position of asteroid before removing */
+            let posStyle = '';
+            if (ast) {
+                if (flyDir === 'rtl') posStyle = 'right:' + (ast.style.right || '0px');
+                else posStyle = 'left:' + (ast.style.left || '0px');
+                ast.remove();
+            }
+            const ex = document.createElement('div');
+            ex.className = 'explode-el';
+            ex.innerHTML = explosionSVG();
+            if (posStyle) ex.style.cssText = posStyle;
+            else {
+                if (flyDir === 'rtl') ex.style.right = '80px';
+                else ex.style.left = '80px';
+            }
+            rowEl.appendChild(ex);
+            setTimeout(() => { if (ex.parentNode) ex.remove(); }, 460);
+        }
+
+        function clearSet() {
+            for (let r = 0; r < ROWS; r++) {
+                const ast = document.getElementById('ast-' + r);
+                if (ast) ast.remove();
+                const laser = document.getElementById('laser-' + r);
+                if (laser) laser.remove();
+            }
+            currentSet = null;
+        }
+
+        function fireLaser(row, correct) {
+            const rowEl = document.getElementById('row-' + row);
+            if (!rowEl) return;
+            const area = document.getElementById('game-area');
+            const areaW = area ? area.clientWidth : 320;
+
+            const laser = document.createElement('div');
+            laser.className = 'laser ' + (correct ? 'ok' : 'bad');
+            laser.id = 'laser-' + row;
+
+            /* rocket is 60px wide, positioned 8px from edge */
+            const rocketEdge = 8 + 60; /* px from right (RTL) or left (LTR) */
+            /* asteroid is ~90px wide, we aim at its center (~45px in from its edge) */
+            /* In RTL: laser goes from rocket (right side) to asteroid center */
+            if (flyDir === 'rtl') {
+                laser.style.right = rocketEdge + 'px';
+                laser.style.width = (areaW - rocketEdge - 45) + 'px';
+            } else {
+                laser.style.left = rocketEdge + 'px';
+                laser.style.width = (areaW - rocketEdge - 45) + 'px';
+            }
+            rowEl.appendChild(laser);
+            setTimeout(() => { if (laser.parentNode) laser.remove(); }, 160);
+        }
+
+        function triggerRocketAnim(type) {
+            const wrap = document.getElementById('rocket-wrap');
+            if (!wrap) return;
+            wrap.classList.remove('correct', 'wrong');
+            void wrap.offsetWidth;
+            wrap.classList.add(type);
+            setTimeout(() => wrap.classList.remove(type), type === 'correct' ? 220 : 320);
+        }
+
+        /* ---- RAF loop (collision detection) ---- */
+        function rafLoop(now) {
+            if (gameState !== 'playing') return;
+            rafId = requestAnimationFrame(rafLoop);
+            if (!currentSet || setResolved) return;
+            const elapsed = now - currentSet.spawnTime;
+            if (elapsed >= currentSet.travelDuration) {
+                /* collision */
+                resolveSet(rocketRow);
+            }
+        }
+
+        /* ---- timer ---- */
+        function onTick() {
+            if (gameState !== 'playing') return;
+            elapsedS++;
+            timeRemaining = Math.max(0, timeRemaining - 1);
+            updateHUD();
+            if (timeRemaining <= 0) endGame(false);
+        }
+
+        function updateHUD() {
+            const tEl = document.getElementById('hud-timer');
+            if (tEl) {
+                const m = Math.floor(timeRemaining / 60);
+                const s = timeRemaining % 60;
+                tEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+            }
+            const pbar = document.getElementById('hud-progbar');
+            if (pbar) {
+                const pct = Math.min(100, Math.round(solved / targetProblems * 100));
+                pbar.style.width = pct + '%';
+            }
+            const cst = document.getElementById('ctrl-stats');
+            if (cst) cst.innerHTML = 'Shot: ' + solved + ' / ' + targetProblems + '<br>Wrong: ' + wrong;
+            const sbar = document.getElementById('stats-bar-txt');
+            if (sbar) sbar.innerHTML = 'Shot: ' + solved + ' / ' + targetProblems + '&nbsp;&nbsp;Wrong: ' + wrong;
+        }
+
+        /* ---- screens ---- */
+        function formatHMS(s) {
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            return h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+        }
+
+        function renderError(msg) {
+            document.getElementById('screen').innerHTML =
+                '<div class="error-screen"><p>' + msg + '</p>' +
+                '<a class="back-link" href="/dyn">\u2190 Back to Games</a></div>';
+        }
+
+        function renderSetup() {
+            gameState = 'setup';
+            document.getElementById('screen').innerHTML =
+                '<div class="setup-screen">' +
+                '<h1>\ud83d\ude80 Shoot Math</h1>' +
+                '<p>Choose which types of problems to include:</p>' +
+                '<div class="setup-opts">' +
+                '<label class="setup-opt"><input type="checkbox" id="chk-mul" checked> Table multiplication</label>' +
+                '<label class="setup-opt"><input type="checkbox" id="chk-add" checked> Addition</label>' +
+                '<label class="setup-opt"><input type="checkbox" id="chk-sub" checked> Subtraction</label>' +
+                '</div>' +
+                '<hr class="setup-divider">' +
+                '<p>Direction:</p>' +
+                '<div class="direction-group">' +
+                '<label><input type="radio" name="dir" value="rtl" id="dir-rtl" checked> Asteroids fly right \u2192 left</label>' +
+                '<label><input type="radio" name="dir" value="ltr" id="dir-ltr"> Asteroids fly left \u2192 right</label>' +
+                '</div>' +
+                '<button class="start-btn" id="start-btn">Start Game!</button>' +
+                '</div>';
+
+            const updateBtn = () => {
+                const any = document.getElementById('chk-mul').checked ||
+                    document.getElementById('chk-add').checked ||
+                    document.getElementById('chk-sub').checked;
+                document.getElementById('start-btn').disabled = !any;
+            };
+            ['chk-mul','chk-add','chk-sub'].forEach(id => {
+                document.getElementById(id).addEventListener('change', updateBtn);
+            });
+            document.getElementById('start-btn').addEventListener('click', () => {
+                selectedTypes = [];
+                if (document.getElementById('chk-mul').checked) selectedTypes.push('mul');
+                if (document.getElementById('chk-add').checked) selectedTypes.push('add');
+                if (document.getElementById('chk-sub').checked) selectedTypes.push('sub');
+                flyDir = document.getElementById('dir-rtl').checked ? 'rtl' : 'ltr';
+                startGame();
+            });
+        }
+
+        function renderPlaying() {
+            if (flyDir === 'ltr') document.body.classList.add('ltr');
+            else document.body.classList.remove('ltr');
+
+            /* Game area: 3 row divs + rocket + star layers */
+            let rowsHtml = '';
+            for (let r = 0; r < ROWS; r++) {
+                rowsHtml += '<div class="row" id="row-' + r + '" style="top:' +
+                    (r / ROWS * 100) + '%;height:' + (1 / ROWS * 100) + '%"></div>';
+            }
+
+            /* Rocket position */
+            const rocketPos = flyDir === 'rtl'
+                ? 'right:8px;top:50%;transform:translateY(-50%)'
+                : 'left:8px;top:50%;transform:translateY(-50%);transform:translateY(-50%) scaleX(-1)';
+
+            document.getElementById('screen').innerHTML =
+                '<div class="game-col">' +
+                  '<div class="header-bar">' +
+                    '<span class="header-title">\ud83d\ude80 Shoot Math</span>' +
+                    '<span class="timer" id="hud-timer">--:--</span>' +
+                    '<div class="prog-wrap"><div class="prog-bar" id="hud-progbar" style="width:0%"></div></div>' +
+                  '</div>' +
+                  '<div class="game-area" id="game-area">' +
+                    '<div class="star-layer s1"></div>' +
+                    '<div class="star-layer s2"></div>' +
+                    '<div class="star-layer s3"></div>' +
+                    rowsHtml +
+                    '<div class="rocket-wrap" id="rocket-wrap" style="' + rocketPos + '">' +
+                      ROCKET_SVG +
+                    '</div>' +
+                  '</div>' +
+                  '<div class="stats-bar"><span id="stats-bar-txt">Shot: 0 / ' + targetProblems + '&nbsp;&nbsp;Wrong: 0</span></div>' +
+                '</div>' +
+                '<div class="control-col">' +
+                  '<div class="problem-display" id="problem-display">Get ready&hellip;</div>' +
+                  '<div class="move-btns">' +
+                    '<button class="move-btn" id="btn-up">\u25b2</button>' +
+                    '<button class="fire-btn" id="btn-fire">\ud83d\udd25 FIRE</button>' +
+                    '<button class="move-btn" id="btn-dn">\u25bc</button>' +
+                  '</div>' +
+                  '<div class="ctrl-stats" id="ctrl-stats">Shot: 0 / ' + targetProblems + '<br>Wrong: 0</div>' +
+                '</div>';
+
+            document.getElementById('btn-up').addEventListener('click', () => moveRocket(-1));
+            document.getElementById('btn-dn').addEventListener('click', () => moveRocket(1));
+            document.getElementById('btn-fire').addEventListener('click', onFire);
+
+            /* Correct rocket position after DOM is ready */
+            requestAnimationFrame(updateRocketRow);
+        }
+
+        function renderEnd(win) {
+            stopGame();
+            const earned = Math.floor(creditsS * solved / targetProblems);
+            const submitCredit = Math.min(earned, creditsS);
+            const bonus = Math.max(0, solved - targetProblems);
+
+            let html = '<div class="end-screen ' + (win ? 'win-screen' : '') + '">';
+            if (win) {
+                html += '<h1 class="win-title">BULLSEYE! YOU WIN!</h1>';
+                html += '<p class="stat">You solved <b>' + solved + ' / ' + targetProblems + '</b></p>';
+                if (bonus > 0) html += '<p class="bonus">(+' + bonus + ' BONUS problem' + (bonus > 1 ? 's' : '') + '! \ud83c\udfc6)</p>';
+            } else {
+                html += '<h1>TIME\'S UP!</h1>';
+                html += '<p class="stat">You solved <b>' + solved + ' / ' + targetProblems + '</b></p>';
+            }
+            html += '<p class="stat">Credits earned: <b>' + formatHMS(submitCredit) + '</b></p>';
+            html += '<div id="banner-area"><p class="claiming">Saving your credits\u2026</p></div>';
+            html += '<a class="back-link" href="/dyn">\u2190 Back to Games</a>';
+            html += '</div>';
+
+            document.getElementById('screen').innerHTML = html;
+            claimCredits(submitCredit);
+        }
+
+        /* ---- credit claim ---- */
+        function claimCredits(submitCredit) {
+            fetch('/api/activities/credit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    device_idx: deviceIdx,
+                    act_id: actId,
+                    credits_s: submitCredit,
+                    completion_time_s: elapsedS,
+                    pin: pin,
+                    token: token
+                })
+            }).then(r => {
+                if (r.ok) return r.json().then(d => showBanner('ok', '\ud83c\udf89 Credits added! Counter: ' + (d.new_counter_hms || '')));
+                if (r.status === 403) { showBanner('err', '\u26d4 Not authorised \u2014 please go back and start a new game.'); return; }
+                if (r.status === 429) { showBanner('warn', '\u23f0 Daily limit reached \u2014 come back tomorrow!'); return; }
+                showBannerRetry('Network error (HTTP ' + r.status + ') \u2014', submitCredit);
+            }).catch(() => {
+                showBannerRetry('Network error \u2014', submitCredit);
+            });
+        }
+
+        function showBanner(type, msg) {
+            const area = document.getElementById('banner-area');
+            if (area) area.innerHTML = '<div class="banner ' + type + '">' + msg + '</div>';
+        }
+
+        function showBannerRetry(msg, submitCredit) {
+            const area = document.getElementById('banner-area');
+            if (!area) return;
+            area.innerHTML = '<div class="banner err">' + msg + ' please try again.' +
+                '<br><button class="retry-btn" id="retry-btn">Try again</button></div>';
+            document.getElementById('retry-btn').addEventListener('click', () => {
+                area.innerHTML = '<p class="claiming">Saving your credits\u2026</p>';
+                claimCredits(submitCredit);
+            });
+        }
+
+        /* ---- game flow ---- */
+        function endGame(win) {
+            gameState = 'end';
+            clearSet();
+            renderEnd(win);
+        }
+
+        function stopGame() {
+            if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+            if (tickId) { clearInterval(tickId); tickId = null; }
+        }
+
+        /* ---- keyboard ---- */
+        document.addEventListener('keydown', e => {
+            if (gameState !== 'playing') return;
+            if (e.key === 'ArrowUp')   { moveRocket(-1); e.preventDefault(); }
+            else if (e.key === 'ArrowDown') { moveRocket(1); e.preventDefault(); }
+            else if (e.key === ' ')    { onFire(); e.preventDefault(); }
+        });
+
+        /* ---- start ---- */
+        function startGame() {
+            targetProblems = Math.max(3, Math.floor(timeLimitS * EARN_FRACTION / SECS_PER_PROBLEM));
+            timeRemaining  = timeLimitS;
+            solved = 0; wrong = 0; elapsedS = 0;
+            rocketRow = 1;
+            currentSet = null; setResolved = false;
+            totalSolvedEver = 0; recentProblems = []; lastRafTime = null;
+            gameState = 'playing';
+
+            renderPlaying();
+
+            /* start first set after a short ready pause */
+            setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 600);
+
+            rafId  = requestAnimationFrame(rafLoop);
+            tickId = setInterval(onTick, 1000);
+
+            updateHUD();
+        }
+
+        /* ---- init ---- */
+        (function init() {
+            const missing = [];
+            if (!pin)    missing.push('pin');
+            if (!token)  missing.push('token');
+            if (!actId)  missing.push('act_id');
+            if (!creditsS)  missing.push('credits_s');
+            if (!timeLimitS) missing.push('time_limit_s');
+            if (!_p.has('device_idx')) missing.push('device_idx');
+            if (missing.length > 0) {
+                renderError('Oops! Missing game parameters (' + missing.join(', ') + '). Please go back to the games page.');
+                return;
+            }
+            renderSetup();
+        })();
+    </script>
+</body>
+
+</html>
