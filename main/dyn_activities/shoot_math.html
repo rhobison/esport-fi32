@@ -264,9 +264,25 @@
             text-shadow: 0 1px 4px rgba(0, 0, 0, .9), 0 0 8px rgba(0, 0, 0, .8)
         }
 
-        .asteroid.tried {
-            opacity: .5;
-            filter: drop-shadow(0 0 4px #ff4444)
+        .asteroid.wrong-hit {
+            animation: astWrongHit .25s ease forwards
+        }
+
+        @keyframes astWrongHit {
+            0% {
+                filter: brightness(1);
+                transform: translateY(-50%) scale(1)
+            }
+
+            35% {
+                filter: brightness(3) drop-shadow(0 0 14px #ff2200);
+                transform: translateY(-50%) scale(1.25)
+            }
+
+            100% {
+                filter: brightness(.7) drop-shadow(0 0 8px #ff4444);
+                transform: translateY(-50%) scale(.9)
+            }
         }
 
         .asteroid.tried .ast-svg ellipse {
@@ -1083,14 +1099,25 @@
                 /* spawn next set */
                 setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 500);
             } else {
-                /* wrong collision — all asteroids flee */
+                /* wrong collision — flash hit asteroid, then all flee */
                 wrong++;
                 timeRemaining = Math.max(0, timeRemaining - 1);
                 triggerRocketAnim('wrong');
                 updateHUD();
-                fleeAsteroids(-1);
-                currentSet = null;
-                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 450);
+                /* freeze & flash the hit asteroid red before fleeing */
+                const hitAst = document.getElementById('ast-' + rocketRow);
+                if (hitAst) {
+                    const areaEl = document.getElementById('game-area');
+                    const areaRect = areaEl ? areaEl.getBoundingClientRect() : { left: 0 };
+                    const fl = hitAst.getBoundingClientRect().left - areaRect.left;
+                    hitAst.style.animation = '';
+                    hitAst.style.left = fl + 'px';
+                    hitAst.style.right = '';
+                    void hitAst.offsetWidth;
+                    hitAst.classList.add('wrong-hit');
+                }
+                setTimeout(() => { fleeAsteroids(-1); currentSet = null; }, 260);
+                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 500);
             }
         }
 
@@ -1116,15 +1143,27 @@
                 }
                 setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 620);
             } else {
-                /* wrong shot — brief red visual, then all asteroids flee */
+                /* wrong shot — flash hit asteroid red, then all flee */
                 wrong++;
                 timeRemaining = Math.max(0, timeRemaining - 1);
                 triggerRocketAnim('wrong');
                 updateHUD();
+                /* freeze & flash the targeted asteroid before fleeing */
+                const hitAst = document.getElementById('ast-' + rocketRow);
+                if (hitAst) {
+                    const areaEl = document.getElementById('game-area');
+                    const areaRect = areaEl ? areaEl.getBoundingClientRect() : { left: 0 };
+                    const fl = hitAst.getBoundingClientRect().left - areaRect.left;
+                    hitAst.style.animation = '';
+                    hitAst.style.left = fl + 'px';
+                    hitAst.style.right = '';
+                    void hitAst.offsetWidth;
+                    hitAst.classList.add('wrong-hit');
+                }
                 setTimeout(() => {
                     fleeAsteroids(-1);
                     currentSet = null;
-                }, 200);
+                }, 260);
                 setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 620);
             }
         }
@@ -1232,10 +1271,19 @@
             if (gameState !== 'playing') return;
             rafId = requestAnimationFrame(rafLoop);
             if (!currentSet || setResolved) return;
-            const elapsed = now - currentSet.spawnTime;
-            if (elapsed >= currentSet.travelDuration) {
-                /* collision */
-                resolveSet(rocketRow);
+            /* Position-based collision: fires when the asteroid's leading edge
+               reaches the rocket's nose tip, regardless of screen width. */
+            const ast = document.getElementById('ast-' + rocketRow);
+            const rktWrap = document.getElementById('rocket-wrap');
+            if (!ast || !rktWrap) return;
+            const astRect = ast.getBoundingClientRect();
+            const rktRect = rktWrap.getBoundingClientRect();
+            if (flyDir === 'rtl') {
+                /* asteroid travels left→right; right edge hits rocket's left face */
+                if (astRect.right >= rktRect.left) resolveSet(rocketRow);
+            } else {
+                /* asteroid travels right→left; left edge hits rocket's right face */
+                if (astRect.left <= rktRect.right) resolveSet(rocketRow);
             }
         }
 
