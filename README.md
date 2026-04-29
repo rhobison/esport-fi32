@@ -64,7 +64,8 @@ Shows in real time:
 
 ### Configuration Page (`/config`)
 
-![Configuration Page](docs/imgs/config.png)
+![Configuration Page](docs/imgs/config-1.png)
+![Configuration Page](docs/imgs/config-2.png)
 
 Lets you set all parameters without reflashing:
 - Home Wi-Fi credentials
@@ -86,9 +87,17 @@ Lets you set all parameters without reflashing:
 
 A parent-facing credit interface (requires Basic Auth). Select a child from the drop-down to view their assigned activities with **Credit** buttons. Clicking a button shows a confirmation dialog ("Credit 0:30:00 internet time?"); confirming adds the activity's configured internet time to the child's counter and plays a double-ding buzzer sound. The page shows the child's total counter (live-updated from `/api/status`) and a per-device credit log. The log separates today's entries from earlier ones with a shaded divider, making it easy to see what was credited today at a glance. Navigation to the management page and config is provided via blue styled buttons.
 
+![Activities](docs/imgs/activities-1.png)
+
 ### Activity Management (`/activities/manage`)
 
 Requires Basic Auth. Manage the global activity pool (up to 30 activities): create, rename, adjust credit times (`h:mm:ss`, auto-formatted as you type), daily time caps, and click limits. Assign or unassign activities per registered device. The "Add Activity" row is part of the same table as existing activities so all columns stay aligned.
+
+![Activity Maanger](docs/imgs/activity-mngr-1.png)
+
+Activity Assignment
+
+![Activity Maanger](docs/imgs/activity-mngr-2.png)
 
 ### Firmware Update OTA (`/ota`)
 
@@ -102,6 +111,73 @@ From the OTA page you can:
 - Change the OTA password via `/ota/pwd`
 
 After a successful upload the device reboots automatically. If the new firmware crashes before completing boot, the bootloader rolls back to the previous slot.
+
+---
+
+## Dynamic Activities (Mini-Games)
+
+Dynamic Activities extend the Activity Credits system with self-contained HTML mini-games embedded directly in the firmware binary.  Kids play them on the reward AP and earn internet credits autonomously — no parent needs to be present.
+
+The mini-games are designed as **educational games** — screen time is earned not just by being active on the bike, but by engaging the mind as well.  Rather than rewarding passive or repetitive tapping, each game is intended to reinforce a real skill: mental arithmetic, pattern recognition, spelling, memory, or similar cognitive exercises appropriate for school-age children.  The goal is to make the time a child spends earning screen time genuinely productive, so that even before the internet session begins, they have already practised something useful.
+
+Parents can tailor the experience by assigning specific games to each child and setting how much internet time each completed round is worth.  A game focused on multiplication tables might be worth more time than a simpler matching exercise, letting parents nudge children toward subjects where they need the most practice.  Daily limits prevent a child from grinding one easy game all day — they must either get on the bike or attempt a broader range of activities.
+
+**Example of a dynamic activity: Shoot Math**
+
+**Shoot Math: selection**
+
+![Shoot math - selection](docs/imgs/dyn-game-1.png)
+
+**Shoot Math: game**
+
+![Shoot math - game](docs/imgs/dyn-game-2.png)
+
+**Shoot Math: game over**
+
+![Shoot math - game over](docs/imgs/dyn-game-3.png)
+
+### Concept
+
+A dynamic activity is a single `.html` file compiled into the firmware.  It is served from `/dyn_activities/<name>` and plays entirely in the browser — no external resources, no back-end logic.  The game receives the device's PIN and activity parameters as URL query parameters and claims credits by calling `POST /api/activities/credit` with the device-bound PIN.
+
+### Admin setup (parent)
+
+1. Open `/activities/manage` (HTTP Basic Auth required).
+2. In the **Add Activity** row, tick **"Is Dynamic"**.
+3. Choose the mini-game name from the dropdown (populated from the embedded file list).
+4. Set a reference credit (`h:mm:ss`) and daily limit.
+5. Assign the activity to the target child's device.
+
+### Kid workflow
+
+1. On a registered device, navigate to `http://192.168.5.1/dyn` (or whatever the reward AP IP is).
+2. The firmware detects your device automatically (via ARP lookup).
+3. A button for each assigned mini-game appears — tap to launch.
+4. Play the game to earn **Credits**; internet time is added immediately.
+
+### PIN system
+
+Each registered device has a deterministic 8-character uppercase hex PIN computed as CRC32 of its 6-byte MAC address.  The PIN is injected automatically into each mini-game's URL by the `/dyn` page.  It is device-bound and prevents a child from crediting another device's counter.
+
+PIN-authenticated credit calls cannot exceed the activity's reference credit value (`credits_s` is silently capped to `activity.credit_s`).
+
+### Adding new mini-games
+
+1. Create a **self-contained `.html` file** in `main/dyn_activities/` (no external JS/CSS dependencies).
+2. Run `idf.py reconfigure` to regenerate the build files.
+3. Rebuild and reflash.
+4. The filename (without `.html`) becomes the logical name shown in the admin dropdown and used in URLs.
+
+**Automatic gzip compression**: every HTML file in `main/dyn_activities/` is
+gzip-compressed by CMake at configure time before being embedded in the firmware binary.
+No manual compression step is needed.  The HTTP server sends the compressed bytes
+with `Content-Encoding: gzip`; all modern browsers decompress transparently.
+
+To embed a specific file uncompressed (edge cases only), add its basename (e.g.
+`"my_activity.html"`) to the `DYN_ACT_NO_COMPRESS` list variable near the top of
+`main/CMakeLists.txt` before running `idf.py reconfigure`.
+
+For full technical detail see §5.13, §5.14, §6.10 in [docs/1-specification.md](docs/1-specification.md).
 
 ---
 
@@ -198,30 +274,39 @@ All parameters are stored in NVS and can be changed at runtime via the web UI.
 | `idle_session_interval_s`               | `30`    | Gap (s) with no pulses that closes a session                                                  |
 | `start_session_interval_s`              | `10`    | Continuous pedalling (s) required to open a session                                           |
 | `pulse_debounce_time_ms`                | `10`    | Minimum time (ms) between two accepted pulses                                                 |
-| `timezone`                              | `"UTC0"` | POSIX TZ string (e.g. `CET-1CEST,M3.5.0,M10.5.0/3`)                                        |
-| `soft_ap_dec_time_above_threshold_kbps` | `1`     | Per-device traffic threshold (kbps) below which countdown pauses                              |
+| `timezone`                              | `"CET-1CEST,M3.5.0,M10.5.0/3"` | POSIX TZ string for local time (e.g. `"UTC0"` for UTC, `"CET-1CEST,M3.5.0,M10.5.0/3"` for Central European) |
+| `soft_ap_dec_time_above_threshold_kbps` | `5`     | Per-device traffic threshold (kbps) below which countdown pauses                              |
 | `soft_ap_idle_throughput_timeout_s`     | `30`    | Seconds of low traffic per device before countdown actually pauses                             |
 | `min_speed_to_increment_time_kmh_x10`   | `30`    | Minimum speed (km/h x 10, e.g. `30` = 3.0 km/h) required for a pulse to earn credits; `0` disables the gate |
 | `buzzer_enabled`                        | `true`  | Enable/disable all buzzer audio feedback                                                      |
 | `config_password`                       | `"esport-fi32"` | Password for HTTP Basic Auth on all `/config` endpoints (username always `admin`). Change via `/config/pwd`. |
+| `activity_credit_buzzer_en`             | `true`  | Enable/disable the double-ding buzzer beep when an activity credit is applied                 |
 
 ---
 
 ## REST API
 
-| Endpoint               | Method     | Description                   |
-| ---------------------- | ---------- | ----------------------------- |
-| `/`                    | GET        | Status dashboard (HTML)       |
-| `/config`              | GET / POST | Configuration form (HTML) — **Basic Auth required** |
-| `/config/reset`        | POST       | Reset all settings to factory defaults — **Basic Auth required** |
-| `/config/pwd`          | GET / POST | Change config page password — **Basic Auth required** |
-| `/api/status`          | GET        | Live state as JSON            |
-| `/api/sessions`        | GET        | Session history as JSON       |
-| `/api/sessions/export` | GET        | Download CSV or JSON report   |
-| `/api/sessions/daily`  | GET        | Daily aggregates for charting |
-| `/ota`                 | GET        | Firmware update page (Basic Auth) |
-| `/ota`                 | POST       | Upload `.bin` and flash (Basic Auth) |
-| `/ota/pwd`             | GET / POST | Change OTA password (Basic Auth) |
+| Endpoint                    | Method     | Description                   |
+| --------------------------- | ---------- | ----------------------------- |
+| `/`                         | GET        | Status dashboard (HTML)       |
+| `/config`                   | GET / POST | Configuration form (HTML) — **Basic Auth required** |
+| `/config/reset`             | POST       | Reset all settings to factory defaults — **Basic Auth required** |
+| `/config/pwd`               | GET / POST | Change config page password — **Basic Auth required** |
+| `/api/status`               | GET        | Live state as JSON            |
+| `/api/sessions`             | GET        | Session history as JSON       |
+| `/api/sessions/export`      | GET        | Download CSV or JSON report   |
+| `/api/sessions/daily`       | GET        | Daily aggregates for charting |
+| `/activities`               | GET        | Activity credits award page — **Basic Auth required** |
+| `/activities/manage`        | GET / POST | Activity pool and assignment management — **Basic Auth required** |
+| `/api/activities`           | GET        | Activity list as JSON (optional `device_idx` filter) |
+| `/api/activities/credit`    | POST       | Credit an activity to a device — **Basic Auth or device PIN required** |
+| `/api/activities/log`       | GET        | Per-device credit log as JSON (`device_idx` required) |
+| `/dyn`                      | GET        | Dynamic activities (mini-games) launcher page |
+| `/dyn_activities/*`         | GET        | Serve embedded mini-game HTML files |
+| `/api/dyn`                  | GET        | Mini-game metadata and device PIN for a device (`device_idx` required) |
+| `/ota`                      | GET        | Firmware update page (Basic Auth) |
+| `/ota`                      | POST       | Upload `.bin` and flash (Basic Auth) |
+| `/ota/pwd`                  | GET / POST | Change OTA password (Basic Auth) |
 
 ---
 
@@ -235,74 +320,31 @@ main/
     config_manager.c          # NVS-backed configuration
     device_registry.c         # Per-device MAC registry, counters & NVS persistence
     buzzer.c                  # Buzzer feedback: GPIO pattern engine
+    button_reset.c            # BOOT button long-press password reset
     wifi_manager.c            # AP+STA+NAT Wi-Fi management & per-MAC frame filter
     time_manager.c            # SNTP / timezone
     pulse_input.c             # GPIO interrupt, debounce & speed calculation
     time_counter.c            # Credit counter & reward AP state machine
     session_tracker.c         # Exercise session detection
     session_log.c             # NVS ring-buffer session log
+    activity_manager.c        # Activity pool, user assignments, daily limits & credit log
+    dyn_nonce.c               # One-time nonce system for mini-game credit anti-replay
     http_server.c             # HTTP server core (init, URI registration)
     http_server_utils.c       # Shared HTML/JSON helpers
     http_server_config.c      # GET & POST /config handlers (incl. device management)
-    http_server_api.c         # GET /api/status and /api/sessions handlers
+    http_server_api.c         # JSON API handlers (/api/status, /api/sessions, /api/activities)
     http_server_export.c      # GET /api/sessions/export handler
     http_server_dashboard.c   # GET / status dashboard handler
+    http_server_activities.c  # GET /activities and /activities/manage handlers
+    http_server_dyn.c         # GET /dyn, /dyn_activities/* and /api/dyn handlers
     ota_manager.c             # OTA state machine; NVS credential storage; rollback cancel
     http_server_ota.c         # GET/POST /ota and /ota/pwd handlers (Basic Auth)
 docs/
   1-specification.md          # Full firmware specification
   2-development_plan.md       # Phased development plan
   3-fota_development_plan.md  # FOTA implementation plan
+  4-dynamic_activities_plan.md# Dynamic activities (mini-games) plan
 ```
-
----
-
-## Dynamic Activities (Mini-Games)
-
-Dynamic Activities extend the Activity Credits system with self-contained HTML mini-games embedded directly in the firmware binary.  Kids play them on the reward AP and earn internet credits autonomously — no parent needs to be present.
-
-### Concept
-
-A dynamic activity is a single `.html` file compiled into the firmware.  It is served from `/dyn_activities/<name>` and plays entirely in the browser — no external resources, no back-end logic.  The game receives the device's PIN and activity parameters as URL query parameters and claims credits by calling `POST /api/activities/credit` with the device-bound PIN.
-
-### Admin setup (parent)
-
-1. Open `/activities/manage` (HTTP Basic Auth required).
-2. In the **Add Activity** row, tick **"Is Dynamic"**.
-3. Choose the mini-game name from the dropdown (populated from the embedded file list).
-4. Set a reference credit (`h:mm:ss`) and daily limit.
-5. Assign the activity to the target child's device.
-
-### Kid workflow
-
-1. On a registered device, navigate to `http://192.168.5.1/dyn` (or whatever the reward AP IP is).
-2. The firmware detects your device automatically (via ARP lookup).
-3. A button for each assigned mini-game appears — tap to launch.
-4. Play the game to earn **Credits**; internet time is added immediately.
-
-### PIN system
-
-Each registered device has a deterministic 8-character uppercase hex PIN computed as CRC32 of its 6-byte MAC address.  The PIN is injected automatically into each mini-game's URL by the `/dyn` page.  It is device-bound and prevents a child from crediting another device's counter.
-
-PIN-authenticated credit calls cannot exceed the activity's reference credit value (`credits_s` is silently capped to `activity.credit_s`).
-
-### Adding new mini-games
-
-1. Create a **self-contained `.html` file** in `main/dyn_activities/` (no external JS/CSS dependencies).
-2. Run `idf.py reconfigure` to regenerate the build files.
-3. Rebuild and reflash.
-4. The filename (without `.html`) becomes the logical name shown in the admin dropdown and used in URLs.
-
-**Automatic gzip compression**: every HTML file in `main/dyn_activities/` is
-gzip-compressed by CMake at configure time before being embedded in the firmware binary.
-No manual compression step is needed.  The HTTP server sends the compressed bytes
-with `Content-Encoding: gzip`; all modern browsers decompress transparently.
-
-To embed a specific file uncompressed (edge cases only), add its basename (e.g.
-`"my_activity.html"`) to the `DYN_ACT_NO_COMPRESS` list variable near the top of
-`main/CMakeLists.txt` before running `idf.py reconfigure`.
-
-For full technical detail see §5.13, §5.14, §6.10 in [docs/1-specification.md](docs/1-specification.md).
 
 ---
 
