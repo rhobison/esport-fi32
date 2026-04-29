@@ -1613,16 +1613,22 @@ Each asteroid is a `<div>` absolutely positioned within its row:
   `calc(100% - 68px)` (travels left→right toward rocket on right); LTR: `right` from
   `-110px` to `calc(100% - 68px)` (travels right→left toward rocket on left); duration
   from the speed tier table.
-- **Wrong shot or collision**: the struck asteroid's laser flashes red; then all
-  asteroids in the set flee off-screen immediately and a new set spawns.
-- **Correct explosion**: CSS `@keyframes` orange/yellow radial burst, 400 ms (same
+- **Wrong shot or collision**: the struck asteroid immediately plays
+  `@keyframes astWrongHit` — a 250 ms CSS animation that brightens the asteroid,
+  adds a red `drop-shadow`, and scales it up briefly (`scale(1.25)`) before
+  shrinking back.  After 260 ms all three asteroids in the set flee off-screen and a
+  new set spawns.  The laser colour is also red for wrong shots.
+- **Correct explosion**: CSS `@keyframes` orange/yellow radial burst, 450 ms (same
   pattern as `space_math.html`); element removed from DOM after animation completes.
 - **Flee animation**: on a correct hit, the two surviving asteroids play
   `transform: translateX(+150vw)` (RTL) or `translateX(-150vw)` (LTR) with
   `transition: transform 0.35s ease-in`, then are removed from DOM.
-- **Collision**: when `setAge >= travelDuration`, the answer evaluation fires
-  immediately.  The collision itself is not separately animated; the rocket's
-  correct/wrong reaction plays instead.
+- **Collision**: detected in the RAF loop using `getBoundingClientRect()`.  The
+  collision fires the moment the asteroid's **leading edge** (right edge in RTL,
+  left edge in LTR) touches the rocket's **nose tip** — i.e. when
+  `astRect.right >= rktRect.left` (RTL) or `astRect.left <= rktRect.right` (LTR).
+  This is screen-width-independent and fires visually at first contact, not at
+  animation completion.
 
 ### Laser Visual Specification
 
@@ -1642,15 +1648,16 @@ When FIRE is triggered (FIRE button, Space key, or tap-asteroid):
 - At game start the first set of 3 asteroids spawns immediately.
 - A new set spawns as soon as the previous set is fully resolved.
 - All 3 asteroids in a set are spawned simultaneously and share the same travel duration.
-- Travel progress is tracked in JS by comparing `Date.now()` against `set.spawnTime`.
-  Asteroid visual position is driven by a CSS `@keyframes` animation whose duration
-  matches the travel time; JS only reads the elapsed fraction to decide when collision
-  occurs.
-- When `elapsed >= travelDuration`:
+- Asteroid visual position is driven by a CSS `@keyframes` animation whose duration
+  matches the travel time.  Collision is detected in the **RAF loop** using
+  `getBoundingClientRect()` — no elapsed-time threshold is used.
+- **Collision** (RAF loop fires per-frame):
+  - RTL: `ast.getBoundingClientRect().right >= rktWrap.getBoundingClientRect().left`
+  - LTR: `ast.getBoundingClientRect().left  <= rktWrap.getBoundingClientRect().right`
   - The asteroid in `rocketRow` is evaluated as the collision answer.
   - Correct → `solved++`; correct explosion; surviving asteroids flee; new set spawns.
-  - Wrong → `wrong++`; −1 s; red rocket shake; set is discarded; `solved` unchanged;
-    new set spawns.
+  - Wrong → `wrong++`; −1 s; `astWrongHit` flash (250 ms); red rocket shake; all
+    asteroids flee (260 ms delay); `solved` unchanged; new set spawns.
 - Only one set is active at a time; no overlapping sets.
 
 ### Background
