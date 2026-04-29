@@ -3923,7 +3923,7 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
        - `creditActivity(dev_idx, act_id, credits_s, btn)`: shows a `confirm()` dialog with the credit amount before posting. If confirmed, sends `POST /api/activities/credit` with JSON body; on success updates the total-credits display. If user cancels, does nothing.
        - `fetch('/api/status')` to update total credits display (using `devices[dev_idx].counter_hms`).
        - On log response: builds the credit log table. A shaded "Earlier" divider row is inserted between today's entries and older ones (comparison uses `timestamp_local.substring(0,10)` vs current date).
-       - Calls `loadUser(0)` on page load; calls `loadUser(dev_idx)` on combobox `change` event.
+       - On page load: reads the first option's value from `#user-select` and calls `loadUser` with it (i.e. `var sel=document.getElementById('user-select'); if(sel&&sel.options.length>0){loadUser(sel.options[0].value);}`). This correctly loads the first user in the combobox rather than hardcoding index 0. Calls `loadUser(dev_idx)` on combobox `change` event.
      - Navigation to `/activities/manage` and `/config` is provided as blue `a.btn`-styled buttons (consistent with dashboard Export buttons).
      - The page is self-contained; no external CSS/JS.
 
@@ -3968,6 +3968,7 @@ Create `http_server_activities.c` / `http_server_activities.h` handling four rou
 - [ ] `GET /activities` without credentials returns HTTP 401.
 - [ ] `GET /activities` with valid credentials returns HTTP 200 with HTML containing user combobox and JS.
 - [ ] `GET /activities` page JavaScript (by inspection): `loadUser()`, `creditActivity()`, combobox `change` handler are present.
+- [ ] On initial page open, the activity list and credit log for the **first user in the combobox** are displayed immediately (no manual user change required).
 - [ ] Clicking a **Credit** button shows a `confirm()` dialog before posting; cancelling aborts the request.
 - [ ] The credit log table shows a shaded "Earlier" divider row separating today's entries from older ones.
 - [ ] Navigation buttons on both pages use `a.btn` (blue, same as dashboard Export buttons).
