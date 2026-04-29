@@ -1329,7 +1329,8 @@ The player must:
 - Tapping an asteroid **directly** instantly snaps the rocket to that row and fires
   (immediate shot).
 - The **▲ / ▼** direction buttons (or keyboard Arrow keys) move the rocket one row at a
-  time without firing.
+  time without firing.  Movement is **clamped**: pressing ▲ at row 0 (top) or ▼ at row 2
+  (bottom) has no effect — the rocket does not wrap around.
 - The **FIRE** button (or **Space** key) fires a laser at the asteroid in the rocket's
   current row.
 - When the asteroid set reaches the rocket's side, the asteroid in the rocket's current
