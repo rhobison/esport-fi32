@@ -68,9 +68,9 @@ code changes are required.
 
 | # | Name | File | Status | Phases |
 | - | ---- | ---- | ------ | ------ |
-| 1 | Space Meteor Shower | `space_math.html` | Specified | A1.1, A1.2, A1.3 |
-| 2 | Clown Fish Bubble Burst | `fish_math.html` | Specified | A2.1, A2.2, A2.3 |
-| 3 | Rocket Asteroid Shooter | `shoot_math.html` | Specified | A3.1, A3.2, A3.3 |
+| 1 | Space Meteor Shower | `space_math.html` | Implemented | A1.1, A1.2, A1.3 |
+| 2 | Clown Fish Bubble Burst | `fish_math.html` | Implemented | A2.1, A2.2, A2.3 |
+| 3 | Rocket Asteroid Shooter | `shoot_math.html` | Implemented | A3.1, A3.2, A3.3 |
 
 > To add a new activity: assign it the next available number, add a row to this table,
 > and create its own `## Activity N` section followed by phases `AN.1` (Design),
