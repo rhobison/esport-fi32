@@ -1001,7 +1001,9 @@
 
         function moveRocket(dir) {
             /* dir: -1 = up (decrements row), +1 = down (increments row) */
-            rocketRow = (rocketRow + dir + ROWS) % ROWS;
+            const next = rocketRow + dir;
+            if (next < 0 || next >= ROWS) return; /* clamp — no wrap-around */
+            rocketRow = next;
             updateRocketRow();
             /* brief scale pulse */
             const wrap = document.getElementById('rocket-wrap');
