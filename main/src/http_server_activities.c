@@ -668,7 +668,8 @@ esp_err_t http_srv_activities_get_handler(httpd_req_t * p_req)
         "document.getElementById('total-credits').textContent="
         "'Total credits: '+d.devices[devIdx].counter_hms;}});}\n"
 
-        "loadUser(0);\n"
+        "var sel=document.getElementById('user-select');\n"
+        "if(sel&&sel.options.length>0){loadUser(sel.options[0].value);}\n"
         "</script>\n");
 
     APPEND("<div style='margin-top:1.5em'>"

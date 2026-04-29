@@ -476,7 +476,10 @@ esp_err_t http_srv_api_activities_get_handler(httpd_req_t * p_req)
         }
     }
 
-    char * p_buf = (char *)malloc(4096U);
+    /* Buffer must fit 30 entries × ~250 bytes/entry plus wrapper overhead.
+     * 4096 bytes is insufficient; 8192 bytes provides safe headroom. */
+#define ACT_JSON_BUF_LEN (8192U)
+    char * p_buf = (char *)malloc(ACT_JSON_BUF_LEN);
     if (NULL == p_buf)
     {
         httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -485,7 +488,7 @@ esp_err_t http_srv_api_activities_get_handler(httpd_req_t * p_req)
 
     size_t pos = 0U;
 
-#define ACT_APPEND(fmt, ...) pos += (size_t)snprintf(p_buf + pos, 4096U - pos, fmt, ##__VA_ARGS__)
+#define ACT_APPEND(fmt, ...) pos += (size_t)snprintf(p_buf + pos, ACT_JSON_BUF_LEN - pos, fmt, ##__VA_ARGS__)
 
     ACT_APPEND("{\"activities\":[");
 
@@ -552,6 +555,7 @@ esp_err_t http_srv_api_activities_get_handler(httpd_req_t * p_req)
     ACT_APPEND("]}");
 
 #undef ACT_APPEND
+#undef ACT_JSON_BUF_LEN
 
     httpd_resp_set_type(p_req, "application/json");
     httpd_resp_send(p_req, p_buf, HTTPD_RESP_USE_STRLEN);
@@ -801,7 +805,9 @@ esp_err_t http_srv_api_activities_log_get_handler(httpd_req_t * p_req)
 
     uint8_t actual = act_mngr_credit_log_read(dev_idx, p_log, log_cnt);
 
-    char * p_buf = (char *)malloc(4096U);
+    /* 30 log entries × ~200 bytes/entry requires more than 4096 bytes. */
+#define LOG_JSON_BUF_LEN (8192U)
+    char * p_buf = (char *)malloc(LOG_JSON_BUF_LEN);
     if (NULL == p_buf)
     {
         free(p_log);
@@ -811,7 +817,7 @@ esp_err_t http_srv_api_activities_log_get_handler(httpd_req_t * p_req)
 
     size_t pos = 0U;
 
-#define LOG_APPEND(fmt, ...) pos += (size_t)snprintf(p_buf + pos, 4096U - pos, fmt, ##__VA_ARGS__)
+#define LOG_APPEND(fmt, ...) pos += (size_t)snprintf(p_buf + pos, LOG_JSON_BUF_LEN - pos, fmt, ##__VA_ARGS__)
 
     LOG_APPEND("{\"log\":[");
 
@@ -862,6 +868,7 @@ esp_err_t http_srv_api_activities_log_get_handler(httpd_req_t * p_req)
     LOG_APPEND("]}");
 
 #undef LOG_APPEND
+#undef LOG_JSON_BUF_LEN
 
     free(p_log);
 
