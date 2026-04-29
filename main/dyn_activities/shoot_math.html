@@ -6,18 +6,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Shoot Math Asteroids</title>
     <style>
-        * { box-sizing: border-box }
+        * {
+            box-sizing: border-box
+        }
+
         body {
-            margin: 0; padding: 0;
+            margin: 0;
+            padding: 0;
             background: #0a0a2e;
             font-family: sans-serif;
             color: #fff;
             padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
             display: flex;
             flex-direction: column;
-            height: 100vh; height: 100dvh;
+            height: 100vh;
+            height: 100dvh;
             overflow: hidden
         }
+
         #screen {
             display: flex;
             flex-direction: column;
@@ -25,6 +31,7 @@
             min-height: 0;
             overflow: hidden
         }
+
         :root {
             font-size: 16px;
             --bg: #0a0a2e;
@@ -36,10 +43,10 @@
             --laser-color: #4af;
             --laser-wrong: #ff4444;
             --thruster: #ff8c00;
-            --row-tint: rgba(255,233,74,0.08);
-            --star1: rgba(255,255,255,.6);
-            --star2: rgba(200,220,255,.5);
-            --star3: rgba(180,200,255,.4)
+            --row-tint: rgba(255, 233, 74, 0.08);
+            --star1: rgba(255, 255, 255, .6);
+            --star2: rgba(200, 220, 255, .5);
+            --star3: rgba(180, 200, 255, .4)
         }
 
         /* landscape: row; portrait: column (default) */
@@ -50,6 +57,7 @@
             min-width: 0;
             overflow: hidden
         }
+
         .control-col {
             display: flex;
             flex-direction: column;
@@ -58,7 +66,10 @@
         }
 
         @media(orientation:landscape) {
-            #screen { flex-direction: row }
+            #screen {
+                flex-direction: row
+            }
+
             .control-col {
                 width: 200px;
                 border-left: 1px solid #1a1a4a;
@@ -66,10 +77,17 @@
                 gap: 6px
             }
         }
+
         /* LTR: mirror - control panel moves to left */
         @media(orientation:landscape) {
-            body.ltr #screen { flex-direction: row-reverse }
-            body.ltr .control-col { border-left: none; border-right: 1px solid #1a1a4a }
+            body.ltr #screen {
+                flex-direction: row-reverse
+            }
+
+            body.ltr .control-col {
+                border-left: none;
+                border-right: 1px solid #1a1a4a
+            }
         }
 
         @media(orientation:portrait) {
@@ -83,8 +101,18 @@
                 gap: 6px
             }
         }
-        @media(max-width:400px) { :root { font-size: 13px } }
-        @media(orientation:landscape)and(max-height:500px) { :root { font-size: 12px } }
+
+        @media(max-width:400px) {
+            :root {
+                font-size: 13px
+            }
+        }
+
+        @media(orientation:landscape)and(max-height:500px) {
+            :root {
+                font-size: 12px
+            }
+        }
 
         /* header */
         .header-bar {
@@ -92,17 +120,24 @@
             align-items: center;
             gap: .5em;
             padding: .3em .6em;
-            background: rgba(0,0,30,.75);
+            background: rgba(0, 0, 30, .75);
             flex-shrink: 0;
             flex-wrap: wrap
         }
-        .header-title { font-weight: bold; font-size: 1em; margin-right: auto }
+
+        .header-title {
+            font-weight: bold;
+            font-size: 1em;
+            margin-right: auto
+        }
+
         .timer {
             font-size: 1.1em;
             font-variant-numeric: tabular-nums;
             min-width: 3.5em;
             text-align: right
         }
+
         .prog-wrap {
             flex: 1 1 60px;
             height: .7em;
@@ -111,6 +146,7 @@
             overflow: hidden;
             min-width: 40px
         }
+
         .prog-bar {
             height: 100%;
             background: linear-gradient(90deg, #4af, #ffe94a);
@@ -132,35 +168,70 @@
             inset: 0;
             pointer-events: none
         }
+
         .s1 {
             background-image: radial-gradient(circle, var(--star1) 1px, transparent 1px);
             background-size: 60px 60px;
             animation: scroll1 12s linear infinite
         }
+
         .s2 {
             background-image: radial-gradient(circle, var(--star2) 1px, transparent 1px);
             background-size: 100px 100px;
             animation: scroll2 20s linear infinite
         }
+
         .s3 {
             background-image: radial-gradient(circle, var(--star3) 1px, transparent 1px);
             background-size: 150px 150px;
             animation: scroll3 30s linear infinite
         }
-        @keyframes scroll1 { from{background-position:0 0} to{background-position:0 60px} }
-        @keyframes scroll2 { from{background-position:0 0} to{background-position:0 100px} }
-        @keyframes scroll3 { from{background-position:0 0} to{background-position:0 150px} }
+
+        @keyframes scroll1 {
+            from {
+                background-position: 0 0
+            }
+
+            to {
+                background-position: 0 60px
+            }
+        }
+
+        @keyframes scroll2 {
+            from {
+                background-position: 0 0
+            }
+
+            to {
+                background-position: 0 100px
+            }
+        }
+
+        @keyframes scroll3 {
+            from {
+                background-position: 0 0
+            }
+
+            to {
+                background-position: 0 150px
+            }
+        }
 
         /* rows */
         .row {
             position: absolute;
-            left: 0; right: 0;
+            left: 0;
+            right: 0;
             transition: background .15s
         }
+
         .row:not(:last-child) {
-            border-bottom: 1px dotted rgba(255,255,255,.12)
+            border-bottom: 1px dotted rgba(255, 255, 255, .12)
         }
-        .row.active-row { background: var(--row-tint) }
+
+        .row.active-row {
+            background: var(--row-tint)
+        }
 
         /* asteroid */
         .asteroid {
@@ -176,35 +247,53 @@
             cursor: pointer;
             user-select: none
         }
+
         .asteroid svg.ast-svg {
             position: absolute;
             inset: 0;
             width: 100%;
             height: 100%
         }
+
         .asteroid .ast-label {
             position: relative;
             z-index: 2;
             font-size: 1.1em;
             font-weight: bold;
             color: #fff;
-            text-shadow: 0 1px 4px rgba(0,0,0,.9), 0 0 8px rgba(0,0,0,.8)
+            text-shadow: 0 1px 4px rgba(0, 0, 0, .9), 0 0 8px rgba(0, 0, 0, .8)
         }
+
         .asteroid.tried {
             opacity: .5;
             filter: drop-shadow(0 0 4px #ff4444)
         }
-        .asteroid.tried .ast-svg ellipse { stroke: #ff4444; stroke-width: 3 }
 
-        /* fly animations — RTL (default): from far right towards left */
-        @keyframes flyRTL {
-            from { right: -110px }
-            to   { right: calc(100% + 10px) }
+        .asteroid.tried .ast-svg ellipse {
+            stroke: #ff4444;
+            stroke-width: 3
         }
-        /* LTR: from far left towards right */
+
+        /* fly animations — RTL (default): asteroid from far LEFT toward rocket on RIGHT */
+        @keyframes flyRTL {
+            from {
+                left: -110px
+            }
+
+            to {
+                left: calc(100% - 68px)
+            }
+        }
+
+        /* LTR: asteroid from far RIGHT toward rocket on LEFT */
         @keyframes flyLTR {
-            from { left: -110px }
-            to   { left: calc(100% + 10px) }
+            from {
+                right: -110px
+            }
+
+            to {
+                right: calc(100% - 68px)
+            }
         }
 
         /* explosion */
@@ -217,10 +306,22 @@
             pointer-events: none;
             animation: explodeAst .45s ease-out forwards
         }
+
         @keyframes explodeAst {
-            0%  { opacity:1; transform: translateY(-50%) scale(1) }
-            50% { opacity:.9; transform: translateY(-50%) scale(2) }
-            100%{ opacity:0; transform: translateY(-50%) scale(2.8) }
+            0% {
+                opacity: 1;
+                transform: translateY(-50%) scale(1)
+            }
+
+            50% {
+                opacity: .9;
+                transform: translateY(-50%) scale(2)
+            }
+
+            100% {
+                opacity: 0;
+                transform: translateY(-50%) scale(2.8)
+            }
         }
 
         /* laser */
@@ -234,15 +335,36 @@
             border-radius: 2px;
             animation: laserShoot .15s ease-out forwards
         }
-        body.ltr .laser { transform-origin: left }
-        @keyframes laserShoot {
-            from { transform: translateY(-50%) scaleX(0) }
-            to   { transform: translateY(-50%) scaleX(1) }
+
+        body.ltr .laser {
+            transform-origin: left
         }
-        .laser.ok  { background: linear-gradient(to left, var(--laser-color), transparent) }
-        .laser.bad { background: linear-gradient(to left, var(--laser-wrong), transparent) }
-        body.ltr .laser.ok  { background: linear-gradient(to right, var(--laser-color), transparent) }
-        body.ltr .laser.bad { background: linear-gradient(to right, var(--laser-wrong), transparent) }
+
+        @keyframes laserShoot {
+            from {
+                transform: translateY(-50%) scaleX(0)
+            }
+
+            to {
+                transform: translateY(-50%) scaleX(1)
+            }
+        }
+
+        .laser.ok {
+            background: linear-gradient(to left, var(--laser-color), transparent)
+        }
+
+        .laser.bad {
+            background: linear-gradient(to left, var(--laser-wrong), transparent)
+        }
+
+        body.ltr .laser.ok {
+            background: linear-gradient(to right, var(--laser-color), transparent)
+        }
+
+        body.ltr .laser.bad {
+            background: linear-gradient(to right, var(--laser-wrong), transparent)
+        }
 
         /* rocket wrapper in game area */
         .rocket-wrap {
@@ -252,45 +374,97 @@
             transition: top 0ms;
             z-index: 10
         }
-        body.ltr .rocket-wrap { right: auto; left: 8px }
+
+        body.ltr .rocket-wrap {
+            right: auto;
+            left: 8px
+        }
 
         .rocket-svg-el {
             display: block;
-            filter: drop-shadow(0 0 6px #4af) drop-shadow(0 0 12px rgba(100,180,255,.4))
+            filter: drop-shadow(0 0 6px #4af) drop-shadow(0 0 12px rgba(100, 180, 255, .4))
         }
+
         .rocket-wrap.correct .rocket-svg-el {
             animation: rocketCorrect .2s ease forwards
         }
+
         .rocket-wrap.wrong .rocket-svg-el {
             animation: rocketWrong .3s ease forwards
         }
+
         .rocket-wrap.rowpulse .rocket-svg-el {
             animation: rocketPulse .08s ease forwards
         }
+
         @keyframes rocketCorrect {
-            0%  { filter: drop-shadow(0 0 6px #4af) brightness(1) }
-            50% { filter: drop-shadow(0 0 24px #00ff80) brightness(4) hue-rotate(120deg) }
-            100%{ filter: drop-shadow(0 0 6px #4af) brightness(1) }
+            0% {
+                filter: drop-shadow(0 0 6px #4af) brightness(1)
+            }
+
+            50% {
+                filter: drop-shadow(0 0 24px #00ff80) brightness(4) hue-rotate(120deg)
+            }
+
+            100% {
+                filter: drop-shadow(0 0 6px #4af) brightness(1)
+            }
         }
+
         @keyframes rocketWrong {
-            0%,100%{ transform: translateX(0) }
-            20%    { transform: translateX(-6px) }
-            40%    { transform: translateX(6px) }
-            60%    { transform: translateX(-6px) }
-            80%    { transform: translateX(6px) }
+
+            0%,
+            100% {
+                transform: translateX(0)
+            }
+
+            20% {
+                transform: translateX(-6px)
+            }
+
+            40% {
+                transform: translateX(6px)
+            }
+
+            60% {
+                transform: translateX(-6px)
+            }
+
+            80% {
+                transform: translateX(6px)
+            }
         }
+
         @keyframes rocketPulse {
-            0%  { transform: scale(1) }
-            50% { transform: scale(1.2) }
-            100%{ transform: scale(1) }
+            0% {
+                transform: scale(1)
+            }
+
+            50% {
+                transform: scale(1.2)
+            }
+
+            100% {
+                transform: scale(1)
+            }
         }
 
         /* thruster glow */
         @keyframes thrusterPulse {
-            0%,100%{ opacity:.7 }
-            50%    { opacity:1 }
+
+            0%,
+            100% {
+                opacity: .7
+            }
+
+            50% {
+                opacity: 1
+            }
         }
-        .thruster-glow { animation: thrusterPulse .8s ease-in-out infinite }
+
+        .thruster-glow {
+            animation: thrusterPulse .8s ease-in-out infinite
+        }
 
         /* stats in control col */
         .stats-bar {
@@ -298,7 +472,7 @@
             gap: 1em;
             padding: .3em .6em;
             font-size: .9em;
-            background: rgba(0,0,30,.5);
+            background: rgba(0, 0, 30, .5);
             flex-shrink: 0
         }
 
@@ -308,12 +482,13 @@
             font-weight: bold;
             text-align: center;
             color: #ffe94a;
-            text-shadow: 0 0 10px rgba(255,233,74,.5);
+            text-shadow: 0 0 10px rgba(255, 233, 74, .5);
             padding: .3em .2em;
             min-height: 2em;
             flex-shrink: 0;
             letter-spacing: .05em
         }
+
         .move-btns {
             display: flex;
             flex-direction: column;
@@ -321,8 +496,10 @@
             align-items: center;
             flex-shrink: 0
         }
+
         .move-btn {
-            width: 54px; height: 54px;
+            width: 54px;
+            height: 54px;
             font-size: 1.4em;
             background: #1a1a6a;
             color: #4af;
@@ -330,11 +507,18 @@
             border-radius: 8px;
             cursor: pointer;
             user-select: none;
-            display: flex; align-items: center; justify-content: center
+            display: flex;
+            align-items: center;
+            justify-content: center
         }
-        .move-btn:active { background: #2a2a9a }
+
+        .move-btn:active {
+            background: #2a2a9a
+        }
+
         .fire-btn {
-            min-width: 80px; min-height: 54px;
+            min-width: 80px;
+            min-height: 54px;
             font-size: 1.1em;
             background: linear-gradient(135deg, #c04000, #ff6600);
             color: #fff;
@@ -343,10 +527,14 @@
             cursor: pointer;
             user-select: none;
             font-weight: bold;
-            box-shadow: 0 0 12px rgba(255,100,0,.5);
+            box-shadow: 0 0 12px rgba(255, 100, 0, .5);
             flex-shrink: 0
         }
-        .fire-btn:active { background: linear-gradient(135deg, #a03000, #e05500) }
+
+        .fire-btn:active {
+            background: linear-gradient(135deg, #a03000, #e05500)
+        }
+
         .ctrl-stats {
             font-size: .85em;
             text-align: center;
@@ -357,8 +545,13 @@
 
         /* portrait control strip */
         @media(orientation:portrait) {
-            .move-btns { flex-direction: row }
-            .ctrl-stats { display: none }
+            .move-btns {
+                flex-direction: row
+            }
+
+            .ctrl-stats {
+                display: none
+            }
         }
 
         /* setup screen */
@@ -367,18 +560,26 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100vh; min-height: 100dvh;
+            min-height: 100vh;
+            min-height: 100dvh;
             text-align: center;
             padding: 1.5em;
             gap: .9em;
             background: #0a0a2e
         }
+
         .setup-screen h1 {
             font-size: 1.8em;
             color: var(--win-gold);
             text-shadow: 0 0 16px var(--win-gold)
         }
-        .setup-screen p { font-size: 1em; color: #aac4ff; margin: 0 }
+
+        .setup-screen p {
+            font-size: 1em;
+            color: #aac4ff;
+            margin: 0
+        }
+
         .setup-opts {
             display: flex;
             flex-direction: column;
@@ -386,6 +587,7 @@
             align-items: flex-start;
             margin: .2em 0
         }
+
         .setup-opt {
             display: flex;
             align-items: center;
@@ -394,11 +596,14 @@
             cursor: pointer;
             user-select: none
         }
+
         .setup-opt input[type=checkbox] {
-            width: 26px; height: 26px;
+            width: 26px;
+            height: 26px;
             cursor: pointer;
             accent-color: #4af
         }
+
         .direction-group {
             display: flex;
             flex-direction: column;
@@ -407,17 +612,21 @@
             font-size: 1em;
             color: #ccdeff
         }
+
         .direction-group label {
             display: flex;
             align-items: center;
             gap: .6em;
             cursor: pointer
         }
+
         .direction-group input[type=radio] {
-            width: 22px; height: 22px;
+            width: 22px;
+            height: 22px;
             cursor: pointer;
             accent-color: #4af
         }
+
         .setup-divider {
             width: 100%;
             max-width: 260px;
@@ -425,6 +634,7 @@
             border-top: 1px solid #2a2a5a;
             margin: .2em 0
         }
+
         .start-btn {
             margin-top: .3em;
             padding: .6em 2em;
@@ -437,37 +647,71 @@
             cursor: pointer;
             min-height: 48px
         }
-        .start-btn:disabled { opacity: .35; cursor: not-allowed }
-        .start-btn:not(:disabled):active { filter: brightness(.85) }
+
+        .start-btn:disabled {
+            opacity: .35;
+            cursor: not-allowed
+        }
+
+        .start-btn:not(:disabled):active {
+            filter: brightness(.85)
+        }
 
         /* end / error screens */
-        .end-screen, .error-screen {
+        .end-screen,
+        .error-screen {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100vh; min-height: 100dvh;
+            min-height: 100vh;
+            min-height: 100dvh;
             text-align: center;
             padding: 1em
         }
+
         .win-screen {
             background: radial-gradient(ellipse at center, #1a2a5a 0%, #0a0a2e 70%);
             animation: starburst 2s ease infinite alternate
         }
+
         @keyframes starburst {
-            from { box-shadow: inset 0 0 60px #0a0a2e }
-            to   { box-shadow: inset 0 0 60px #2a2a6e }
+            from {
+                box-shadow: inset 0 0 60px #0a0a2e
+            }
+
+            to {
+                box-shadow: inset 0 0 60px #2a2a6e
+            }
         }
-        .end-screen h1 { font-size: 2em; margin-bottom: .5em }
-        .end-screen .win-title { color: var(--win-gold); text-shadow: 0 0 20px var(--win-gold) }
-        .end-screen .stat { font-size: 1.1em; margin: .3em 0 }
-        .end-screen .bonus { color: var(--win-gold); font-size: 1.2em }
+
+        .end-screen h1 {
+            font-size: 2em;
+            margin-bottom: .5em
+        }
+
+        .end-screen .win-title {
+            color: var(--win-gold);
+            text-shadow: 0 0 20px var(--win-gold)
+        }
+
+        .end-screen .stat {
+            font-size: 1.1em;
+            margin: .3em 0
+        }
+
+        .end-screen .bonus {
+            color: var(--win-gold);
+            font-size: 1.2em
+        }
+
         .back-link {
             display: inline-block;
             margin-top: .8em;
             color: #4af;
             text-decoration: none
         }
+
         .banner {
             margin-top: .8em;
             padding: .5em 1em;
@@ -475,10 +719,28 @@
             font-size: .95em;
             max-width: 340px
         }
-        .banner.ok  { background: #1a5c2e; border: 1px solid #27ae60 }
-        .banner.err { background: #5c1a1a; border: 1px solid #cc0000 }
-        .banner.warn{ background: #5c4a00; border: 1px solid #e6a800 }
-        .claiming { font-size: .95em; color: #aac4ff; margin-top: .8em }
+
+        .banner.ok {
+            background: #1a5c2e;
+            border: 1px solid #27ae60
+        }
+
+        .banner.err {
+            background: #5c1a1a;
+            border: 1px solid #cc0000
+        }
+
+        .banner.warn {
+            background: #5c4a00;
+            border: 1px solid #e6a800
+        }
+
+        .claiming {
+            font-size: .95em;
+            color: #aac4ff;
+            margin-top: .8em
+        }
+
         .retry-btn {
             margin-top: .5em;
             padding: .35em .9em;
@@ -490,8 +752,15 @@
             border-radius: 4px;
             cursor: pointer
         }
-        .error-screen p { max-width: 320px; line-height: 1.5 }
-        .error-screen .back-link { margin-top: 1em }
+
+        .error-screen p {
+            max-width: 320px;
+            line-height: 1.5
+        }
+
+        .error-screen .back-link {
+            margin-top: 1em
+        }
     </style>
 </head>
 
@@ -503,34 +772,34 @@
         const EARN_FRACTION = 0.70;
         const ROWS = 3;
         const SPEED_TIERS = [
-            { upTo: 5,        travelS: 8 },
-            { upTo: 10,       travelS: 7 },
-            { upTo: 20,       travelS: 6 },
+            { upTo: 5, travelS: 8 },
+            { upTo: 10, travelS: 7 },
+            { upTo: 20, travelS: 6 },
             { upTo: Infinity, travelS: 5 }
         ];
 
         /* ---- url params ---- */
         const _p = new URLSearchParams(location.search);
-        const pin       = _p.get('pin')        || '';
-        const deviceIdx = parseInt(_p.get('device_idx')  || '0', 10);
-        const actId     = parseInt(_p.get('act_id')      || '0', 10);
-        const creditsS  = parseInt(_p.get('credits_s')   || '0', 10);
-        const timeLimitS= parseInt(_p.get('time_limit_s')|| '0', 10);
-        const token     = _p.get('token')       || '';
+        const pin = _p.get('pin') || '';
+        const deviceIdx = parseInt(_p.get('device_idx') || '0', 10);
+        const actId = parseInt(_p.get('act_id') || '0', 10);
+        const creditsS = parseInt(_p.get('credits_s') || '0', 10);
+        const timeLimitS = parseInt(_p.get('time_limit_s') || '0', 10);
+        const token = _p.get('token') || '';
 
         /* ---- state ---- */
-        let gameState    = 'loading';
-        let flyDir       = 'rtl';
-        let selectedTypes= ['mul','add','sub'];
+        let gameState = 'loading';
+        let flyDir = 'rtl';
+        let selectedTypes = ['mul', 'add', 'sub'];
         let targetProblems = 3;
         let solved = 0, wrong = 0, elapsedS = 0;
         let timeRemaining = 0;
-        let rocketRow   = 1;
-        let currentSet  = null;   /* { problem, correctRow, answers[3], triedRows[], spawnTime, travelDuration, animStarted } */
+        let rocketRow = 1;
+        let currentSet = null;   /* { problem, correctRow, answers[3], triedRows[], spawnTime, travelDuration, animStarted } */
         let totalSolvedEver = 0;
-        let recentProblems  = [];
-        let rafId    = null;
-        let tickId   = null;
+        let recentProblems = [];
+        let rafId = null;
+        let tickId = null;
         let lastRafTime = null;
         let gameAreaH = 0, gameAreaW = 0;
         let setResolved = false;
@@ -551,13 +820,13 @@
                 const t = selectedTypes[Math.floor(Math.random() * selectedTypes.length)];
                 let q, ans, type;
                 if (t === 'add') {
-                    const a = rand(1,49), b = rand(1, 49 - a + 1);
+                    const a = rand(1, 49), b = rand(1, 49 - a + 1);
                     q = a + ' + ' + b; ans = a + b; type = 'add';
                 } else if (t === 'sub') {
-                    const a = rand(10,99), b = rand(1, a - 1);
+                    const a = rand(10, 99), b = rand(1, a - 1);
                     q = a + ' - ' + b; ans = a - b; type = 'sub';
                 } else {
-                    const a = rand(1,9), b = rand(1,9);
+                    const a = rand(1, 9), b = rand(1, 9);
                     q = a + ' x ' + b; ans = a * b; type = 'mul';
                 }
                 prob = { question: q + ' = ?', answer: ans, type };
@@ -576,7 +845,7 @@
                     if (type === 'mul') {
                         /* neighbour from times table */
                         const sign = (Math.random() < .5 ? 1 : -1);
-                        d = correct + sign * (pass === 0 ? rand(6,10) : rand(12,18));
+                        d = correct + sign * (pass === 0 ? rand(6, 10) : rand(12, 18));
                     } else {
                         d = correct + (Math.random() < .5 ? 1 : -1) * rand(1, 9);
                     }
@@ -640,17 +909,17 @@
         function asteroidSVG(label, rowIdx) {
             /* Different rocky colour palette per row */
             const palettes = [
-                { c1:'#6a4020', c2:'#9a6030', c3:'#c0884a', s:'#4a2810' },
-                { c1:'#2a4a20', c2:'#3a6a2a', c3:'#5a8a3a', s:'#1a3010' },
-                { c1:'#20304a', c2:'#2a4a6a', c3:'#3a6a8a', s:'#10203a' }
+                { c1: '#6a4020', c2: '#9a6030', c3: '#c0884a', s: '#4a2810' },
+                { c1: '#2a4a20', c2: '#3a6a2a', c3: '#5a8a3a', s: '#1a3010' },
+                { c1: '#20304a', c2: '#2a4a6a', c3: '#3a6a8a', s: '#10203a' }
             ];
             const p = palettes[rowIdx % 3];
             const rx = 44, ry = 26;
             /* polygon points for a rough rocky outline (12-sided irregular shape) */
             const pts = [
-                [44,3],[55,8],[62,15],[63,22],[58,30],[50,34],[40,36],[30,35],
-                [20,33],[12,27],[8,19],[10,10],[18,4],[30,1]
-            ].map(([x,y])=>`${x},${y}`).join(' ');
+                [44, 3], [55, 8], [62, 15], [63, 22], [58, 30], [50, 34], [40, 36], [30, 35],
+                [20, 33], [12, 27], [8, 19], [10, 10], [18, 4], [30, 1]
+            ].map(([x, y]) => `${x},${y}`).join(' ');
             return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 38" width="90" height="55" class="ast-svg">
   <defs>
     <radialGradient id="ag${rowIdx}" cx="38%" cy="35%" r="65%">
@@ -700,7 +969,9 @@
             const rowH = gameAreaH / ROWS;
             const top = rocketRow * rowH + rowH / 2;
             wrap.style.top = top + 'px';
-            wrap.style.transform = 'translateY(-50%)';
+            wrap.style.transform = flyDir === 'ltr'
+                ? 'translateY(-50%) scaleX(-1)'
+                : 'translateY(-50%)';
 
             /* row highlights */
             for (let r = 0; r < ROWS; r++) {
@@ -749,7 +1020,6 @@
                 problem: prob,
                 correctRow,
                 answers,
-                triedRows: [],
                 spawnTime: performance.now(),
                 travelDuration: dur * 1000
             };
@@ -774,14 +1044,14 @@
                 ast.innerHTML = asteroidSVG(answers[r], r) +
                     '<span class="ast-label">' + answers[r] + '</span>';
 
-                /* start CSS animation */
-                const area = document.getElementById('game-area');
-                const w = area ? area.clientWidth : 320;
+                /* start CSS animation — asteroid spawns on opposite side from rocket */
                 if (flyDir === 'rtl') {
-                    ast.style.right = (-110) + 'px';
+                    ast.style.left = '-110px';
+                    ast.style.right = '';
                     ast.style.animation = `flyRTL ${dur}s linear forwards`;
                 } else {
-                    ast.style.left = (-110) + 'px';
+                    ast.style.right = '-110px';
+                    ast.style.left = '';
                     ast.style.animation = `flyLTR ${dur}s linear forwards`;
                 }
 
@@ -813,49 +1083,49 @@
                 /* spawn next set */
                 setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 500);
             } else {
-                /* wrong collision — discard set immediately */
+                /* wrong collision — all asteroids flee */
                 wrong++;
                 timeRemaining = Math.max(0, timeRemaining - 1);
                 triggerRocketAnim('wrong');
-                clearSet();
                 updateHUD();
-                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 400);
+                fleeAsteroids(-1);
+                currentSet = null;
+                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 450);
             }
         }
 
         function onFire() {
             if (!currentSet || setResolved || gameState !== 'playing') return;
-            /* ignore tried rows */
-            if (currentSet.triedRows.includes(rocketRow)) return;
 
             const correct = (rocketRow === currentSet.correctRow);
+            setResolved = true;
             fireLaser(rocketRow, correct);
 
             if (correct) {
-                currentSet.triedRows.push(rocketRow);
-                setResolved = true;
                 solved++;
                 totalSolvedEver++;
                 triggerRocketAnim('correct');
                 setTimeout(() => {
                     explodeAsteroid(rocketRow, true);
                     fleeAsteroids(rocketRow);
-                }, 120);
+                }, 130);
                 updateHUD();
                 if (gameState === 'playing' && solved >= targetProblems) {
-                    setTimeout(() => endGame(true), 600);
+                    setTimeout(() => endGame(true), 620);
                     return;
                 }
-                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 600);
+                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 620);
             } else {
+                /* wrong shot — brief red visual, then all asteroids flee */
                 wrong++;
                 timeRemaining = Math.max(0, timeRemaining - 1);
-                currentSet.triedRows.push(rocketRow);
-                /* dim asteroid */
-                const ast = document.getElementById('ast-' + rocketRow);
-                if (ast) ast.classList.add('tried');
                 triggerRocketAnim('wrong');
                 updateHUD();
+                setTimeout(() => {
+                    fleeAsteroids(-1);
+                    currentSet = null;
+                }, 200);
+                setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 620);
             }
         }
 
@@ -869,14 +1139,23 @@
         }
 
         function fleeAsteroids(survivedRow) {
+            /* survivedRow = -1 means all rows flee (wrong answer scenario) */
+            const area = document.getElementById('game-area');
+            const areaRect = area ? area.getBoundingClientRect() : { left: 0 };
             for (let r = 0; r < ROWS; r++) {
                 if (r === survivedRow) continue;
                 const ast = document.getElementById('ast-' + r);
                 if (!ast) continue;
-                /* cancel fly animation and apply flee */
+                /* Freeze the current visual position before cancelling the CSS animation,
+                   otherwise the element snaps back to its inline initial position. */
+                const astLeft = ast.getBoundingClientRect().left - areaRect.left;
                 ast.style.animation = 'none';
+                ast.style.left = astLeft + 'px';
+                ast.style.right = '';
                 void ast.offsetWidth;
-                const dist = flyDir === 'rtl' ? '-150vw' : '150vw';
+                /* RTL: asteroids travel left→right, flee continues rightward (+150vw).
+                   LTR: asteroids travel right→left, flee continues leftward (−150vw). */
+                const dist = flyDir === 'rtl' ? '150vw' : '-150vw';
                 ast.style.transition = 'transform .35s ease-in';
                 ast.style.transform = 'translateY(-50%) translateX(' + dist + ')';
                 setTimeout(() => { if (ast.parentNode) ast.remove(); }, 380);
@@ -885,23 +1164,20 @@
 
         function explodeAsteroid(row, correct) {
             const rowEl = document.getElementById('row-' + row);
-            const ast = document.getElementById('ast-' + row);
             if (!rowEl) return;
-            /* get current position of asteroid before removing */
-            let posStyle = '';
+            const ast = document.getElementById('ast-' + row);
+            /* Use getBoundingClientRect to capture the actual animated position. */
+            let leftInRow = 50;
             if (ast) {
-                if (flyDir === 'rtl') posStyle = 'right:' + (ast.style.right || '0px');
-                else posStyle = 'left:' + (ast.style.left || '0px');
+                const astRect = ast.getBoundingClientRect();
+                const rowRect = rowEl.getBoundingClientRect();
+                leftInRow = astRect.left - rowRect.left;
                 ast.remove();
             }
             const ex = document.createElement('div');
             ex.className = 'explode-el';
             ex.innerHTML = explosionSVG();
-            if (posStyle) ex.style.cssText = posStyle;
-            else {
-                if (flyDir === 'rtl') ex.style.right = '80px';
-                else ex.style.left = '80px';
-            }
+            ex.style.left = leftInRow + 'px';
             rowEl.appendChild(ex);
             setTimeout(() => { if (ex.parentNode) ex.remove(); }, 460);
         }
@@ -919,23 +1195,24 @@
         function fireLaser(row, correct) {
             const rowEl = document.getElementById('row-' + row);
             if (!rowEl) return;
-            const area = document.getElementById('game-area');
-            const areaW = area ? area.clientWidth : 320;
 
             const laser = document.createElement('div');
             laser.className = 'laser ' + (correct ? 'ok' : 'bad');
             laser.id = 'laser-' + row;
 
-            /* rocket is 60px wide, positioned 8px from edge */
-            const rocketEdge = 8 + 60; /* px from right (RTL) or left (LTR) */
-            /* asteroid is ~90px wide, we aim at its center (~45px in from its edge) */
-            /* In RTL: laser goes from rocket (right side) to asteroid center */
+            /* Rocket is 60px wide, 8px from its side edge = 68px total.
+               Span the laser across the full game area between the opposite edge
+               and the rocket's inner face. transform-origin (right/left) makes
+               the scaleX(0→1) animation expand from the rocket outward. */
+            const rocketEdge = 68;
             if (flyDir === 'rtl') {
+                /* Rocket on right: laser from left edge (0) to rocket's left face */
+                laser.style.left = '0';
                 laser.style.right = rocketEdge + 'px';
-                laser.style.width = (areaW - rocketEdge - 45) + 'px';
             } else {
+                /* Rocket on left: laser from rocket's right face to right edge */
                 laser.style.left = rocketEdge + 'px';
-                laser.style.width = (areaW - rocketEdge - 45) + 'px';
+                laser.style.right = '0';
             }
             rowEl.appendChild(laser);
             setTimeout(() => { if (laser.parentNode) laser.remove(); }, 160);
@@ -976,7 +1253,7 @@
             if (tEl) {
                 const m = Math.floor(timeRemaining / 60);
                 const s = timeRemaining % 60;
-                tEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+                tEl.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
             }
             const pbar = document.getElementById('hud-progbar');
             if (pbar) {
@@ -994,7 +1271,7 @@
             const h = Math.floor(s / 3600);
             const m = Math.floor((s % 3600) / 60);
             const sec = s % 60;
-            return h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+            return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
         }
 
         function renderError(msg) {
@@ -1029,7 +1306,7 @@
                     document.getElementById('chk-sub').checked;
                 document.getElementById('start-btn').disabled = !any;
             };
-            ['chk-mul','chk-add','chk-sub'].forEach(id => {
+            ['chk-mul', 'chk-add', 'chk-sub'].forEach(id => {
                 document.getElementById(id).addEventListener('change', updateBtn);
             });
             document.getElementById('start-btn').addEventListener('click', () => {
@@ -1056,34 +1333,34 @@
             /* Rocket position */
             const rocketPos = flyDir === 'rtl'
                 ? 'right:8px;top:50%;transform:translateY(-50%)'
-                : 'left:8px;top:50%;transform:translateY(-50%);transform:translateY(-50%) scaleX(-1)';
+                : 'left:8px;top:50%;transform:translateY(-50%) scaleX(-1)';
 
             document.getElementById('screen').innerHTML =
                 '<div class="game-col">' +
-                  '<div class="header-bar">' +
-                    '<span class="header-title">\ud83d\ude80 Shoot Math</span>' +
-                    '<span class="timer" id="hud-timer">--:--</span>' +
-                    '<div class="prog-wrap"><div class="prog-bar" id="hud-progbar" style="width:0%"></div></div>' +
-                  '</div>' +
-                  '<div class="game-area" id="game-area">' +
-                    '<div class="star-layer s1"></div>' +
-                    '<div class="star-layer s2"></div>' +
-                    '<div class="star-layer s3"></div>' +
-                    rowsHtml +
-                    '<div class="rocket-wrap" id="rocket-wrap" style="' + rocketPos + '">' +
-                      ROCKET_SVG +
-                    '</div>' +
-                  '</div>' +
-                  '<div class="stats-bar"><span id="stats-bar-txt">Shot: 0 / ' + targetProblems + '&nbsp;&nbsp;Wrong: 0</span></div>' +
+                '<div class="header-bar">' +
+                '<span class="header-title">\ud83d\ude80 Shoot Math</span>' +
+                '<span class="timer" id="hud-timer">--:--</span>' +
+                '<div class="prog-wrap"><div class="prog-bar" id="hud-progbar" style="width:0%"></div></div>' +
+                '</div>' +
+                '<div class="game-area" id="game-area">' +
+                '<div class="star-layer s1"></div>' +
+                '<div class="star-layer s2"></div>' +
+                '<div class="star-layer s3"></div>' +
+                rowsHtml +
+                '<div class="rocket-wrap" id="rocket-wrap" style="' + rocketPos + '">' +
+                ROCKET_SVG +
+                '</div>' +
+                '</div>' +
+                '<div class="stats-bar"><span id="stats-bar-txt">Shot: 0 / ' + targetProblems + '&nbsp;&nbsp;Wrong: 0</span></div>' +
                 '</div>' +
                 '<div class="control-col">' +
-                  '<div class="problem-display" id="problem-display">Get ready&hellip;</div>' +
-                  '<div class="move-btns">' +
-                    '<button class="move-btn" id="btn-up">\u25b2</button>' +
-                    '<button class="fire-btn" id="btn-fire">\ud83d\udd25 FIRE</button>' +
-                    '<button class="move-btn" id="btn-dn">\u25bc</button>' +
-                  '</div>' +
-                  '<div class="ctrl-stats" id="ctrl-stats">Shot: 0 / ' + targetProblems + '<br>Wrong: 0</div>' +
+                '<div class="problem-display" id="problem-display">Get ready&hellip;</div>' +
+                '<div class="move-btns">' +
+                '<button class="move-btn" id="btn-up">\u25b2</button>' +
+                '<button class="fire-btn" id="btn-fire">\ud83d\udd25 FIRE</button>' +
+                '<button class="move-btn" id="btn-dn">\u25bc</button>' +
+                '</div>' +
+                '<div class="ctrl-stats" id="ctrl-stats">Shot: 0 / ' + targetProblems + '<br>Wrong: 0</div>' +
                 '</div>';
 
             document.getElementById('btn-up').addEventListener('click', () => moveRocket(-1));
@@ -1172,15 +1449,15 @@
         /* ---- keyboard ---- */
         document.addEventListener('keydown', e => {
             if (gameState !== 'playing') return;
-            if (e.key === 'ArrowUp')   { moveRocket(-1); e.preventDefault(); }
+            if (e.key === 'ArrowUp') { moveRocket(-1); e.preventDefault(); }
             else if (e.key === 'ArrowDown') { moveRocket(1); e.preventDefault(); }
-            else if (e.key === ' ')    { onFire(); e.preventDefault(); }
+            else if (e.key === ' ') { onFire(); e.preventDefault(); }
         });
 
         /* ---- start ---- */
         function startGame() {
             targetProblems = Math.max(3, Math.floor(timeLimitS * EARN_FRACTION / SECS_PER_PROBLEM));
-            timeRemaining  = timeLimitS;
+            timeRemaining = timeLimitS;
             solved = 0; wrong = 0; elapsedS = 0;
             rocketRow = 1;
             currentSet = null; setResolved = false;
@@ -1192,7 +1469,7 @@
             /* start first set after a short ready pause */
             setTimeout(() => { if (gameState === 'playing') spawnSet(); }, 600);
 
-            rafId  = requestAnimationFrame(rafLoop);
+            rafId = requestAnimationFrame(rafLoop);
             tickId = setInterval(onTick, 1000);
 
             updateHUD();
@@ -1201,10 +1478,10 @@
         /* ---- init ---- */
         (function init() {
             const missing = [];
-            if (!pin)    missing.push('pin');
-            if (!token)  missing.push('token');
-            if (!actId)  missing.push('act_id');
-            if (!creditsS)  missing.push('credits_s');
+            if (!pin) missing.push('pin');
+            if (!token) missing.push('token');
+            if (!actId) missing.push('act_id');
+            if (!creditsS) missing.push('credits_s');
             if (!timeLimitS) missing.push('time_limit_s');
             if (!_p.has('device_idx')) missing.push('device_idx');
             if (missing.length > 0) {
