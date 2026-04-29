@@ -587,6 +587,77 @@
         .error-screen .back-link {
             margin-top: 1em
         }
+
+        /* setup screen */
+        .setup-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            min-height: 100dvh;
+            text-align: center;
+            padding: 1.5em;
+            gap: 1em;
+            background: linear-gradient(180deg, #001428, #003d5c)
+        }
+
+        .setup-screen h1 {
+            font-size: 1.8em;
+            color: var(--win-gold);
+            text-shadow: 0 0 16px var(--win-gold)
+        }
+
+        .setup-screen p {
+            font-size: 1em;
+            color: #7dd4f0;
+            margin: 0
+        }
+
+        .setup-opts {
+            display: flex;
+            flex-direction: column;
+            gap: .9em;
+            align-items: flex-start;
+            margin: .3em 0
+        }
+
+        .setup-opt {
+            display: flex;
+            align-items: center;
+            gap: .7em;
+            font-size: 1.1em;
+            cursor: pointer;
+            user-select: none
+        }
+
+        .setup-opt input[type=checkbox] {
+            width: 26px;
+            height: 26px;
+            cursor: pointer;
+            accent-color: #1db8d6
+        }
+
+        .start-btn {
+            margin-top: .5em;
+            padding: .6em 2em;
+            font-size: 1.2em;
+            background: #1db8d6;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            min-height: 48px
+        }
+
+        .start-btn:disabled {
+            opacity: .4;
+            cursor: not-allowed
+        }
+
+        .start-btn:not(:disabled):active {
+            background: #1498b8
+        }
     </style>
 </head>
 
@@ -615,6 +686,7 @@
 
         /* ---- state ---- */
         let gameState = 'loading';
+        let selectedTypes = ['mul', 'add', 'sub'];
         let targetProblems = 3;
         let solved = 0, wrong = 0, elapsedS = 0;
         let timeRemaining = 0;
@@ -664,12 +736,12 @@
         function generateProblem() {
             let prob, attempt = 0;
             do {
-                const t = rand(0, 2);
+                const t = selectedTypes[Math.floor(Math.random() * selectedTypes.length)];
                 let q, ans;
-                if (t === 0) {
+                if (t === 'add') {
                     const a = rand(1, 49), b = rand(1, 49 - a + 1);
                     q = a + '+' + b; ans = a + b;
-                } else if (t === 1) {
+                } else if (t === 'sub') {
                     const a = rand(10, 99), b = rand(1, a - 1);
                     q = a + '-' + b; ans = a - b;
                 } else {
@@ -921,6 +993,37 @@
                 '<a class="back-link" href="/dyn">\u2190 Back to Games</a></div>';
         }
 
+        function renderSetup() {
+            gameState = 'setup';
+            document.getElementById('screen').innerHTML =
+                '<div class="setup-screen">' +
+                '<h1>&#x1F420; Fish Math</h1>' +
+                '<p>Choose which types of problems to include:</p>' +
+                '<div class="setup-opts">' +
+                '<label class="setup-opt"><input type="checkbox" id="chk-mul" checked> Table multiplication</label>' +
+                '<label class="setup-opt"><input type="checkbox" id="chk-add" checked> Addition</label>' +
+                '<label class="setup-opt"><input type="checkbox" id="chk-sub" checked> Subtraction</label>' +
+                '</div>' +
+                '<button class="start-btn" id="start-btn">Start Game!</button>' +
+                '</div>';
+            const updateBtn = () => {
+                const any = document.getElementById('chk-mul').checked ||
+                            document.getElementById('chk-add').checked ||
+                            document.getElementById('chk-sub').checked;
+                document.getElementById('start-btn').disabled = !any;
+            };
+            ['chk-mul', 'chk-add', 'chk-sub'].forEach(id => {
+                document.getElementById(id).addEventListener('change', updateBtn);
+            });
+            document.getElementById('start-btn').addEventListener('click', () => {
+                selectedTypes = [];
+                if (document.getElementById('chk-mul').checked) selectedTypes.push('mul');
+                if (document.getElementById('chk-add').checked) selectedTypes.push('add');
+                if (document.getElementById('chk-sub').checked) selectedTypes.push('sub');
+                startGame();
+            });
+        }
+
         function renderPlaying() {
             document.getElementById('screen').innerHTML =
                 '<div class="game-col">' +
@@ -1096,7 +1199,7 @@
                 renderError('Oops! Missing game parameters (' + missing.join(', ') + '). Please go back to the games page.');
                 return;
             }
-            startGame();
+            renderSetup();
         })();
     </script>
 </body>

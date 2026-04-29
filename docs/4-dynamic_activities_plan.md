@@ -304,17 +304,47 @@ Define the full visual layout, animation behaviour, screen states, and input met
 
 ### Screen States
 
-The game has four mutually exclusive screen states managed by a JS state machine:
+The game has five mutually exclusive screen states managed by a JS state machine:
 
 | State       | Trigger                               | Description                                           |
 | ----------- | ------------------------------------- | ----------------------------------------------------- |
-| `LOADING`   | Page load                             | Validates URL params; transitions to `PLAYING` or `ERROR` |
+| `LOADING`   | Page load                             | Validates URL params; transitions to `SETUP` or `ERROR` |
 | `ERROR`     | Missing/invalid URL params            | Shows error message + back link                       |
-| `PLAYING`   | After `LOADING` succeeds              | Main game loop                                        |
+| `SETUP`     | After `LOADING` succeeds              | Problem-type selection screen; player chooses which operation types to practise, then presses **Start Game!** |
+| `PLAYING`   | Player presses **Start Game!**        | Main game loop                                        |
 | `END`       | Timer reaches 0 OR `solved >= targetProblems` | Shows WIN or GAME OVER result + Claim Credits button |
 
 All states are rendered in the **same single `<div id="screen">`** by swapping its
 `innerHTML` — no multi-page navigation.
+
+### SETUP State Layout
+
+Displayed immediately after URL-param validation succeeds, before gameplay begins.
+
+```
+┌──────────────────────────────┐
+│   ★  Space Math              │
+│                              │
+│  Choose which types of       │
+│  problems to include:        │
+│                              │
+│  ☑  Table multiplication     │
+│  ☑  Addition                 │
+│  ☑  Subtraction              │
+│                              │
+│  [ Start Game! ]  ← disabled │
+│                  if none ✓   │
+└──────────────────────────────┘
+```
+
+- All three checkboxes are **checked by default**.
+- The **Start Game!** button is **disabled** when no checkbox is checked; re-enabled as
+  soon as at least one is checked.
+- Tapping the button records the selected types into `selectedTypes[]` and transitions
+  directly to `PLAYING`.
+- The setup screen uses the same dark-space background (`#0a0a2e`) and gold title colour
+  as the rest of the game.  Checkboxes have `accent-color` set to the game's accent blue.
+  The **Start Game!** button follows the same styling as the **OK** button.
 
 ### PLAYING State Layout
 
@@ -542,14 +572,16 @@ game must show the `ERROR` screen immediately before any game logic runs.
 
 ```
 ┌─ Constants (SECS_PER_PROBLEM, EARN_FRACTION, MAX_METEORS, speed tiers)
+├─ Constants (SECS_PER_PROBLEM, EARN_FRACTION, MAX_METEORS, speed tiers)
 ├─ State variables
 │   ├─ pin, deviceIdx, actId, creditsS, timeLimitS, token  (from URL params)
+│   ├─ selectedTypes[]  ('mul' | 'add' | 'sub' — set from SETUP checkboxes)
 │   ├─ targetProblems, solved, wrong, elapsedS
-│   ├─ gameState: 'loading' | 'playing' | 'end'
+│   ├─ gameState: 'loading' | 'setup' | 'playing' | 'end'
 │   ├─ meteors[]  (array of active meteor objects)
 │   └─ activeMeteorId  (id of the currently-answered meteor)
 ├─ Problem generator
-│   └─ generateProblem() → { question: string, answer: number, type: string }
+│   └─ generateProblem() → picks uniformly from selectedTypes[]
 ├─ Meteor lifecycle
 │   ├─ spawnMeteor(problem)
 │   ├─ updateMeteors(dt)   ← called from RAF loop
@@ -563,6 +595,7 @@ game must show the `ERROR` screen immediately before any game logic runs.
 ├─ Timer
 │   └─ onTick()  ← called by setInterval
 ├─ Screen renderers
+│   ├─ renderSetup()     ← SETUP state; checkboxes + Start Game! button
 │   ├─ renderPlaying()   ← builds the game HTML once; meteors updated by RAF
 │   ├─ renderEnd(win)    ← replaces screen content
 │   └─ renderError(msg)
@@ -589,6 +622,10 @@ body            → dark bg; portrait: flex column; landscape: flex row (orienta
 .input-row      → flex; answer display + submit button
 .keypad         → CSS grid 3×4
 .keypad-btn     → large tap targets (min 48×48 px)
+.setup-screen   → centred flex column; full-viewport height; space theme background
+.setup-opts     → flex column; checkbox+label rows
+.setup-opt      → flex row; min 48 px tap target via checkbox sizing
+.start-btn      → full-width styled button; disabled state reduces opacity
 .end-screen     → centred; star-burst background animation on WIN
 ```
 
@@ -598,6 +635,12 @@ body            → dark bg; portrait: flex column; landscape: flex row (orienta
 - [ ] File size ≤ 40 KB uncompressed (target); must not exceed 80 KB under any circumstances.
 - [ ] Source code is human-readable; no minification, no obfuscation.
 - [ ] Missing/zero URL params → ERROR screen shown; game does not start.
+- [ ] Valid URL params → SETUP screen shown before any game logic runs.
+- [ ] SETUP screen displays three checkboxes: **Table multiplication**, **Addition**, **Subtraction** — all checked by default.
+- [ ] **Start Game!** button is **disabled** when no checkbox is checked.
+- [ ] **Start Game!** button becomes enabled as soon as at least one checkbox is checked.
+- [ ] Pressing **Start Game!** with a valid selection transitions to PLAYING; `selectedTypes[]` contains only the chosen types.
+- [ ] Only problem types present in `selectedTypes[]` are generated during gameplay.
 - [ ] `targetProblems = floor(time_limit_s * 0.70 / 5)`, minimum 3.
 - [ ] On-screen keypad digits append to the answer display; Backspace removes last digit;
       Enter/OK submits.
@@ -834,12 +877,35 @@ Define the full visual layout, animation behaviour, screen states, and input met
 
 | State     | Trigger                                       | Description                                               |
 | --------- | --------------------------------------------- | --------------------------------------------------------- |
-| `LOADING` | Page load                                     | Validates URL params; transitions to `PLAYING` or `ERROR` |
+| `LOADING` | Page load                                     | Validates URL params; transitions to `SETUP` or `ERROR`   |
 | `ERROR`   | Missing/invalid URL params                    | Shows error message + back link                           |
-| `PLAYING` | After `LOADING` succeeds                      | Main game loop                                            |
+| `SETUP`   | After `LOADING` succeeds                      | Problem-type selection screen; player chooses which operation types to practise, then presses **Start Game!** |
+| `PLAYING` | Player presses **Start Game!**                | Main game loop                                            |
 | `END`     | Timer reaches 0 OR `solved >= targetProblems` | WIN or GAME OVER result; credit claim auto-triggered      |
 
 Same single `<div id="screen">` swap pattern as Activity 1.
+
+### SETUP State Layout
+
+Identical structure to Activity 1's SETUP state (see Phase A1.1), with the underwater
+theme applied: ocean-gradient background, `#7dd4f0` subtitle text, and `#1db8d6` checkbox
+accent colour and button colour.
+
+```
+┌──────────────────────────────┐
+│  🐠  Fish Math               │
+│                              │
+│  Choose which types of       │
+│  problems to include:        │
+│                              │
+│  ☑  Table multiplication     │
+│  ☑  Addition                 │
+│  ☑  Subtraction              │
+│                              │
+│  [ Start Game! ]  ← disabled │
+│                  if none ✓   │
+└──────────────────────────────┘
+```
 
 ### PLAYING State Layout
 
@@ -1046,13 +1112,14 @@ game must show the `ERROR` screen immediately before any game logic runs.
 ┌─ Constants (SECS_PER_PROBLEM, EARN_FRACTION, MAX_BUBBLES, speed tiers)
 ├─ State variables
 │   ├─ pin, deviceIdx, actId, creditsS, timeLimitS, token  (from URL params)
+│   ├─ selectedTypes[]  ('mul' | 'add' | 'sub' — set from SETUP checkboxes)
 │   ├─ targetProblems, solved, wrong, elapsedS
-│   ├─ gameState: 'loading' | 'playing' | 'end'
+│   ├─ gameState: 'loading' | 'setup' | 'playing' | 'end'
 │   ├─ bubbles[]  (array of active bubble objects)
 │   ├─ activeBubbleId  (id of the currently-targeted bubble)
 │   └─ fishHappyTimer, fishWrongTimer  (timeout handles for fish animation reset)
 ├─ Problem generator
-│   └─ generateProblem()  (identical to Activity 1)
+│   └─ generateProblem()  (picks uniformly from selectedTypes[]; otherwise identical to Activity 1)
 ├─ Bubble lifecycle
 │   ├─ spawnBubble()
 │   ├─ rafLoop(now)          ← moves bubbles upward; detects escape at topPx <= -70
@@ -1064,6 +1131,7 @@ game must show the `ERROR` screen immediately before any game logic runs.
 ├─ Input handling  (identical to Activity 1)
 ├─ Timer  (identical to Activity 1)
 ├─ Screen renderers
+│   ├─ renderSetup()        ← SETUP state; checkboxes + Start Game! button (ocean theme)
 │   ├─ renderPlaying()      ← builds game HTML once; injects FISH_SVG constant
 │   ├─ renderEnd(win)       ← same layout/style as Activity 1 END screen
 │   └─ renderError(msg)
@@ -1092,6 +1160,10 @@ body            → ocean gradient; portrait: flex column; landscape: flex row
 .stats-bar      → same as Activity 1
 .input-row      → same as Activity 1
 .keypad         → same as Activity 1
+.setup-screen   → centred flex column; full-viewport height; ocean gradient background
+.setup-opts     → flex column; checkbox+label rows
+.setup-opt      → flex row; min 48 px tap target via checkbox sizing
+.start-btn      → full-width styled button; disabled state reduces opacity
 .end-screen     → centred; reef-burst glow animation on WIN
 ```
 
@@ -1102,6 +1174,12 @@ body            → ocean gradient; portrait: flex column; landscape: flex row
 - [ ] Source code is human-readable; no minification, no obfuscation.
 - [ ] `<title>` is "Fish Math: Bubble Reef".
 - [ ] Missing/zero URL params → ERROR screen shown; game does not start.
+- [ ] Valid URL params → SETUP screen shown before any game logic runs.
+- [ ] SETUP screen displays three checkboxes: **Table multiplication**, **Addition**, **Subtraction** — all checked by default.
+- [ ] **Start Game!** button is **disabled** when no checkbox is checked.
+- [ ] **Start Game!** button becomes enabled as soon as at least one checkbox is checked.
+- [ ] Pressing **Start Game!** with a valid selection transitions to PLAYING; `selectedTypes[]` contains only the chosen types.
+- [ ] Only problem types present in `selectedTypes[]` are generated during gameplay.
 - [ ] `targetProblems = floor(time_limit_s * 0.70 / 5)`, minimum 3.
 - [ ] Bubbles move **upward**; escape check at `topPx <= −70`.
 - [ ] Active bubble = bubble with minimum `topPx` (closest to escaping); auto-updated.
