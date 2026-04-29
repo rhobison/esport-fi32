@@ -31,6 +31,16 @@
 - [Phase A2.1 — Game Design & UI Specification](#phase-a21--game-design--ui-specification)
 - [Phase A2.2 — HTML/JS/CSS Implementation](#phase-a22--htmljscss-implementation)
 - [Phase A2.3 — Integration & Verification](#phase-a23--integration--verification)
+- [Activity 3 — Rocket Asteroid Shooter](#activity-3--rocket-asteroid-shooter)
+  - [Concept](#concept-2)
+  - [Math Problem Rules](#math-problem-rules-2)
+  - [Timing & Scoring Model](#timing--scoring-model-2)
+  - [Credit Calculation](#credit-calculation-2)
+  - [URL Parameters & API Integration](#url-parameters--api-integration-2)
+  - [Security Considerations](#security-considerations-2)
+- [Phase A3.1 — Game Design & UI Specification](#phase-a31--game-design--ui-specification)
+- [Phase A3.2 — HTML/JS/CSS Implementation](#phase-a32--htmljscss-implementation)
+- [Phase A3.3 — Integration & Verification](#phase-a33--integration--verification)
 - [Dependency Notes](#dependency-notes)
 - [Summary of Design Decisions](#summary-of-design-decisions)
 
@@ -60,6 +70,7 @@ code changes are required.
 | - | ---- | ---- | ------ | ------ |
 | 1 | Space Meteor Shower | `space_math.html` | Specified | A1.1, A1.2, A1.3 |
 | 2 | Clown Fish Bubble Burst | `fish_math.html` | Specified | A2.1, A2.2, A2.3 |
+| 3 | Rocket Asteroid Shooter | `shoot_math.html` | Specified | A3.1, A3.2, A3.3 |
 
 > To add a new activity: assign it the next available number, add a row to this table,
 > and create its own `## Activity N` section followed by phases `AN.1` (Design),
@@ -80,6 +91,7 @@ must fit within the partition table allocation.
 | -------- | ---- | ------------------- | -------------------- | ------------------- |
 | 1        | `space_math.html` | < 40 KB | < 80 KB | ~ 10–15 KB |
 | 2        | `fish_math.html`  | < 40 KB | < 80 KB | ~ 10–15 KB |
+| 3        | `shoot_math.html` | < 40 KB | < 80 KB | ~ 10–15 KB |
 
 > **Note**: the size targets and hard maximum apply to the **uncompressed source file**
 > in the repository.  The figure that directly determines flash consumption is the
@@ -1300,6 +1312,700 @@ the complete play-through flow end-to-end.
 
 ---
 
+## Activity 3 — Rocket Asteroid Shooter
+
+### Concept
+
+The player pilots a **rocket/spaceship** defending against incoming asteroids.  Each round
+presents a single math problem displayed in the header.  Three asteroids approach
+simultaneously from the far side of the screen — one per row — each carrying a candidate
+answer (1 correct + 2 plausible distractors).
+
+The player must:
+1. Move the rocket up or down between the three rows to align with the correct answer, OR
+2. Fire a laser at the correct-answer asteroid before the set reaches the rocket.
+
+**Answer selection mechanics:**
+- Tapping an asteroid **directly** instantly snaps the rocket to that row and fires
+  (immediate shot).
+- The **▲ / ▼** direction buttons (or keyboard Arrow keys) move the rocket one row at a
+  time without firing.
+- The **FIRE** button (or **Space** key) fires a laser at the asteroid in the rocket's
+  current row.
+- When the asteroid set reaches the rocket's side, the asteroid in the rocket's current
+  row **collides** with the rocket and is evaluated as the player's selected answer — there
+  is no way for asteroids to pass the spaceship.
+
+**Resolution:**
+- **Correct answer hit or collided** → the struck asteroid explodes (orange burst);
+  the remaining two asteroids instantly flee off-screen at high speed.  `solved++`.
+  New problem + new set spawns immediately.
+- **Wrong answer hit or collided** → the struck asteroid flashes red; −1 second timer
+  penalty; `wrong++`.  The wrong asteroid is visually marked as "tried" (dimmed + red
+  border); the set continues advancing.  The player can fire at the remaining asteroids.
+  At most 2 wrong shots are possible per set; the third asteroid is always correct by
+  exclusion.  Re-firing at an already-tried wrong asteroid is silently ignored (no second
+  penalty).
+
+The **direction** of play is chosen on the SETUP screen:
+- **Right → Left** (default): rocket on the right, asteroids fly in from the left.
+  Rocket SVG faces left (←).
+- **Left → Right**: rocket on the left, asteroids fly in from the right.  Rocket SVG
+  faces right (→).
+
+This is purely cosmetic — gameplay, scoring, and controls are identical in both modes.
+The layout is mirrored via a CSS class on the body element.
+
+Engagement hooks:
+- Inline SVG rocket with pulsing thruster-glow CSS animation; green flash on correct hit,
+  red shake on wrong.
+- Laser beam (`3px` coloured line) shoots from rocket to target (CSS `@keyframes`, 150 ms).
+- Surviving asteroids flee at high speed (CSS `transform: translateX` transition) after
+  a correct hit.
+- Animated star-field background (identical CSS pattern to Activity 1).
+- Speed tier progression: asteroids travel faster as more problems are solved.
+- Celebratory "BULLSEYE! YOU WIN!" screen with star-burst animation on WIN.
+- "TIME'S UP!" screen with proportional credit on GAME OVER.
+- Sound is NOT used (avoids permission issues and distraction in shared spaces).
+
+Size budget: target < 40 KB, hard maximum 80 KB (uncompressed HTML file).
+See [Flash Storage Constraints](#flash-storage-constraints).  All assets are CSS/SVG — no
+binary images or external resources.
+
+---
+
+### Math Problem Rules
+
+Identical to Activities 1 and 2:
+
+| Type           | Operand ranges                                 | Result constraint | Example         |
+| -------------- | ---------------------------------------------- | ----------------- | --------------- |
+| Addition       | Both operands 1–49                             | Sum ≤ 99          | `23 + 41 = ?`   |
+| Subtraction    | Minuend 10–99, subtrahend 1–(minuend-1)        | Result ≥ 1        | `54 − 17 = ?`   |
+| Multiplication | Both factors 1–9 (single-digit × single-digit) | Product ≤ 81      | `7 × 6 = ?`     |
+
+- No division.
+- All answers are positive integers.
+- Problems are generated pseudo-randomly using `Math.random()`, picking uniformly from
+  `selectedTypes[]`.
+- De-dup buffer of the last 10 problems prevents consecutive repeats.
+
+#### Distractor Generation
+
+Each set of 3 asteroids contains 1 correct answer and 2 plausible distractors assigned
+randomly to rows 0, 1, 2.
+
+| Problem type | Distractor strategy |
+| ------------ | ------------------- |
+| Addition / Subtraction | `correct ± offset` where offset is a random integer 1–9; re-roll if result ≤ 0 or > 99 |
+| Multiplication | neighbour from the times table: vary one factor by ±1 (e.g. for 6 × 7 = 42, candidates are 6 × 6 = 36 and 6 × 8 = 48) |
+
+Rules:
+- Both distractors must differ from the correct answer and from each other.
+- Re-roll up to 10 times; fallback to `correct ± 10` (clamped to valid range) if still
+  colliding.
+- Distractors must be positive integers.
+
+---
+
+### Timing & Scoring Model
+
+Identical to Activities 1 and 2:
+
+| Constant           | Value | Rationale          |
+| ------------------ | ----- | ------------------ |
+| `SECS_PER_PROBLEM` | 5     | Same as Activity 1 |
+| `EARN_FRACTION`    | 0.70  | Same as Activity 1 |
+
+```
+targetProblems = Math.floor(time_limit_s * EARN_FRACTION / SECS_PER_PROBLEM)
+```
+
+Minimum `targetProblems` = 3.  Bonus problems continue after the target is reached.
+
+**Asteroid travel speed** (time for one set to travel from the far edge to the rocket):
+
+| Problems solved correctly so far | Travel time |
+| --------------------------------- | ----------- |
+| 0–4                               | 8 s         |
+| 5–9                               | 7 s         |
+| 10–19                             | 6 s         |
+| 20+                               | 5 s (minimum) |
+
+Only one set of asteroids is active at a time.  A new set spawns immediately after the
+previous set is resolved (correct hit, correct collision, or wrong collision).
+
+---
+
+### Credit Calculation
+
+Identical to Activities 1 and 2:
+
+```
+solved       = number of problems answered correctly
+earnedCredit = Math.floor(credit_s * solved / targetProblems)
+submitCredit = Math.min(earnedCredit, credit_s)   // server will cap anyway
+```
+
+---
+
+### URL Parameters & API Integration
+
+Identical to Activities 1 and 2 — same six URL parameters (`pin`, `device_idx`, `act_id`,
+`credits_s`, `time_limit_s`, `token`), same `POST /api/activities/credit` contract, and
+same response handling.
+
+Launch URL:
+
+```
+/dyn_activities/shoot_math?pin=<PIN>&device_idx=<N>&act_id=<ID>&credits_s=<CREDIT_S>&time_limit_s=<N>&token=<TOKEN>
+```
+
+---
+
+### Security Considerations
+
+Identical to Activities 1 and 2 — same API contract, same security properties, same
+reasoning about `time_limit_s` being informational only.
+
+---
+
+## Phase A3.1 — Game Design & UI Specification (Activity 3)
+
+### Goal
+
+Define the full visual layout, animation behaviour, screen states, and input method for
+`shoot_math.html` so that Phase A3.2 can proceed without ambiguity.
+
+### Screen States
+
+| State     | Trigger                                       | Description                                               |
+| --------- | --------------------------------------------- | --------------------------------------------------------- |
+| `LOADING` | Page load                                     | Validates URL params; transitions to `SETUP` or `ERROR`   |
+| `ERROR`   | Missing/invalid URL params                    | Shows error message + back link                           |
+| `SETUP`   | After `LOADING` succeeds                      | Problem-type checkboxes + direction radio; player presses **Start Game!** |
+| `PLAYING` | Player presses **Start Game!**                | Main game loop                                            |
+| `END`     | Timer reaches 0 OR `solved >= targetProblems` | WIN or GAME OVER result; credit claim auto-triggered      |
+
+Same single `<div id="screen">` swap pattern as Activities 1 and 2.
+
+### SETUP State Layout
+
+Extends the standard Activity 1/2 SETUP screen with an additional **Direction** radio
+group below the problem-type checkboxes.  The space theme (dark background `#0a0a2e`,
+gold title, accent blue checkboxes/buttons) is shared with Activity 1.
+
+```
+┌──────────────────────────────────┐
+│  🚀  Shoot Math                  │
+│                                  │
+│  Choose which types of           │
+│  problems to include:            │
+│                                  │
+│  ☑  Table multiplication         │
+│  ☑  Addition                     │
+│  ☑  Subtraction                  │
+│                                  │
+│  Direction:                      │
+│  ◉ Asteroids fly right → left    │
+│  ○ Asteroids fly left → right    │
+│                                  │
+│  [ Start Game! ]  ← disabled     │
+│                  if none ✓       │
+└──────────────────────────────────┘
+```
+
+- All three checkboxes are **checked by default**.
+- Direction **right → left** (rocket on right, asteroids from left) is **selected by
+  default**.
+- The **Start Game!** button is **disabled** when no checkbox is checked; re-enabled when
+  at least one is checked.  The direction radio does not affect the disabled state.
+- Pressing **Start Game!** records `selectedTypes[]` and `flyDir` (`'rtl'` | `'ltr'`)
+  and transitions to `PLAYING`.
+
+### PLAYING State Layout
+
+**Landscape is the primary and preferred orientation** — the game is inherently
+horizontal.  Portrait is supported as a secondary layout with a reduced play area.
+
+**Landscape layout** (`@media (orientation: landscape)` — two-column, `flex-direction: row`):
+
+```
+┌──────────────────────────────────────────────────┬──────────────┐
+│ 🚀 Shoot Math   ⏱ 01:52   [======    ]           │ 27 + 15 = ?  │
+├──────────────────────────────────────────────────┤              │
+│                                                  │   [ ▲ ]      │
+│  [ast: 36] ══════════════════════════════        │              │
+│                                       laser →    │  [🔥 FIRE]   │
+│  [ast: 42] ══════════════════════════════  🚀   │              │
+│                                                  │   [ ▼ ]      │
+│  [ast: 17] ══════════════════════════════        │              │
+│                                                  │ Shot: 5 / 16 │
+│                                                  │ Wrong: 2     │
+└──────────────────────────────────────────────────┴──────────────┘
+  ←────────── game area (.game-col, flex: 1 1 0) ──→  ←── 200 px ──→
+```
+
+The right column (`.control-col`, `flex: 0 0 200px`) contains: the math problem, ▲ / ▼
+direction buttons, FIRE button, and stats (Shot count, Wrong count).
+
+For `flyDir = 'ltr'`: the body gains class `.ltr`; `flex-direction` is set to
+`row-reverse`, so `.control-col` moves to the **left** side.  The rocket SVG is mirrored
+via `transform: scaleX(-1)` and positioned at the left edge of the game area.  The
+asteroid animation direction is reversed.
+
+**Portrait layout** (fallback — `@media (orientation: portrait)`, `flex-direction: column`):
+
+```
+┌──────────────────────────────────────────┐
+│ 🚀 Shoot Math  ⏱ 01:52  [======    ]    │  ← header
+├──────────────────────────────────────────┤
+│  [ast: 36] ════════════════════  🚀     │  ← active row
+│  [ast: 42] ════════════════════          │
+│  [ast: 17] ════════════════════          │
+├──────────────────────────────────────────┤
+│  Shot: 5 / 16              Wrong: 2      │  ← stats bar
+├──────────────────────────────────────────┤
+│  27 + 15 = ?           [🔥 FIRE]         │  ← problem + fire
+│          [ ▲ Up ]   [ ▼ Down ]           │  ← move buttons
+└──────────────────────────────────────────┘
+```
+
+In portrait, the control panel becomes a bottom strip below the game area (problem text +
+FIRE button + ▲▼ buttons in a two-row flex layout).
+
+### Row and Rocket Layout
+
+The game area is divided into **3 equal horizontal rows** (`height: 33.33%` each).  Row
+dividers are subtle dotted lines (`border-bottom: 1px dotted rgba(255,255,255,0.12)`).
+
+The rocket is an inline SVG (`60 × 36 px`) positioned at the right edge (RTL) or left
+edge (LTR) of the game area, vertically centred within its current row.  Row transitions
+are **discrete** (instant snap, no animation) accompanied by a brief
+`transform: scale(1.2)` pulse (80 ms) on the rocket to give tactile feedback.
+
+**Active row highlight**: the row containing the rocket has a subtle background tint
+(`rgba(255, 233, 74, 0.08)`) and the rocket emits a pulsing glow
+(`box-shadow: 0 0 14px 4px #ffe94a`).
+
+Row indices `0`, `1`, `2` are numbered top to bottom.  ▲ decrements the row index (wraps
+from `0` to `2`); ▼ increments it (wraps from `2` to `0`).
+
+### Rocket Visual Specification
+
+Inline SVG spaceship — approximately 4–6 `<polygon>` / `<ellipse>` / `<rect>` elements:
+
+- Triangular body + cockpit window + engine nozzle, pointing **left** for RTL.
+  For LTR apply `transform: scaleX(-1)` on the SVG element.
+- Thruster glow: `@keyframes` pulsing orange/yellow `filter: drop-shadow(...)` behind
+  the engine nozzle, cycling 0.8 s.
+- **Correct hit reaction**: `@keyframes` `filter: brightness(4) hue-rotate(120deg)` green
+  flash (200 ms), then return to normal.
+- **Wrong hit reaction**: `@keyframes` horizontal shake (±6 px, 4 cycles, 300 ms).
+
+### Asteroid Visual Specification
+
+Each asteroid is a `<div>` absolutely positioned within its row:
+
+- Shape: CSS oval (`border-radius: 50%`) with a `radial-gradient` for a rocky 3D
+  appearance (dark centre, lighter edge).
+- Size: `90 × 55 px` baseline; scales down on narrow screens.
+- Displays the **candidate answer number** centred, bold white, `1.2em`.
+- Movement: CSS `animation: flyIn linear` (RTL: `translateX` from `0` to `-gameWidth`;
+  LTR: `translateX` from `0` to `+gameWidth`); duration from the speed tier table.
+- **"Tried wrong" state**: after a wrong shot, `opacity: 0.5` and
+  `border: 2px solid #ff4444`; the asteroid continues moving.  Firing at it again is
+  silently ignored.
+- **Correct explosion**: CSS `@keyframes` orange/yellow radial burst, 400 ms (same
+  pattern as `space_math.html`); element removed from DOM after animation completes.
+- **Flee animation**: on a correct hit, the two surviving asteroids play
+  `transform: translateX(+150vw)` (RTL) or `translateX(-150vw)` (LTR) with
+  `transition: transform 0.35s ease-in`, then are removed from DOM.
+- **Collision**: when `setAge >= travelDuration`, the answer evaluation fires
+  immediately.  The collision itself is not separately animated; the rocket's
+  correct/wrong reaction plays instead.
+
+### Laser Visual Specification
+
+When FIRE is triggered (FIRE button, Space key, or tap-asteroid):
+
+- A `<div class="laser">` with `height: 3px` and
+  `background: linear-gradient(to left, var(--accent), transparent)` (RTL; reversed for LTR)
+  spanning horizontally from the rocket's edge to the target asteroid's centre.
+- `@keyframes laserShoot`: `transform: scaleX(0)` → `scaleX(1)` with
+  `transform-origin: right` (RTL), completing in 150 ms.
+- Element is removed immediately after 150 ms.
+- If the shot is wrong, the laser colour switches to `#ff4444` for its final 50 ms
+  (achieved by adding a `.wrong` class at the midpoint of the animation).
+
+### Spawn & Timing Rules
+
+- At game start the first set of 3 asteroids spawns immediately.
+- A new set spawns as soon as the previous set is fully resolved.
+- All 3 asteroids in a set are spawned simultaneously and share the same travel duration.
+- Travel progress is tracked in JS by comparing `Date.now()` against `set.spawnTime`.
+  Asteroid visual position is driven by a CSS `@keyframes` animation whose duration
+  matches the travel time; JS only reads the elapsed fraction to decide when collision
+  occurs.
+- When `elapsed >= travelDuration`:
+  - The asteroid in `rocketRow` is evaluated as the collision answer.
+  - Correct → `solved++`; correct explosion; surviving asteroids flee; new set spawns.
+  - Wrong → `wrong++`; −1 s; red rocket shake; set is discarded; `solved` unchanged;
+    new set spawns.
+- Only one set is active at a time; no overlapping sets.
+
+### Background
+
+Identical to Activity 1: pure CSS animated star field (3 `<div class="star-layer">` with
+`background-image: radial-gradient(...)` repeating dots, each at a different animation
+speed).  Dark navy background (`#0a0a2e`).
+
+### WIN State Layout
+
+```
+┌──────────────────────────────┐
+│   🌟  BULLSEYE! YOU WIN!  🌟  │
+│                              │
+│  You solved 18 / 16          │
+│  (+2 BONUS problems!)        │
+│                              │
+│  Credits earned: 0:10:00     │
+│  (+ 2 bonus = 🏆 Champion!)  │
+│                              │
+│  [ Claim Credits ]           │
+│  ← Back to Games             │
+└──────────────────────────────┘
+```
+
+### GAME OVER State Layout
+
+```
+┌──────────────────────────────┐
+│   💫  TIME'S UP!             │
+│                              │
+│  You solved 11 / 16          │
+│  Credits earned: 0:06:53     │
+│                              │
+│  [ Claim Credits ]           │
+│  ← Back to Games             │
+└──────────────────────────────┘
+```
+
+### Responsiveness and Orientation
+
+**Primary target**: tablet (768–1024 px) in **landscape** orientation; the game is
+inherently horizontal.  Smartphone portrait (360–414 px) is a supported secondary layout.
+
+**Viewport meta tag** (same as Activities 1 and 2 — must be exactly this):
+
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+```
+
+**Landscape layout** (`@media (orientation: landscape)` — `flex-direction: row`):
+- `.game-col` (`flex: 1 1 0`): header bar + 3-row game area.
+- `.control-col` (`flex: 0 0 200px`): problem text, ▲/▼ buttons, FIRE button, stats.
+- `body.ltr`: `flex-direction: row-reverse` moves `.control-col` to the left side.
+
+**Portrait layout** (default — `flex-direction: column`):
+- Header at top; game area (`flex-grow: 1`) with 3 rows; stats bar; bottom control strip
+  (problem text + FIRE button row + ▲▼ button row).
+- Minimum supported width: 320 px.
+- Game area height: `calc(100dvh - 200px)` with `100vh` fallback.
+
+**Font sizes**: same rules as Activities 1 and 2 (`:root 16px`; `400px` and landscape
+`500px` breakpoints).
+
+**Tap target sizes**: minimum `48 × 48 px` for ▲, ▼, and FIRE buttons.
+
+**Safe-area insets**: `env(safe-area-inset-*)` applied to `body`.
+
+---
+
+## Phase A3.2 — HTML/JS/CSS Implementation (Activity 3)
+
+### Goal
+
+Implement `main/dyn_activities/shoot_math.html` as a single self-contained HTML5 file
+following all rules from Phase A3.1 and the esport-fi32 dynamic activity interface contract.
+
+### Inputs
+
+- Phase A3.1 (this document).
+- `main/dyn_activities/space_math.html` — reference for credit-claim flow, URL param
+  parsing, `formatHMS()`, `showBanner()`, star-field background CSS, and explosion
+  animation keyframes.
+- `docs/1-specification.md` §6.9 (credit API), §6.10 (dynamic activities URL contract).
+
+### File
+
+`main/dyn_activities/shoot_math.html`
+
+### Required URL Query Parameters
+
+| Parameter      | Type   | Description                                              |
+| -------------- | ------ | -------------------------------------------------------- |
+| `pin`          | string | 8-char device PIN from `GET /api/dyn`                    |
+| `device_idx`   | int    | Device slot index (0–3)                                  |
+| `act_id`       | int    | Activity ID                                              |
+| `credits_s`    | int    | Reference credit in seconds (`activity.credit_s`)        |
+| `time_limit_s` | int    | Activity time limit in seconds (`activity.time_limit_s`) |
+| `token`        | string | One-time nonce from `GET /api/dyn`                       |
+
+If any required parameter is absent, zero (for numeric params), or fails to parse, the
+game must show the `ERROR` screen immediately before any game logic runs.
+
+### Structural Requirements
+
+1. **Single file, no external resources.**  All CSS, JS, and graphics are inline.
+2. **File size target < 40 KB** (uncompressed, unminified source).  Hard maximum: 80 KB.
+   See [Flash Storage Constraints](#flash-storage-constraints).
+3. **`<meta charset="UTF-8">` and `<meta name="viewport" ...>`** present (exact form
+   specified in Phase A3.1).
+4. **`<title>Shoot Math Asteroids</title>`**.
+5. **CSS reset**: `box-sizing: border-box` on `*`; `margin: 0; padding: 0` on `body`.
+6. **Dark space theme**: `background: #0a0a2e` on body.
+7. **No `alert()`, `confirm()`, `prompt()`, `eval()`, or `innerHTML` injection of
+   user-supplied data.**  Only game-generated integers and operator symbols are inserted
+   via `textContent`.
+8. **`var` is forbidden** — use `const` and `let` throughout.
+9. **Game loop**: `requestAnimationFrame` for set travel progress tracking and laser
+   animation; a separate `setInterval(1000)` decrements the countdown timer and checks
+   win/lose conditions.
+
+### JavaScript Architecture
+
+```
+┌─ Constants (SECS_PER_PROBLEM, EARN_FRACTION, ROWS, SPEED_TIERS)
+├─ State variables
+│   ├─ pin, deviceIdx, actId, creditsS, timeLimitS, token  (URL params)
+│   ├─ selectedTypes[]  ('mul' | 'add' | 'sub')
+│   ├─ flyDir            ('rtl' | 'ltr')
+│   ├─ targetProblems, solved, wrong, elapsedS
+│   ├─ gameState: 'loading' | 'setup' | 'playing' | 'end'
+│   ├─ rocketRow          (0 | 1 | 2)
+│   └─ currentSet         { problem, correctRow, answers[3], triedRows[], spawnTime, travelDuration }
+├─ Problem & distractor generator
+│   ├─ generateProblem() → { text, answer }
+│   └─ generateDistractors(correct, type) → [d1, d2]
+├─ Set lifecycle
+│   ├─ spawnSet()           → generates problem + assigns answers to rows; starts CSS animation
+│   ├─ checkCollision()     ← called from RAF; fires when elapsed >= travelDuration
+│   ├─ resolveSet(row)      → evaluates answer; updates solved/wrong/timer
+│   └─ fleeAsteroids(correctRow)  ← triggers flee CSS transitions on surviving rows
+├─ Input handling
+│   ├─ onMoveUp()
+│   ├─ onMoveDown()
+│   ├─ onFire()             ← fires at rocketRow; ignores already-tried wrong rows
+│   ├─ onTapAsteroid(row)   ← snap rocket to row + immediate fire
+│   └─ onKeyDown(event)     ← ArrowUp, ArrowDown, Space
+├─ Timer
+│   └─ onTick()             ← setInterval(1000)
+├─ Screen renderers
+│   ├─ renderSetup()        ← checkboxes + direction radio + Start Game! button
+│   ├─ renderPlaying()      ← builds game DOM once; updates via updateRocketRow() and spawnSet()
+│   ├─ updateRocketRow()    ← moves rocket element; updates row highlights
+│   ├─ renderEnd(win)
+│   └─ renderError(msg)
+└─ Credit claim
+    └─ claimCredits()       ← same flow as space_math.html
+```
+
+### CSS Architecture
+
+```
+:root            → colour vars (--bg, --accent, --win-gold, --laser-color, --rock-grad, ...)
+body             → dark bg; landscape: flex row; portrait: flex column
+                   safe-area-inset padding applied
+body.ltr         → flex-direction: row-reverse  (LTR: control panel on left)
+.game-col        → flex: 1 1 0; header + game-area
+.control-col     → 200 px fixed (landscape); full-width bottom strip (portrait)
+.header-bar      → flex row; title, timer, progress bar
+.game-area       → position: relative; overflow: hidden; flex-grow: 1
+.star-layer      → position: absolute; full size; animated background (reuse space_math pattern)
+.row             → height: 33.33%; position: relative; border-bottom dotted divider
+.row.active      → background-tint rgba(255,233,74,0.08)
+.asteroid        → position: absolute; CSS oval; animation: flyIn linear
+.asteroid.tried  → opacity: 0.5; border: 2px solid #ff4444
+.asteroid.explode → keyframe radial burst (reuse from space_math pattern)
+.rocket          → position: absolute; right: 8px (RTL) / left: 8px (LTR); inline SVG
+                   transition: top 0ms (instant snap)
+.rocket.correct  → @keyframes green brightness flash (200 ms)
+.rocket.wrong    → @keyframes horizontal shake (300 ms)
+.rocket-pulse    → @keyframes scale(1.2) pulse on row change (80 ms)
+.laser           → position: absolute; height: 3px; @keyframes scaleX expand (150 ms)
+.laser.wrong     → background switches to #ff4444
+.problem-display → large bold; centred in .control-col (landscape) or bottom strip (portrait)
+.move-btn        → min 48×48 px; ▲ / ▼ arrows
+.fire-btn        → min 48×48 px; prominent --accent background
+.setup-screen    → same pattern as space_math.html
+.direction-group → flex column; radio-label rows; accent-color for radio inputs
+.end-screen      → centred; star-burst background on WIN
+```
+
+### Acceptance Criteria
+
+- [ ] File is a valid HTML5 document with no external resource references.
+- [ ] File size ≤ 40 KB uncompressed (target); must not exceed 80 KB under any circumstances.
+- [ ] Source code is human-readable; no minification, no obfuscation.
+- [ ] Missing/zero URL params → ERROR screen shown; game does not start.
+- [ ] Valid URL params → SETUP screen shown before any game logic runs.
+- [ ] SETUP screen: three problem-type checkboxes (all checked by default) + direction
+      radio group (RTL default).
+- [ ] **Start Game!** button disabled when no checkbox checked; enabled on first checkbox
+      check.  Direction radio does not affect enabled state.
+- [ ] `flyDir = 'rtl'`: rocket on right, asteroids from left; rocket SVG faces left.
+- [ ] `flyDir = 'ltr'`: rocket on left, asteroids from right; rocket SVG faces right;
+      `.control-col` moves to left side; asteroid animation direction reversed.
+- [ ] `targetProblems = floor(time_limit_s * 0.70 / 5)`, minimum 3.
+- [ ] Each set: 1 correct answer + 2 plausible distractors; randomly assigned to rows
+      0, 1, 2.
+- [ ] Math problem is displayed in the control panel (outside the game area) for the
+      full duration of each set.
+- [ ] Only problem types in `selectedTypes[]` are generated.
+- [ ] ▲ button / ArrowUp key → rocket moves to row above; wraps row 0 → row 2.
+- [ ] ▼ button / ArrowDown key → rocket moves to row below; wraps row 2 → row 0.
+- [ ] Row change is instant (discrete snap); brief scale-pulse on rocket (80 ms).
+- [ ] Active row visually highlighted (background tint + rocket glow).
+- [ ] FIRE button / Space key → laser shoots at active row's asteroid.
+- [ ] Tapping an asteroid → rocket snaps to that row + immediate shot.
+- [ ] Laser animation plays (150 ms expanding line from rocket to asteroid).
+- [ ] Correct asteroid shot → orange explosion; remaining 2 flee off-screen;
+      rocket green flash; `solved++`.
+- [ ] Wrong asteroid shot → red flash on asteroid; `wrong++`; −1 s from timer;
+      asteroid dims + red border; continues moving.
+- [ ] Re-firing at an already-tried wrong asteroid → silently ignored; no second penalty.
+- [ ] Asteroid set reaches rocket (travel time elapsed) → collision on rocket's row.
+- [ ] Correct collision → correct explosion + rocket green flash; others flee; `solved++`.
+- [ ] Wrong collision → rocket red shake; `wrong++`; −1 s; set discarded; `solved` unchanged.
+- [ ] New set spawns immediately after previous set resolves.
+- [ ] Asteroid travel time follows the 4-tier speed table (8 s → 7 s → 6 s → 5 s).
+- [ ] Countdown timer decrements every second; displayed as `MM:SS` in header.
+- [ ] Progress bar reflects `solved / targetProblems` (capped at 100%).
+- [ ] `solved >= targetProblems` before timer → WIN screen; bonus count displayed.
+- [ ] Timer reaches 0 → GAME OVER screen; partial credit displayed.
+- [ ] WIN screen: "BULLSEYE! YOU WIN!" + solved/target, bonus (if any), credits as h:mm:ss.
+- [ ] GAME OVER screen: "TIME'S UP!" + solved/target, credits as h:mm:ss.
+- [ ] Credit claim POST sent automatically on END screen; same fields as Activities 1 and 2.
+- [ ] HTTP 200 → green banner; 403 → red (non-retriable); 429 → orange (non-retriable);
+      other → red + Try again button.
+- [ ] Star-field background animates continuously.
+- [ ] No `var`, no `eval()`, no `alert()/confirm()`, no external resources.
+- [ ] `<meta name="viewport">` includes `maximum-scale=1.0` and `user-scalable=no`.
+- [ ] Landscape: `.control-col` is 200 px; game area fills remaining width.
+- [ ] Portrait: controls (problem + FIRE + ▲▼) appear in bottom strip below game area.
+- [ ] No horizontal scrollbar at 320 px wide (portrait) or 568 × 320 px (landscape phone).
+- [ ] `env(safe-area-inset-*)` applied to `body`.
+- [ ] Game area uses `100dvh` with `100vh` fallback for height calculations.
+
+### Required `POST /api/activities/credit` Fields
+
+```javascript
+{
+  device_idx:        deviceIdx,
+  act_id:            actId,
+  credits_s:         submitCredit,  // Math.floor(creditsS * solved / targetProblems), capped at creditsS
+  completion_time_s: elapsedS,
+  pin:               pin,
+  token:             token
+}
+```
+
+---
+
+## Phase A3.3 — Integration & Verification (Activity 3)
+
+### Goal
+
+Register `shoot_math.html` as a dynamic activity in the firmware, wire it to a test
+device, and verify the complete play-through flow end-to-end.
+
+### Inputs
+
+- Phase A3.2 output: `main/dyn_activities/shoot_math.html`.
+- Existing Feature 8 infrastructure (Phases 8.1–8.5 must be complete).
+
+### Tasks
+
+1. **Build**: run `idf.py reconfigure && idf.py build`.  The CMake glob picks up
+   `shoot_math.html` automatically; `g_dyn_act_count` increments by 1.
+
+2. **Create activity via admin UI**:
+   - Navigate to `/activities/manage`.
+   - Tick "Dynamic activity".
+   - Select `shoot_math` from the combobox.
+   - Set **Credit** to `0:10:00` (600 s), **Time Limit** to `0:02:00` (120 s),
+     **Daily Limit** to `2`.
+   - Submit → HTTP 303 redirect.
+
+3. **Assign to device 0** via the same manage page.
+
+4. **Kid workflow test (RTL direction)**:
+   - Navigate to `/dyn` from device 0; verify `shoot_math` button appears.
+   - Click button; confirm URL contains all 6 required parameters including
+     `time_limit_s=120`.
+   - SETUP screen: verify three checkboxes (all checked), direction radio (RTL default),
+     **Start Game!** disabled if all unchecked.
+   - Play to WIN (solve ≥ 16 problems before 2 min expire); claim credits; verify green
+     success banner and `new_counter_hms`.
+
+5. **LTR direction test**: repeat step 4 selecting "Asteroids fly left → right" on SETUP;
+   verify rocket appears on the **left** and asteroids travel from the **right**; controls
+   panel is on the left; gameplay and scoring unchanged.
+
+6. **Wrong-answer penalty test**: fire at a wrong asteroid; verify −1 s deducted from
+   timer, `wrong` increments, asteroid dims with red border.
+
+7. **Re-fire ignored test**: fire at the same wrong asteroid a second time; verify timer
+   is NOT further decremented and `wrong` is NOT incremented again.
+
+8. **Collision test (correct row)**: let a set reach the rocket while positioned on the
+   correct-answer row; verify `solved` increments and others flee.
+
+9. **Collision test (wrong row)**: let a set reach the rocket while positioned on a
+   wrong-answer row; verify `wrong` increments, −1 s, set discards, `solved` unchanged.
+
+10. **GAME OVER path**: let timer expire at < 16 solved; verify proportional credit
+    screen.
+
+11. **Replay attack test**: after claiming, re-submit same POST (same `token`) →
+    server must return HTTP 403.
+
+12. **Daily limit test**: claim twice (daily limit = 2); third attempt → HTTP 429
+    banner shown in game.
+
+13. **Tampered `time_limit_s` test**: load URL with `time_limit_s=5`; verify
+    `targetProblems` clamps to 3; game is playable; credit cap still applies.
+
+14. **Responsiveness test**: load game on a 320 px portrait viewport (browser DevTools);
+    all controls (▲, ▼, FIRE, problem text) must be visible without horizontal scroll.
+
+15. **Build artefact check**: `g_dyn_act_registry` must include an entry with
+    `p_name == "shoot_math"`.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and zero warnings.
+- [ ] `g_dyn_act_count` increases by 1 compared to pre-game build.
+- [ ] `GET /dyn_activities/shoot_math` returns HTTP 200 with `Content-Type: text/html`.
+- [ ] `GET /dyn_activities/shoot_math.html` returns HTTP 200 (`.html` extension handled).
+- [ ] `/dyn` page shows `shoot_math` button for registered device.
+- [ ] Launch URL contains all 6 required parameters including `time_limit_s`.
+- [ ] RTL mode: rocket on right, asteroids from left; controls on right.
+- [ ] LTR mode: rocket on left, asteroids from right; controls on left; layout mirrored.
+- [ ] WIN flow: `POST /api/activities/credit` returns 200; counter incremented correctly.
+- [ ] GAME OVER flow: proportional credits posted and accepted.
+- [ ] Wrong shot: −1 s applied; `wrong` incremented; asteroid dims with red border.
+- [ ] Re-fire on tried-wrong asteroid: no second penalty, no `wrong` increment.
+- [ ] Correct collision (rocket on correct row): `solved` increments; others flee.
+- [ ] Wrong collision (rocket on wrong row): `wrong` increments; −1 s; set discards.
+- [ ] Replay of consumed token → HTTP 403.
+- [ ] Third daily claim → HTTP 429.
+- [ ] `time_limit_s=5` → `targetProblems == 3` (minimum clamp enforced).
+- [ ] No regression in Activities 1 and 2 tests or Phases 8.1–8.5 criteria.
+
+---
+
 ## Dependency Notes
 
 - Feature 8, Phases 8.1–8.5 must be complete before Phases A1.3 and A2.3 can run.
@@ -1312,6 +2018,11 @@ the complete play-through flow end-to-end.
   as part of Phase A1.3 task 1 (or retrofitted into Phase 8.4 if not yet implemented).
 - Phase A2.2 (`fish_math.html`) shares the same infrastructure as Phase A1.2 and can be
   developed independently or in parallel with Activity 1 phases.
+- Phase A3.2 (`shoot_math.html`) is independent of firmware and can be developed and
+  reviewed on a desktop browser without any firmware build.  The same `time_limit_s`
+  URL-parameter change required for Activities 1 and 2 covers Activity 3 as well — no
+  additional server-side change is needed.
+- Phases A3.2 and A1.2/A2.2 are fully independent and can be developed in parallel.
 
 ---
 
@@ -1341,5 +2052,19 @@ the complete play-through flow end-to-end.
 | Active bubble auto-selection | Bubble with minimum `topPx` (closest to top/escaping) | Same intuition as Activity 1 "lowest meteor" but direction-appropriate |
 | Underwater background | Ocean gradient + rising CSS bubble layers + seaweed | Consistent with game theme; pure CSS; no image assets; replaces star-layer pattern from Activity 1 |
 | Stat label | "Popped" instead of "Solved" | Thematically appropriate for bubble-popping; visually distinct from Activity 1 |
+| **Activity 3** | | |
+| Multiple-choice answer model | 3 asteroids = 1 correct + 2 distractors for 1 problem | One mental task at a time; no typing overhead; distractors add educational value |
+| Plausible distractors | ±1–9 offset (add/sub); neighbouring times-table entry (mul) | Challenges recall rather than guessing; avoids trivially obvious wrong answers |
+| Direction toggle (RTL / LTR) | SETUP radio; CSS `flex-direction: row-reverse` + SVG `scaleX(-1)` | Accommodates personal preference; implemented with a single CSS class flip |
+| Row movement | Discrete snap (▲/▼); no smooth scroll | Cleaner for touch; avoids accidentally landing between rows; snap + pulse gives clear feedback |
+| Tap asteroid = snap + fire | Single touch action selects and shoots | Fastest possible input on touch devices; consistent with "I know the answer" intuition |
+| Re-fire on tried-wrong ignored | Silent ignore; no second penalty | Prevents frustration from accidental double-tap; rewards attention to the dimmed indicator |
+| Collision = forced selection | Asteroid reaching rocket → evaluates rocket's current row | Guarantees every problem is resolved; no "escape" mechanic needed; keeps game tense |
+| One active set at a time | No overlapping sets | Reduces cognitive load; clear one-problem-at-a-time focus for the target age group |
+| Speed tiers | 8 s → 7 s → 6 s → 5 s (4 tiers) | Slightly faster than Activities 1/2 (no typing required); still age-appropriate |
+| Flee animation on correct hit | `translateX(±150vw)` CSS transition, 350 ms | Satisfying visual reward; clears the screen quickly for the next set |
+| Landscape primary | Horizontal play field suits horizontal movement natively | Natural orientation for a side-scrolling shooter; portrait supported as fallback |
+| Star-field background | Reused from `space_math.html` | Consistent space theme; zero additional code cost |
+| Stat label | "Shot" instead of "Solved" | Thematically appropriate for shooting mechanic |
 
 /*** end of file ***/
