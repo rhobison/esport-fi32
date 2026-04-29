@@ -354,6 +354,17 @@ docs/
 
 ![Assembly 2](docs/imgs/assembly-2.jpg)
 
+---
+
+## Documentation
+
+- [Specification](docs/1-specification.md)
+- [General development plan](docs/2-development_plan.md)
+- [FOTA development plan](docs/3-fota_development_plan.md)
+- [Dynamic activities development plan](docs/4-dynamic_activities_plan.md)
+
+---
+
 ## Disclaimer
 
 This project was 100% implemented by AI agents. Don't take the source code too serious! :)
