@@ -136,6 +136,8 @@ esp_err_t time_ctr_init(void)
     if (ESP_OK != ret)
     {
         ESP_LOGE(gp_tag, "esp_timer_create (threshold) failed: %s", esp_err_to_name(ret));
+        (void)esp_timer_delete(gp_tick_timer);
+        gp_tick_timer = NULL;
         return ret;
     }
 
@@ -144,6 +146,10 @@ esp_err_t time_ctr_init(void)
     if (ESP_OK != ret)
     {
         ESP_LOGE(gp_tag, "esp_event_handler_register (pulse) failed: %s", esp_err_to_name(ret));
+        (void)esp_timer_delete(gp_tick_timer);
+        (void)esp_timer_delete(gp_inet_gate_timer);
+        gp_tick_timer      = NULL;
+        gp_inet_gate_timer = NULL;
         return ret;
     }
 
@@ -153,6 +159,10 @@ esp_err_t time_ctr_init(void)
     {
         ESP_LOGE(gp_tag, "esp_event_handler_register (session_opened) failed: %s",
             esp_err_to_name(ret));
+        (void)esp_timer_delete(gp_tick_timer);
+        (void)esp_timer_delete(gp_inet_gate_timer);
+        gp_tick_timer      = NULL;
+        gp_inet_gate_timer = NULL;
         return ret;
     }
 
@@ -162,6 +172,10 @@ esp_err_t time_ctr_init(void)
     {
         ESP_LOGE(gp_tag, "esp_event_handler_register (session_closed) failed: %s",
             esp_err_to_name(ret));
+        (void)esp_timer_delete(gp_tick_timer);
+        (void)esp_timer_delete(gp_inet_gate_timer);
+        gp_tick_timer      = NULL;
+        gp_inet_gate_timer = NULL;
         return ret;
     }
 
@@ -171,6 +185,10 @@ esp_err_t time_ctr_init(void)
     {
         ESP_LOGE(gp_tag, "esp_event_handler_register (config_changed) failed: %s",
             esp_err_to_name(ret));
+        (void)esp_timer_delete(gp_tick_timer);
+        (void)esp_timer_delete(gp_inet_gate_timer);
+        gp_tick_timer      = NULL;
+        gp_inet_gate_timer = NULL;
         return ret;
     }
 

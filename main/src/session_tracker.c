@@ -131,6 +131,8 @@ esp_err_t session_trk_init(void)
     if (NULL == gp_idle_timer)
     {
         ESP_LOGE(gp_tag, "xTimerCreate failed for idle timer");
+        (void)xTimerDelete(gp_qualify_timer, 0U);
+        gp_qualify_timer = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -139,6 +141,10 @@ esp_err_t session_trk_init(void)
     if (ESP_OK != ret)
     {
         ESP_LOGE(gp_tag, "esp_event_handler_register failed: %s", esp_err_to_name(ret));
+        (void)xTimerDelete(gp_qualify_timer, 0U);
+        (void)xTimerDelete(gp_idle_timer, 0U);
+        gp_qualify_timer = NULL;
+        gp_idle_timer    = NULL;
         return ret;
     }
 
