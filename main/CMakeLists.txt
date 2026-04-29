@@ -1,7 +1,9 @@
 # ---- Dynamic Activity Files -----------------------------------------------
 # Collect all HTML files in the dyn_activities directory.
-# NOTE: Run 'idf.py reconfigure' after adding or removing .html files so
-# the build system picks up the changes.
+# NOTE: Run 'idf.py reconfigure' after ADDING or REMOVING .html files (the
+# file list is fixed at configure time).  Modifying an existing .html file
+# is picked up automatically on the next 'idf.py build' — no reconfigure
+# needed.
 file(GLOB DYN_ACT_HTMLS
      "${CMAKE_CURRENT_SOURCE_DIR}/dyn_activities/*.html")
 
@@ -41,13 +43,33 @@ foreach(_HTML ${DYN_ACT_HTMLS})
     if(_NO_COMPRESS_IDX EQUAL -1)
         # --- compressed (default) ---
         set(_GZ_OUT "${_DYN_GZ_DIR}/${_FNAME_FULL}.gz")
-        execute_process(
-            COMMAND "${_GZIP_EXEC}" -9 -c "${_HTML}"
-            OUTPUT_FILE "${_GZ_OUT}"
-            RESULT_VARIABLE _GZIP_RESULT)
-        if(NOT _GZIP_RESULT EQUAL 0)
-            message(FATAL_ERROR "gzip failed for ${_HTML} (exit code ${_GZIP_RESULT})")
+
+        # Bootstrap: ensure the .gz exists on the very first configure so
+        # that idf_component_register can reference it in EMBED_FILES.
+        if(NOT EXISTS "${_GZ_OUT}")
+            execute_process(
+                COMMAND "${_GZIP_EXEC}" -9 -c "${_HTML}"
+                OUTPUT_FILE "${_GZ_OUT}"
+                RESULT_VARIABLE _GZIP_RESULT)
+            if(NOT _GZIP_RESULT EQUAL 0)
+                message(FATAL_ERROR "gzip failed for ${_HTML} (exit code ${_GZIP_RESULT})")
+            endif()
         endif()
+
+        # Build-time rule: re-compress whenever the source HTML is modified.
+        # ESP-IDF's EMBED_FILES mechanism depends on this OUTPUT, so the full
+        # chain (html → gz → .S → object) is tracked by Ninja automatically.
+        add_custom_command(
+            OUTPUT  "${_GZ_OUT}"
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DGZIP_EXEC=${_GZIP_EXEC}"
+                    "-DSRC=${_HTML}"
+                    "-DDST=${_GZ_OUT}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/gz_compress.cmake"
+            DEPENDS "${_HTML}"
+            COMMENT "Compressing ${_FNAME_FULL}"
+            VERBATIM)
+
         list(APPEND _EMBED_LIST "${_GZ_OUT}")
         set(_EMBED_FILE "${_GZ_OUT}")
         set(_B_GZIP "1")
