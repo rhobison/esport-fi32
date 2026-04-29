@@ -1340,12 +1340,10 @@ The player must:
 - **Correct answer hit or collided** → the struck asteroid explodes (orange burst);
   the remaining two asteroids instantly flee off-screen at high speed.  `solved++`.
   New problem + new set spawns immediately.
-- **Wrong answer hit or collided** → the struck asteroid flashes red; −1 second timer
-  penalty; `wrong++`.  The wrong asteroid is visually marked as "tried" (dimmed + red
-  border); the set continues advancing.  The player can fire at the remaining asteroids.
-  At most 2 wrong shots are possible per set; the third asteroid is always correct by
-  exclusion.  Re-firing at an already-tried wrong asteroid is silently ignored (no second
-  penalty).
+- **Wrong answer hit or collided** → the struck asteroid's row is immediately flagged;
+  −1 second timer penalty; `wrong++`.  All three asteroids in the set then flee
+  off-screen at high speed and a new set spawns.  Every set is resolved by exactly
+  one shot or collision — there is no multi-shot within a single set.
 
 The **direction** of play is chosen on the SETUP screen:
 - **Right → Left** (default): rocket on the right, asteroids fly in from the left.
@@ -1611,11 +1609,12 @@ Each asteroid is a `<div>` absolutely positioned within its row:
   appearance (dark centre, lighter edge).
 - Size: `90 × 55 px` baseline; scales down on narrow screens.
 - Displays the **candidate answer number** centred, bold white, `1.2em`.
-- Movement: CSS `animation: flyIn linear` (RTL: `translateX` from `0` to `-gameWidth`;
-  LTR: `translateX` from `0` to `+gameWidth`); duration from the speed tier table.
-- **"Tried wrong" state**: after a wrong shot, `opacity: 0.5` and
-  `border: 2px solid #ff4444`; the asteroid continues moving.  Firing at it again is
-  silently ignored.
+- Movement: CSS `animation: flyRTL / flyLTR linear` — RTL: `left` from `-110px` to
+  `calc(100% - 68px)` (travels left→right toward rocket on right); LTR: `right` from
+  `-110px` to `calc(100% - 68px)` (travels right→left toward rocket on left); duration
+  from the speed tier table.
+- **Wrong shot or collision**: the struck asteroid's laser flashes red; then all
+  asteroids in the set flee off-screen immediately and a new set spawns.
 - **Correct explosion**: CSS `@keyframes` orange/yellow radial burst, 400 ms (same
   pattern as `space_math.html`); element removed from DOM after animation completes.
 - **Flee animation**: on a correct hit, the two surviving asteroids play
@@ -1784,7 +1783,7 @@ game must show the `ERROR` screen immediately before any game logic runs.
 │   ├─ targetProblems, solved, wrong, elapsedS
 │   ├─ gameState: 'loading' | 'setup' | 'playing' | 'end'
 │   ├─ rocketRow          (0 | 1 | 2)
-│   └─ currentSet         { problem, correctRow, answers[3], triedRows[], spawnTime, travelDuration }
+│   └─ currentSet         { problem, correctRow, answers[3], spawnTime, travelDuration }
 ├─ Problem & distractor generator
 │   ├─ generateProblem() → { text, answer }
 │   └─ generateDistractors(correct, type) → [d1, d2]
@@ -1792,11 +1791,11 @@ game must show the `ERROR` screen immediately before any game logic runs.
 │   ├─ spawnSet()           → generates problem + assigns answers to rows; starts CSS animation
 │   ├─ checkCollision()     ← called from RAF; fires when elapsed >= travelDuration
 │   ├─ resolveSet(row)      → evaluates answer; updates solved/wrong/timer
-│   └─ fleeAsteroids(correctRow)  ← triggers flee CSS transitions on surviving rows
+│   └─ fleeAsteroids(survivedRow)  ← triggers flee CSS transitions; survivedRow = -1 flees all
 ├─ Input handling
 │   ├─ onMoveUp()
 │   ├─ onMoveDown()
-│   ├─ onFire()             ← fires at rocketRow; ignores already-tried wrong rows
+│   ├─ onFire()             ← fires at rocketRow; resolves set (correct or wrong)
 │   ├─ onTapAsteroid(row)   ← snap rocket to row + immediate fire
 │   └─ onKeyDown(event)     ← ArrowUp, ArrowDown, Space
 ├─ Timer
@@ -1872,12 +1871,9 @@ body.ltr         → flex-direction: row-reverse  (LTR: control panel on left)
 - [ ] Laser animation plays (150 ms expanding line from rocket to asteroid).
 - [ ] Correct asteroid shot → orange explosion; remaining 2 flee off-screen;
       rocket green flash; `solved++`.
-- [ ] Wrong asteroid shot → red flash on asteroid; `wrong++`; −1 s from timer;
-      asteroid dims + red border; continues moving.
-- [ ] Re-firing at an already-tried wrong asteroid → silently ignored; no second penalty.
-- [ ] Asteroid set reaches rocket (travel time elapsed) → collision on rocket's row.
-- [ ] Correct collision → correct explosion + rocket green flash; others flee; `solved++`.
-- [ ] Wrong collision → rocket red shake; `wrong++`; −1 s; set discarded; `solved` unchanged.
+- [ ] Wrong asteroid shot → red laser flash; `wrong++`; −1 s from timer;
+      all asteroids in the set immediately flee off-screen; new set spawns.
+- [ ] Wrong collision → rocket red shake; `wrong++`; −1 s; all asteroids flee; `solved` unchanged.
 - [ ] New set spawns immediately after previous set resolves.
 - [ ] Asteroid travel time follows the 4-tier speed table (8 s → 7 s → 6 s → 5 s).
 - [ ] Countdown timer decrements every second; displayed as `MM:SS` in header.
