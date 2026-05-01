@@ -37,9 +37,6 @@
 /** NVS key for the device count (uint8). */
 #define DEVICE_REG_NVS_KEY_COUNT ("dev_count")
 
-/** NVS key prefix for device blobs (uint8 index appended). */
-#define DEVICE_REG_NVS_KEY_DEV_FMT ("dev_%u")
-
 /** NVS key format for the metadata blob (mac, nickname, b_enabled). */
 #define DEVICE_REG_NVS_KEY_META_FMT ("dev_%u_m")
 /** NVS key format for the counter value (uint32_t). */
@@ -183,22 +180,11 @@ esp_err_t device_reg_init(void)
         return ESP_OK;
     }
 
-    /* TEMPORARY migration (Feature 10): units with the legacy single-blob layout
-     * (key "dev_N") are migrated to the split-key layout ("dev_N_m" + "dev_N_c")
-     * on the first boot after flashing Feature 10.  Remove this block in Feature 11
-     * after verifying that all devices have been migrated. */
-
-    /* Track slots that need migration so we can write the new keys and erase the
-     * legacy key after the main read loop, in a separate NVS session. */
-    bool b_needs_migration[DEVICE_REG_MAX_ENTRIES];
-    memset(b_needs_migration, 0, sizeof(b_needs_migration));
-
-    /* Load each device entry — try split keys first, fall back to legacy blob. */
+    /* Load each device entry from split keys. */
     for (uint8_t i = 0U; i < count; i++)
     {
         char key[16];
 
-        /* Step A — Try new meta key. */
         device_reg_meta_t meta;
         size_t            meta_size = sizeof(meta);
         snprintf(key, sizeof(key), DEVICE_REG_NVS_KEY_META_FMT, (unsigned)i);
@@ -206,7 +192,6 @@ esp_err_t device_reg_init(void)
 
         if (ESP_OK == blob_ret)
         {
-            /* Meta key found — copy static fields. */
             memcpy(g_entries[i].mac, meta.mac, DEVICE_REG_MAC_LEN);
             memcpy(g_entries[i].nickname, meta.nickname, sizeof(g_entries[i].nickname));
             g_entries[i].b_enabled = meta.b_enabled;
@@ -221,34 +206,12 @@ esp_err_t device_reg_init(void)
         }
         else if (ESP_ERR_NVS_NOT_FOUND == blob_ret)
         {
-            /* Step B — Fall back to legacy blob (migration path). */
-            device_reg_entry_t legacy;
-            size_t             legacy_size = sizeof(legacy);
-            snprintf(key, sizeof(key), DEVICE_REG_NVS_KEY_DEV_FMT, (unsigned)i);
-            blob_ret = nvs_get_blob(handle, key, &legacy, &legacy_size);
-
-            if ((ESP_OK == blob_ret) && (legacy_size == sizeof(device_reg_entry_t)))
-            {
-                g_entries[i]         = legacy;
-                b_needs_migration[i] = true;
-                ESP_LOGI(gp_tag, "dev %u: migrated legacy blob to split keys", (unsigned)i);
-            }
-            else if (ESP_ERR_NVS_NOT_FOUND == blob_ret)
-            {
-                /* Neither key present — empty slot. */
-                memset(&g_entries[i], 0, sizeof(g_entries[i]));
-                ESP_LOGD(gp_tag, "dev %u: no NVS data (empty slot)", (unsigned)i);
-            }
-            else
-            {
-                memset(&g_entries[i], 0, sizeof(g_entries[i]));
-                ESP_LOGW(gp_tag, "dev %u: read error %s, slot zeroed", (unsigned)i,
-                    esp_err_to_name(blob_ret));
-            }
+            /* No entry for this slot — zero it. */
+            memset(&g_entries[i], 0, sizeof(g_entries[i]));
+            ESP_LOGD(gp_tag, "dev %u: no NVS data (empty slot)", (unsigned)i);
         }
         else
         {
-            /* Unexpected error on meta read. */
             memset(&g_entries[i], 0, sizeof(g_entries[i]));
             ESP_LOGW(gp_tag, "dev %u: meta read error %s, slot zeroed", (unsigned)i,
                 esp_err_to_name(blob_ret));
@@ -274,29 +237,6 @@ esp_err_t device_reg_init(void)
     }
 
     nvs_close(handle);
-
-    /* Apply migrations: write split keys and erase legacy blobs for any slot
-     * that was loaded from a legacy dev_N blob.  Each helper opens/closes its
-     * own NVS handle, so no handle must be open at this point. */
-    for (uint8_t i = 0U; i < count; i++)
-    {
-        if (b_needs_migration[i])
-        {
-            (void)device_reg_entry_meta_save(i);
-            (void)device_reg_entry_ctr_save(i);
-
-            /* Erase legacy key. */
-            nvs_handle_t mig_handle;
-            if (ESP_OK == nvs_open(DEVICE_REG_NVS_NS, NVS_READWRITE, &mig_handle))
-            {
-                char leg_key[16];
-                snprintf(leg_key, sizeof(leg_key), DEVICE_REG_NVS_KEY_DEV_FMT, (unsigned)i);
-                (void)nvs_erase_key(mig_handle, leg_key);
-                (void)nvs_commit(mig_handle);
-                nvs_close(mig_handle);
-            }
-        }
-    }
 
     ESP_LOGI(gp_tag, "init: loaded %u device(s), rider=%u", (unsigned)g_count, (unsigned)g_rider);
     return ESP_OK;
@@ -432,9 +372,6 @@ esp_err_t device_reg_entry_remove(uint8_t idx)
         snprintf(stale_key, sizeof(stale_key), DEVICE_REG_NVS_KEY_META_FMT, (unsigned)old_last);
         (void)nvs_erase_key(handle, stale_key);
         snprintf(stale_key, sizeof(stale_key), DEVICE_REG_NVS_KEY_CTR_FMT, (unsigned)old_last);
-        (void)nvs_erase_key(handle, stale_key);
-        /* migration cleanup: remove legacy blob if present */
-        snprintf(stale_key, sizeof(stale_key), DEVICE_REG_NVS_KEY_DEV_FMT, (unsigned)old_last);
         (void)nvs_erase_key(handle, stale_key);
 
         (void)nvs_set_u8(handle, DEVICE_REG_NVS_KEY_COUNT, g_count);
