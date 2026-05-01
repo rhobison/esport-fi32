@@ -93,6 +93,15 @@
   - [Phase 9.4 — Integration & Verification](#phase-94--integration--verification)
   - [Phase 9.5 — Documentation Update](#phase-95--documentation-update)
   - [Phase 9.6 — Commit Message](#phase-96--commit-message)
+- [Feature 10 — Device Registry NVS Key Splitting](#feature-10--device-registry-nvs-key-splitting)
+  - [Phase 10.1 — Split Save Helpers and Key Constants](#phase-101--split-save-helpers-and-key-constants)
+  - [Phase 10.2 — Migration Path in `device_reg_init()`](#phase-102--migration-path-in-device_reg_init)
+  - [Phase 10.3 — Spec Update: `docs/1-specification.md`](#phase-103--spec-update-docs1-specificationmd)
+  - [Phase 10.4 — Commit Message](#phase-104--commit-message)
+- [Feature 11 — Remove NVS Migration Code](#feature-11--remove-nvs-migration-code)
+  - [Phase 11.1 — Remove Migration Code from `device_registry.c`](#phase-111--remove-migration-code-from-device_registryc)
+  - [Phase 11.2 — Documentation Update](#phase-112--documentation-update)
+  - [Phase 11.3 — Commit Message](#phase-113--commit-message)
 
 ---
 
@@ -1147,6 +1156,18 @@ This section tracks incremental improvements beyond the base specification.  Eac
 | 8.4   | 8       | HTTP Server: `/dyn` Page, File Server & Manage UI | `http_server_dyn.h`, `http_server_dyn.c`, `http_server_activities.c`, `http_server_api.c`, `http_server.c` |
 | 8.5   | 8       | Integration & Verification                     | all prior outputs, `http_server.c`                                     |
 | 8.6   | 8       | Documentation & README Update                  | `docs/1-specification.md`, `docs/2-development_plan.md`, `README.md`   |
+| 9.1   | 9       | CMake Build Infrastructure                     | `main/CMakeLists.txt`                                                  |
+| 9.2   | 9       | Registry Header Update                         | `main/inc/dyn_act_registry.h`                                          |
+| 9.3   | 9       | HTTP Handler Update                            | `main/src/http_server_dyn.c`                                           |
+| 9.4   | 9       | Integration & Verification                     | all prior outputs                                                      |
+| 9.5   | 9       | Documentation Update                           | `README.md`, `docs/4-dynamic_activities_plan.md`                       |
+| 10.1  | 10      | Split Save Helpers and Key Constants           | `device_registry.c`                                                    |
+| 10.2  | 10      | Migration Path in `device_reg_init()`          | `device_registry.c`                                                    |
+| 10.3  | 10      | Spec Update                                    | `docs/1-specification.md`                                              |
+| 10.4  | 10      | Commit Message                                 | (provided to user)                                                     |
+| 11.1  | 11      | Remove Migration Code                          | `device_registry.c`                                                    |
+| 11.2  | 11      | Documentation Update                           | `docs/1-specification.md`, `docs/2-development_plan.md`                |
+| 11.3  | 11      | Commit Message                                 | (provided to user)                                                     |
 
 ---
 
@@ -5408,5 +5429,591 @@ files are gzip-compressed at build time before being embedded in the firmware.
 - [ ] `docs/4-dynamic_activities_plan.md` Flash Storage Constraints table includes a
       compressed size column.
 - [ ] No other documentation sections contradict the compression behaviour.
+
+---
+
+---
+
+## Feature 10 — Device Registry NVS Key Splitting
+
+### Overview
+
+The current device registry stores each entry as a single NVS blob under key `dev_N`
+(where N is the slot index).  This blob contains both **static metadata** (MAC address,
+nickname, enabled flag) and the **dynamic counter** (`counter_s`) in one contiguous
+`device_reg_entry_t`.
+
+The problem with this layout is that the counter is updated frequently (every 60 seconds
+by the periodic save, and immediately when it reaches zero), whereas the metadata changes
+only when the operator explicitly edits a device's nickname or enabled state.  If a
+hard reset occurs while a blob write is in progress — or if the NVS sector becomes
+unreadable — the entire blob is treated as corrupt.  The recovery path in
+`device_reg_init()` zeroes the whole entry, which destroys the nickname and MAC address
+along with the counter.
+
+**This feature splits each `dev_N` blob into two independent NVS keys:**
+
+| New NVS key | Type | Contents | Updated when |
+| ----------- | ---- | -------- | ------------ |
+| `dev_N_m`   | blob (`device_reg_meta_t`) | `mac[6]`, `nickname[16]`, `b_enabled` | Nickname or enabled flag changed |
+| `dev_N_c`   | uint32 | `counter_s` | Counter reaches zero, periodic 60 s save |
+
+With this layout, a counter write failure only corrupts `dev_N_c` (counter resets to 0
+on next boot — losing at most `DEVICE_REG_SAVE_INTERVAL_S` seconds of credits); the
+nickname, MAC address, and enabled flag stored in `dev_N_m` are unaffected.
+
+### Key naming
+
+All new key strings fit within ESP-IDF's 15-character NVS key limit:
+
+| Key string | Length | Example (slot 0) |
+| ---------- | ------ | ---------------- |
+| `dev_N_m`  | 7      | `"dev_0_m"`      |
+| `dev_N_c`  | 7      | `"dev_0_c"`      |
+
+The legacy format `"dev_N"` is used **only** inside the migration read path in
+`device_reg_init()` and is never written.
+
+### Migration path
+
+On the first boot after flashing, `device_reg_init()` will not find `dev_N_m` keys.  It
+falls back to reading the legacy `dev_N` blob, writes both new keys, and erases the old
+key.  This migration runs transparently without any data loss.
+
+The migration code is **temporary**.  It exists only to carry existing device data through
+the one-time upgrade from the legacy single-blob layout.  Once the first boot with Feature
+10 has been confirmed and all data is safely migrated, Feature 11 removes the migration
+branch entirely so no dead code remains in production firmware.
+
+### Only `device_registry.c` is modified
+
+The public API (`device_registry.h`) and the `device_reg_entry_t` struct are unchanged.
+No other source file requires modification.  All callers continue to call the same
+public functions with the same parameters.
+
+### Modified Files
+
+| File | Change |
+| ---- | ------ |
+| `main/src/device_registry.c` | New key constants, `device_reg_meta_t` struct, split save helpers, migration in `device_reg_init()`, updated callers of `device_reg_entry_save()` |
+| `docs/1-specification.md` | §8 NVS Layout updated to reflect `dev_N_m` / `dev_N_c` keys and migration note |
+
+---
+
+### Phase 10.1 — Split Save Helpers and Key Constants
+
+#### Goal
+
+Introduce the new NVS key naming constants and the internal `device_reg_meta_t` struct.
+Add two static save helpers — `device_reg_entry_meta_save()` and
+`device_reg_entry_ctr_save()` — and update every internal site that currently calls
+`device_reg_entry_save()` or writes blobs to NVS to use the appropriate split helper.
+
+`device_reg_init()` is **not** updated in this phase; it still reads the legacy `dev_N`
+blob (Phase 10.2 replaces the init read path).  After this phase the new keys are
+written but not yet read back on boot.
+
+#### Inputs
+
+- `main/src/device_registry.c` (Feature 4 + dirty-flag improvement output)
+- `docs/1-specification.md` §8 NVS Layout (for reference only)
+
+#### Tasks
+
+1. **New key format macros** — in the Internal Constants section of `device_registry.c`,
+   add below the existing `DEVICE_REG_NVS_KEY_DEV_FMT` definition:
+   ```c
+   /** NVS key format for the metadata blob (mac, nickname, b_enabled). */
+   #define DEVICE_REG_NVS_KEY_META_FMT  ("dev_%u_m")
+   /** NVS key format for the counter value (uint32_t). */
+   #define DEVICE_REG_NVS_KEY_CTR_FMT   ("dev_%u_c")
+   ```
+   The legacy macro `DEVICE_REG_NVS_KEY_DEV_FMT` is **retained** — it is still used by
+   the migration read path (Phase 10.2) and the stale-key erase in
+   `device_reg_entry_remove()` (updated below).
+
+2. **`device_reg_meta_t` struct** — define internally in `device_registry.c` (not
+   exported in the header):
+   ```c
+   typedef struct device_reg_meta_tag {
+       uint8_t mac[DEVICE_REG_MAC_LEN];
+       char    nickname[DEVICE_REG_NICKNAME_MAX_LEN + 1U];
+       bool    b_enabled;
+   } device_reg_meta_t;
+   ```
+   Place this typedef in the Internal Type Definitions section, before the static variable
+   declarations.
+
+3. **`device_reg_entry_meta_save(uint8_t idx)`** — new static helper:
+   - Builds a `device_reg_meta_t` from `g_entries[idx]` inside a spinlock snapshot.
+   - Opens namespace `DEVICE_REG_NVS_NS` `NVS_READWRITE`.
+   - Formats the key with `snprintf(key, sizeof(key), DEVICE_REG_NVS_KEY_META_FMT, (unsigned)idx)`.
+   - Calls `nvs_set_blob(handle, key, &meta, sizeof(meta))`, then `nvs_commit()`, then
+     `nvs_close()`.
+   - Logs `ESP_LOGE` on open failure; logs `ESP_LOGW` on set/commit failure.
+
+4. **`device_reg_entry_ctr_save(uint8_t idx)`** — new static helper:
+   - Snapshots `g_entries[idx].counter_s` inside a spinlock.
+   - Opens namespace `DEVICE_REG_NVS_NS` `NVS_READWRITE`.
+   - Formats the key with `snprintf(key, sizeof(key), DEVICE_REG_NVS_KEY_CTR_FMT, (unsigned)idx)`.
+   - Calls `nvs_set_u32(handle, key, counter_s)`, then `nvs_commit()`, then `nvs_close()`.
+   - Logs `ESP_LOGE` on open failure; logs `ESP_LOGW` on set/commit failure.
+
+5. **Declare both helpers** in the Internal Function Prototypes section.
+
+6. **Update `device_reg_entry_save(uint8_t idx)`** — replace its entire body with:
+   ```c
+   (void)device_reg_entry_meta_save(idx);
+   (void)device_reg_entry_ctr_save(idx);
+   return ESP_OK;
+   ```
+   This ensures callers such as `device_reg_entry_add()` and the remove-rewrite loop
+   continue to work without change.
+
+7. **Update `device_reg_entry_nickname_set()`** — replace the
+   `device_reg_entry_save(idx)` call with `device_reg_entry_meta_save(idx)`.
+   The counter is not affected by a nickname change; writing a full blob would be
+   unnecessary flash wear.
+
+8. **Update `device_reg_entry_enabled_set()`** — replace the
+   `device_reg_entry_save(idx)` call with `device_reg_entry_meta_save(idx)`.
+   Same rationale.
+
+9. **Update `device_reg_counters_save_all()`** — replace
+   `device_reg_entry_save(i)` with `device_reg_entry_ctr_save(i)`.
+   The periodic checkpoint only needs to persist counters; metadata does not change.
+
+10. **Update `device_reg_tick()` — zero-reached path** — replace
+    `device_reg_entry_save(i)` with `device_reg_entry_ctr_save(i)`.
+    When a counter hits zero, only the counter key needs to be updated immediately.
+
+11. **Update `device_reg_entry_remove()` — stale-key erase** — the existing code erases
+    the now-vacated last slot's legacy blob key after compacting the array.  Replace the
+    single `nvs_erase_key()` call on the stale `dev_N` key with two calls:
+    ```c
+    snprintf(stale_key, sizeof(stale_key), DEVICE_REG_NVS_KEY_META_FMT, (unsigned)old_last);
+    (void)nvs_erase_key(handle, stale_key);
+    snprintf(stale_key, sizeof(stale_key), DEVICE_REG_NVS_KEY_CTR_FMT, (unsigned)old_last);
+    (void)nvs_erase_key(handle, stale_key);
+    ```
+    The legacy `dev_N` stale-key erase is **also retained** for the transition period
+    (units being upgraded from old firmware still have that key):
+    ```c
+    snprintf(stale_key, sizeof(stale_key), DEVICE_REG_NVS_KEY_DEV_FMT, (unsigned)old_last);
+    (void)nvs_erase_key(handle, stale_key); /* migration cleanup: remove legacy blob if present */
+    ```
+
+#### Notes
+
+> After this phase, first-boot init still reads legacy `dev_N` blobs.  New entries added
+> or modified after flashing will be stored under the new keys.  `device_reg_init()` is
+> updated in Phase 10.2 to read the new keys first and fall back to the legacy blob only
+> when neither new key exists.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `DEVICE_REG_NVS_KEY_META_FMT` and `DEVICE_REG_NVS_KEY_CTR_FMT` are defined.
+- [ ] `device_reg_meta_t` typedef exists in `device_registry.c` (not exported).
+- [ ] `device_reg_entry_meta_save()` and `device_reg_entry_ctr_save()` are declared in
+      the Internal Function Prototypes section.
+- [ ] `device_reg_entry_save()` calls both helpers and returns `ESP_OK`.
+- [ ] After `device_reg_entry_nickname_set()`: only `dev_N_m` is written to NVS; no
+      `dev_N_c` write occurs (verify with NVS explorer or targeted unit test).
+- [ ] After `device_reg_entry_enabled_set()`: only `dev_N_m` is written.
+- [ ] `device_reg_counters_save_all()` calls `device_reg_entry_ctr_save()` for each slot.
+- [ ] `device_reg_tick()` b_zero path calls `device_reg_entry_ctr_save()`.
+- [ ] `device_reg_entry_remove()` erases `dev_N_m`, `dev_N_c`, and (if present)
+      `dev_N` for the vacated last slot.
+- [ ] No function allocates more than 512 bytes on the stack (NVS key buffers are `char
+      key[16]` — exempt).
+
+---
+
+### Phase 10.2 — Migration Path in `device_reg_init()`
+
+#### Goal
+
+Update `device_reg_init()` to read per-device state from the new split keys (`dev_N_m`
+and `dev_N_c`).  When the new `dev_N_m` key is not found for a slot, fall back to the
+legacy `dev_N` blob, migrate the data to the new keys, and erase the legacy key.
+
+The migration code is **temporary**.  It will be removed by Feature 11 once the first
+boot with Feature 10 has been confirmed.  Until then it must be kept intact to ensure
+no data is lost during the upgrade.
+
+#### Inputs
+
+- `main/src/device_registry.c` (Phase 10.1 output)
+
+#### Tasks
+
+1. **Replace the per-slot read loop** in `device_reg_init()` (the block that calls
+   `nvs_get_blob(key, &g_entries[i], ...)` for each index) with the following two-step
+   read logic for each slot `i`:
+
+   **Step A — Try new meta key:**
+   ```c
+   device_reg_meta_t meta;
+   size_t            meta_size = sizeof(meta);
+   snprintf(key, sizeof(key), DEVICE_REG_NVS_KEY_META_FMT, (unsigned)i);
+   ret = nvs_get_blob(handle, key, &meta, &meta_size);
+   ```
+   - If `ESP_OK`:
+     - Copy `meta.mac` → `g_entries[i].mac`, `meta.nickname` → `g_entries[i].nickname`,
+       `meta.b_enabled` → `g_entries[i].b_enabled`.
+     - Read counter:
+       ```c
+       snprintf(key, sizeof(key), DEVICE_REG_NVS_KEY_CTR_FMT, (unsigned)i);
+       uint32_t ctr = 0U;
+       (void)nvs_get_u32(handle, key, &ctr);  /* 0 on miss is acceptable */
+       g_entries[i].counter_s = ctr;
+       ```
+     - Log `ESP_LOGD(gp_tag, "dev %u: loaded (meta+ctr)", i)`.
+     - `continue` to next slot.
+
+   **Step B — Fall back to legacy blob (migration):**
+   - If `ret == ESP_ERR_NVS_NOT_FOUND`:
+     ```c
+     device_reg_entry_t legacy;
+     size_t             legacy_size = sizeof(legacy);
+     snprintf(key, sizeof(key), DEVICE_REG_NVS_KEY_DEV_FMT, (unsigned)i);
+     ret = nvs_get_blob(handle, key, &legacy, &legacy_size);
+     ```
+     - If `ESP_OK` and `legacy_size == sizeof(device_reg_entry_t)`:
+       - Copy `legacy` → `g_entries[i]` directly.
+       - Close the current handle.
+       - Call `device_reg_entry_meta_save(i)` and `device_reg_entry_ctr_save(i)` to write
+         the new keys.
+       - Re-open the handle `NVS_READWRITE`; call `nvs_erase_key()` on the legacy key;
+         call `nvs_commit()`; close; re-open for the remaining slots.
+       - Log `ESP_LOGI(gp_tag, "dev %u: migrated legacy blob to split keys", i)`.
+     - If `ESP_ERR_NVS_NOT_FOUND` (neither key exists): this slot has never been written.
+       Zero `g_entries[i]` and log `ESP_LOGD(gp_tag, "dev %u: no NVS data (empty slot)", i)`.
+     - On any other error: zero `g_entries[i]` and log
+       `ESP_LOGW(gp_tag, "dev %u: read error %s, slot zeroed", i, esp_err_to_name(ret))`.
+   - If `ret` is neither `ESP_OK` nor `ESP_ERR_NVS_NOT_FOUND` (unexpected error on
+     the meta read itself): zero `g_entries[i]` and log `ESP_LOGW`.
+
+2. Add a **temporary migration comment** immediately before the per-slot loop:
+   ```c
+   /* TEMPORARY migration (Feature 10): units with the legacy single-blob layout
+    * (key "dev_N") are migrated to the split-key layout ("dev_N_m" + "dev_N_c")
+    * on the first boot after flashing Feature 10.  Remove this block in Feature 11
+    * after verifying that all devices have been migrated. */
+   ```
+
+3. The handle management surrounding the loop may need adjustment: the re-open dance
+   after a migration write is acceptable but must not leave any handle open or leaked.
+   An alternative that avoids re-open is to collect migration work in a local array and
+   apply all migrations after the main read loop in a single NVS session.  Either
+   approach is acceptable; choose whichever is cleaner given the existing handle structure.
+
+#### Notes
+
+> The migration path is intentionally kept simple and bounded.  With at most four slots
+> (`DEVICE_REG_MAX_ENTRIES = 4`), the worst case is four legacy reads + four meta writes +
+> four counter writes + four erases — all at boot time, before any task has been scheduled.
+> This is acceptable.
+
+> `device_reg_entry_meta_save()` and `device_reg_entry_ctr_save()` each open and close
+> their own NVS handle, so they can safely be called while the init handle is closed (or
+> they can be called after the init close).  The sequence:
+> 1. Close init handle.
+> 2. Call `device_reg_entry_meta_save(i)` (opens, commits, closes).
+> 3. Call `device_reg_entry_ctr_save(i)` (opens, commits, closes).
+> 4. Open new handle; erase legacy key; commit; close.
+> 5. Open new handle for remaining slots.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] **New layout (normal boot)**: `device_reg_init()` reads `dev_N_m` and `dev_N_c`
+      for each slot; no migration log message is emitted.
+- [ ] **Legacy layout (first boot after upgrade)**: `device_reg_init()` reads legacy
+      `dev_N` blob, writes `dev_N_m` and `dev_N_c`, erases `dev_N`, and logs
+      `"migrated legacy blob to split keys"` for each migrated slot.
+- [ ] After migration, a second `device_reg_init()` call (simulated reboot) reads the
+      new keys without triggering the migration path again.
+- [ ] Nickname, MAC, `b_enabled`, and `counter_s` are preserved exactly after migration.
+- [ ] If `dev_N_m` exists but `dev_N_c` does not (counter write was interrupted),
+      `device_reg_init()` loads `counter_s = 0` without an error and without triggering
+      migration.
+- [ ] If neither `dev_N_m` nor `dev_N` exist for a slot, the slot is zeroed and no error
+      is returned from `device_reg_init()`.
+- [ ] No NVS handle is left open on return from `device_reg_init()`.
+- [ ] `device_reg_init()` still validates `g_count` and `g_rider` ranges as before.
+
+---
+
+### Phase 10.3 — Spec Update: `docs/1-specification.md`
+
+#### Goal
+
+Update `docs/1-specification.md` to document the new NVS key layout for the device
+registry namespace, including a migration note.
+
+#### Inputs
+
+- All Phase 10.1–10.2 outputs.
+- `docs/1-specification.md` (current — §8 NVS Layout, `esport_dev` namespace)
+
+#### Tasks
+
+1. **§8 NVS Layout — namespace `esport_dev`** — replace the `dev_N` blob row with two rows:
+
+   | NVS Key       | Type                     | Description                                                                 |
+   | ------------- | ------------------------ | --------------------------------------------------------------------------- |
+   | `dev_count`   | `uint8`                  | Number of registered entries (0–4); `0` on first boot                      |
+   | `dev_0_m` … `dev_3_m` | blob (`device_reg_meta_t`) | Static device metadata: MAC address, nickname, `b_enabled` flag       |
+   | `dev_0_c` … `dev_3_c` | `uint32`           | Per-device internet credit counter (`counter_s`)                            |
+   | `dev_rider`   | `uint8`                  | Current rider index, or `DEVICE_REG_NO_RIDER` (0xFF) when none selected    |
+
+2. **§8 — add a migration note** after the table:
+
+   > **Migration (temporary):** On the first boot after a firmware upgrade from a version
+   > that used the legacy `dev_N` single-blob layout, `device_reg_init()` automatically
+   > reads each `dev_N` blob, writes the split keys, and erases the legacy key.  The
+   > migration is transparent and preserves all device data.  The migration code is
+   > removed in Feature 11 after the first successful boot with Feature 10.
+
+3. **§5 Device Registry module spec** — update the NVS persistence description:
+   - Under "NVS write triggers", clarify that nickname/enabled changes write only
+     `dev_N_m`; counter updates (periodic save + zero event) write only `dev_N_c`.
+   - Add a sentence: "Separating static metadata from the dynamic counter ensures that a
+     failed counter write cannot corrupt a device's nickname or MAC address."
+
+#### Acceptance Criteria
+
+- [ ] §8 `esport_dev` namespace table lists `dev_N_m` (blob) and `dev_N_c` (uint32) instead of `dev_N` (blob).
+- [ ] The migration note is present below the table and is marked as temporary (removed in Feature 11).
+- [ ] §5 Device Registry NVS persistence description distinguishes meta writes from counter writes.
+- [ ] No other section of `docs/1-specification.md` still refers to `dev_N` as a
+      writable key (references in the migration note are acceptable).
+
+---
+
+### Phase 10.4 — Commit Message
+
+#### Goal
+
+Provide the user with a concise commit message for all Feature 10 changes.
+
+#### Tasks
+
+1. After verifying that `idf.py build` succeeds and all Phase 10.1–10.3 acceptance
+   criteria are met, provide the following commit message to the user:
+
+   - Subject line: 50 characters or fewer, imperative mood, no period.
+   - Body: wrapped at 72 characters, no Unicode characters.
+   - The commit message must describe: (a) what changed (split blob into meta + counter
+     keys), (b) why (counter write failure no longer corrupts nickname/MAC), (c) that a
+     temporary migration path is included and will be removed in a follow-up commit.
+
+2. Do **not** write the commit message text into this plan document.  Deliver it as a
+   plain-text response to the user after completing all prior phases.
+
+#### Acceptance Criteria
+
+- [ ] All Phase 10.1–10.3 acceptance criteria are met before the message is delivered.
+- [ ] Commit message subject is 50 characters or fewer.
+- [ ] Commit message body contains no Unicode characters.
+- [ ] Message body mentions the temporary migration path and references cleanup in a
+      follow-up commit.
+
+---
+
+## Feature 11 — Remove NVS Migration Code
+
+### Overview
+
+> **IMPORTANT: Feature 11 must only be implemented after the first successful boot of
+> Feature 10 has been confirmed on the target hardware.  The migration path in
+> `device_reg_init()` must run at least once to carry existing `dev_N` blob data into the
+> new `dev_N_m` / `dev_N_c` keys before the migration code is removed.  Implementing
+> Feature 11 before that confirmation will result in permanent data loss for any device
+> that has not yet been rebooted with Feature 10 firmware.**
+
+This feature removes the temporary migration code that was added in Feature 10 Phase 10.2.
+Once all target devices have booted with Feature 10 firmware and their NVS data has been
+migrated to the split-key layout, the legacy fallback branch is dead code and should be
+deleted to keep the codebase clean.
+
+Specifically the following are removed:
+
+- The `Step B` legacy-blob fallback branch inside `device_reg_init()`.
+- The temporary migration comment block.
+- The `DEVICE_REG_NVS_KEY_DEV_FMT` macro (no longer referenced after removal of
+  the migration branch and the legacy stale-key erase in `device_reg_entry_remove()`).
+- The legacy `dev_N` stale-key erase call inside `device_reg_entry_remove()` that was
+  retained as a migration cleanup step in Phase 10.1 Task 11.
+
+The `docs/1-specification.md` migration note is also removed since the migration is now
+complete and the legacy layout no longer exists in any deployed unit.
+
+### Prerequisites
+
+- All target devices have been booted at least once with Feature 10 firmware.
+- NVS keys `dev_N_m` and `dev_N_c` are confirmed present for all registered devices
+  (verify via serial log: `"dev %u: loaded (meta+ctr)"` for each slot, no
+  `"migrated legacy blob"` messages on boot).
+- No `dev_N` key exists in the `esport_dev` NVS namespace on any target unit
+  (confirm by checking that the migration log message is absent after reboot).
+
+### Modified Files
+
+| File | Change |
+| ---- | ------ |
+| `main/src/device_registry.c` | Remove migration branch, remove `DEVICE_REG_NVS_KEY_DEV_FMT`, remove legacy stale-key erase |
+| `docs/1-specification.md` | Remove migration note from §8 `esport_dev` table |
+
+---
+
+### Phase 11.1 — Remove Migration Code from `device_registry.c`
+
+#### Goal
+
+Delete all migration-specific code from `device_registry.c` now that all devices carry
+the new split-key NVS layout.
+
+#### Inputs
+
+- `main/src/device_registry.c` (Feature 10 output — confirmed post-migration)
+
+#### Tasks
+
+1. **Remove `DEVICE_REG_NVS_KEY_DEV_FMT`** from the Internal Constants section.
+   Verify no other code references this macro before deleting it.
+
+2. **Remove the Step B migration branch** from `device_reg_init()`:
+   - Delete the entire `if (ret == ESP_ERR_NVS_NOT_FOUND)` block that reads the legacy
+     `dev_N` blob, writes split keys, and erases the legacy key.
+   - Delete the temporary migration comment above the loop.
+   - The `if (ret != ESP_OK)` unexpected-error branch that zeros the slot and logs
+     `ESP_LOGW` **must be retained** — it handles genuine NVS read failures on the meta
+     key itself.
+   - The resulting per-slot logic for slot `i` should be simply:
+     - Read `dev_N_m` → if `ESP_OK`, load meta and counter; `continue`.
+     - On `ESP_ERR_NVS_NOT_FOUND`: zero slot, log debug.
+     - On any other error: zero slot, log warning.
+
+3. **Remove the legacy stale-key erase** from `device_reg_entry_remove()`:
+   - Delete the three lines that format and erase the `dev_N` (legacy) key:
+     ```c
+     snprintf(stale_key, sizeof(stale_key), DEVICE_REG_NVS_KEY_DEV_FMT, (unsigned)old_last);
+     (void)nvs_erase_key(handle, stale_key); /* migration cleanup: remove legacy blob if present */
+     ```
+   - Keep the two erase calls for `dev_N_m` and `dev_N_c` (they are the current layout,
+     not migration code).
+
+4. Confirm `idf.py build` succeeds with zero errors and warnings.
+
+#### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and warnings.
+- [ ] `DEVICE_REG_NVS_KEY_DEV_FMT` is not defined anywhere in `device_registry.c`.
+- [ ] `device_reg_init()` contains no reference to the legacy `dev_N` key.
+- [ ] The temporary migration comment block is absent.
+- [ ] `device_reg_entry_remove()` erases only `dev_N_m` and `dev_N_c` for the vacated slot.
+- [ ] `device_reg_init()` still handles `ESP_ERR_NVS_NOT_FOUND` on the meta key (empty
+      slot, no error) and unexpected errors (zero slot, log warning).
+- [ ] No NVS handle is left open on return from `device_reg_init()`.
+
+---
+
+### Phase 11.2 — Documentation Update
+
+#### Goal
+
+Remove all references to the now-complete migration from both `docs/1-specification.md`
+and `docs/2-development_plan.md`.
+
+#### Inputs
+
+- All Phase 11.1 outputs.
+- `docs/1-specification.md` (Feature 10 output)
+- `docs/2-development_plan.md` (current)
+
+#### Tasks
+
+**`docs/1-specification.md`**
+
+1. **§8 NVS Layout — namespace `esport_dev`** — delete the migration note paragraph
+   that was added in Phase 10.3 Task 2 (the paragraph beginning
+   `> **Migration (temporary):**`).
+
+2. **§5 Device Registry NVS persistence description** — remove any sentence that
+   references the migration or the legacy `dev_N` key.  The description of split writes
+   (`dev_N_m` for metadata, `dev_N_c` for counter) and the rationale (counter failure
+   cannot corrupt metadata) must be retained.
+
+**`docs/2-development_plan.md`**
+
+3. **Feature 10 Overview — Migration path section** — replace the sentence
+   _"Once all target devices have booted with Feature 10 firmware and their NVS data has
+   been migrated to the split-key layout, Feature 11 removes the migration branch entirely
+   so no dead code remains in production firmware."_ with:
+   _"The migration code was removed in Feature 11 after the first successful boot with
+   Feature 10 firmware confirmed that all device data had been migrated."_
+
+4. **Feature 10 Phase 10.2 — Goal paragraph** — replace the sentence
+   _"The migration code is **temporary**. It will be removed by Feature 11 once the first
+   boot with Feature 10 has been confirmed.  Until then it must be kept intact to ensure
+   no data is lost during the upgrade."_ with:
+   _"The migration code was **temporary** and was removed by Feature 11 after the first
+   confirmed boot with Feature 10 firmware."_
+
+5. **Feature 10 Phase 10.3 — Task 2** — update the migration note wording to past tense,
+   removing the _"The migration code is removed in Feature 11"_ forward reference:
+   replace `> **Migration (temporary):**` with `> **Migration (completed):**` and change
+   _"The migration code is removed in Feature 11 after the first successful boot with
+   Feature 10."_ to _"The migration code has been removed; all units now use the
+   split-key layout."_
+
+6. **Feature 11 Prerequisites block** — change the present-tense warning header from
+   bold `IMPORTANT: Feature 11 must only be implemented...` to a past-tense note:
+   `NOTE: Feature 11 was implemented after confirming the first successful boot with
+   Feature 10 firmware on all target devices.`
+
+#### Acceptance Criteria
+
+- [ ] `docs/1-specification.md` §8 `esport_dev` namespace table contains no migration note.
+- [ ] `docs/1-specification.md` §5 Device Registry section contains no reference to the
+      legacy `dev_N` blob or to the migration.
+- [ ] The split-key rationale (metadata vs. counter separation) is still present in §5.
+- [ ] `docs/2-development_plan.md` Feature 10 Overview migration section is updated to
+      past tense with no forward reference to Feature 11.
+- [ ] `docs/2-development_plan.md` Phase 10.2 Goal paragraph is updated to past tense.
+- [ ] `docs/2-development_plan.md` Phase 10.3 migration note wording reflects completion.
+- [ ] `docs/2-development_plan.md` Feature 11 Prerequisites block uses past-tense note.
+
+---
+
+### Phase 11.3 — Commit Message
+
+#### Goal
+
+Provide the user with a concise commit message for the Feature 11 cleanup.
+
+#### Tasks
+
+1. After verifying that `idf.py build` succeeds and all Phase 11.1–11.2 acceptance
+   criteria are met, provide the following commit message to the user:
+
+   - Subject line: 50 characters or fewer, imperative mood, no period.
+   - Body: wrapped at 72 characters, no Unicode characters.
+   - The commit message must state that the temporary NVS migration code introduced in
+     Feature 10 is now removed, and confirm that all units have been migrated to the
+     split-key layout.
+
+2. Do **not** write the commit message text into this plan document.  Deliver it as a
+   plain-text response to the user after completing all prior phases.
+
+#### Acceptance Criteria
+
+- [ ] All Phase 11.1–11.2 acceptance criteria are met before the message is delivered.
+- [ ] Commit message subject is 50 characters or fewer.
+- [ ] Commit message body contains no Unicode characters.
+- [ ] Message references Feature 10 as the commit that introduced the migration.
 
 ---
