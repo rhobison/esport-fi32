@@ -625,7 +625,7 @@ esp_err_t http_srv_init(void);
   - Trigger a NVS save when `counter_s` reaches 0 or every `DEVICE_REG_SAVE_INTERVAL_S` (60) seconds.
   - Post `ESPORT_EVENT_DEVICE_REGISTRY_CHANGED` after each tick.
 - `device_reg_entry_counter_set()` updates the counter **in RAM only**; it does not write to NVS. Persistence is deferred to the `device_reg_tick()` save policy above to avoid FLASH wear.
-- Persist entries as NVS blobs (`dev_0` ... `dev_3`), count as `dev_count` uint8, and rider index as `dev_rider` uint8 in namespace `esport_dev`.
+- Persist entries as NVS blobs — static metadata (`mac`, `nickname`, `b_enabled`) under `dev_N_m` and the counter under `dev_N_c`; count as `dev_count` uint8, and rider index as `dev_rider` uint8 in namespace `esport_dev`. Nickname/enabled changes write only `dev_N_m`; counter updates (periodic save + zero event) write only `dev_N_c`. Separating static metadata from the dynamic counter ensures that a failed counter write cannot corrupt a device's nickname or MAC address.
 
 **Data model:**
 
@@ -1547,7 +1547,14 @@ so that no flash byte goes unused across the full 4 MB device.
 | ---------------- | ------ | ----------------------------------------------------------- |
 | `dev_count`      | uint8  | Number of registered devices (0-4)                          |
 | `dev_rider`      | uint8  | Current rider index; `0xFF` = no rider                      |
-| `dev_0`...`dev_3` | blob   | `device_reg_entry_t` binary (MAC + nickname + counter + enabled) |
+| `dev_0_m`...`dev_3_m` | blob (`device_reg_meta_t`) | Static device metadata: MAC address, nickname, `b_enabled` flag |
+| `dev_0_c`...`dev_3_c` | uint32 | Per-device internet credit counter (`counter_s`) |
+
+> **Migration (temporary):** On the first boot after a firmware upgrade from a version
+> that used the legacy `dev_N` single-blob layout, `device_reg_init()` automatically
+> reads each `dev_N` blob, writes the split keys, and erases the legacy key.  The
+> migration is transparent and preserves all device data.  The migration code is
+> removed in Feature 11 after the first successful boot with Feature 10.
 
 ---
 
