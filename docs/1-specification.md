@@ -1550,12 +1550,6 @@ so that no flash byte goes unused across the full 4 MB device.
 | `dev_0_m`...`dev_3_m` | blob (`device_reg_meta_t`) | Static device metadata: MAC address, nickname, `b_enabled` flag |
 | `dev_0_c`...`dev_3_c` | uint32 | Per-device internet credit counter (`counter_s`) |
 
-> **Migration (temporary):** On the first boot after a firmware upgrade from a version
-> that used the legacy `dev_N` single-blob layout, `device_reg_init()` automatically
-> reads each `dev_N` blob, writes the split keys, and erases the legacy key.  The
-> migration is transparent and preserves all device data.  The migration code is
-> removed in Feature 11 after the first successful boot with Feature 10.
-
 ---
 
 ### Namespace: `esport_ota`

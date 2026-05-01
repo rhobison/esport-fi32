@@ -5638,9 +5638,8 @@ Update `device_reg_init()` to read per-device state from the new split keys (`de
 and `dev_N_c`).  When the new `dev_N_m` key is not found for a slot, fall back to the
 legacy `dev_N` blob, migrate the data to the new keys, and erase the legacy key.
 
-The migration code is **temporary**.  It will be removed by Feature 11 once the first
-boot with Feature 10 has been confirmed.  Until then it must be kept intact to ensure
-no data is lost during the upgrade.
+The migration code was **temporary** and was removed by Feature 11 after the first
+confirmed boot with Feature 10 firmware.
 
 #### Inputs
 
@@ -5771,11 +5770,11 @@ registry namespace, including a migration note.
 
 2. **§8 — add a migration note** after the table:
 
-   > **Migration (temporary):** On the first boot after a firmware upgrade from a version
-   > that used the legacy `dev_N` single-blob layout, `device_reg_init()` automatically
-   > reads each `dev_N` blob, writes the split keys, and erases the legacy key.  The
-   > migration is transparent and preserves all device data.  The migration code is
-   > removed in Feature 11 after the first successful boot with Feature 10.
+> **Migration (completed):** On the first boot after a firmware upgrade from a version
+> that used the legacy `dev_N` single-blob layout, `device_reg_init()` automatically
+> reads each `dev_N` blob, writes the split keys, and erases the legacy key.  The
+> migration is transparent and preserves all device data.  The migration code has been
+> removed; all units now use the split-key layout.
 
 3. **§5 Device Registry module spec** — update the NVS persistence description:
    - Under "NVS write triggers", clarify that nickname/enabled changes write only
@@ -5827,12 +5826,8 @@ Provide the user with a concise commit message for all Feature 10 changes.
 
 ### Overview
 
-> **IMPORTANT: Feature 11 must only be implemented after the first successful boot of
-> Feature 10 has been confirmed on the target hardware.  The migration path in
-> `device_reg_init()` must run at least once to carry existing `dev_N` blob data into the
-> new `dev_N_m` / `dev_N_c` keys before the migration code is removed.  Implementing
-> Feature 11 before that confirmation will result in permanent data loss for any device
-> that has not yet been rebooted with Feature 10 firmware.**
+> **NOTE: Feature 11 was implemented after confirming the first successful boot with
+> Feature 10 firmware on all target devices.**
 
 This feature removes the temporary migration code that was added in Feature 10 Phase 10.2.
 Once all target devices have booted with Feature 10 firmware and their NVS data has been
