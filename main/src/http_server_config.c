@@ -361,7 +361,10 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
             (unsigned)dev_i);
         (void)httpd_resp_sendstr_chunk(p_req, row_open);
         http_srv_html_attr_encode(entry.nickname, enc, sizeof(enc));
-        (void)httpd_resp_sendstr_chunk(p_req, enc);
+        if ('\0' != enc[0])
+        {
+            (void)httpd_resp_sendstr_chunk(p_req, enc);
+        }
         (void)httpd_resp_sendstr_chunk(p_req, "\"></td>");
 
         /* MAC (read-only). */

@@ -59,6 +59,7 @@ esp_err_t http_srv_init(void)
     cfg.server_port      = 80U;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
     cfg.max_uri_handlers = 24U;
+    cfg.lru_purge_enable = true; /* evict idle keep-alive sockets when pool is full */
 
     esp_err_t ret = httpd_start(&gp_server_handle, &cfg);
     if (ESP_OK != ret)

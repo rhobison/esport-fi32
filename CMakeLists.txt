@@ -9,5 +9,5 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 # Enable lwip MIB2 per-interface byte counters for reward AP throughput measurement.
 idf_build_set_property(COMPILE_DEFINITIONS "MIB2_STATS=1" APPEND)
-set(PROJECT_VER "2.0.0")
+set(PROJECT_VER "2.0.1")
 project(esport-fi32)
