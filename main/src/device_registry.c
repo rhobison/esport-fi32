@@ -65,6 +65,10 @@ static portMUX_TYPE g_dev_mux = portMUX_INITIALIZER_UNLOCKED;
 /** Tick counter used to trigger periodic NVS saves. */
 static uint16_t g_tick_count = 0U;
 
+/** Set when any counter changes in RAM; cleared after the periodic NVS save so
+ * NVS is never written when no counter has changed since the last checkpoint. */
+static bool gb_counters_dirty = false;
+
 /* ---------- Per-device traffic state (RAM only) ---------- */
 
 /** Cumulative RX bytes per device since last tick (indexed by slot). */
@@ -117,9 +121,10 @@ esp_err_t device_reg_init(void)
     memset(g_dev_paused, 0, sizeof(g_dev_paused));
     memset(g_inet_gate_locked, 0, sizeof(g_inet_gate_locked));
     memset(g_entries, 0, sizeof(g_entries));
-    g_count      = 0U;
-    g_rider      = DEVICE_REG_NO_RIDER;
-    g_tick_count = 0U;
+    g_count            = 0U;
+    g_rider            = DEVICE_REG_NO_RIDER;
+    g_tick_count       = 0U;
+    gb_counters_dirty = false;
 
     nvs_handle_t handle;
     esp_err_t    ret = nvs_open(DEVICE_REG_NVS_NS, NVS_READWRITE, &handle);
@@ -425,6 +430,7 @@ esp_err_t device_reg_entry_counter_set(uint8_t idx, uint32_t counter_s)
     }
 
     g_entries[idx].counter_s = counter_s;
+    gb_counters_dirty       = true;
     portEXIT_CRITICAL(&g_dev_mux);
 
     (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_DEVICE_REGISTRY_CHANGED, NULL, 0U, 0U);
@@ -634,7 +640,8 @@ esp_err_t device_reg_tick(void)
             !g_inet_gate_locked[i])
         {
             g_entries[i].counter_s--;
-            b_changed = true;
+            b_changed          = true;
+            gb_counters_dirty = true;
             if (0U == g_entries[i].counter_s)
             {
                 b_zero[i] = true;
@@ -658,11 +665,17 @@ esp_err_t device_reg_tick(void)
         (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_DEVICE_REGISTRY_CHANGED, NULL, 0U, 0U);
     }
 
-    /* Periodic full save. */
+    /* Periodic full save — only when counters have actually changed since the
+     * last checkpoint.  ESP-IDF NVS does not skip writes on identical data, so
+     * we guard with a dirty flag to avoid unnecessary flash wear. */
     g_tick_count++;
     if (g_tick_count >= (uint16_t)DEVICE_REG_SAVE_INTERVAL_S)
     {
-        device_reg_counters_save_all();
+        if (gb_counters_dirty)
+        {
+            device_reg_counters_save_all();
+            gb_counters_dirty = false;
+        }
         g_tick_count = 0U;
     }
 
