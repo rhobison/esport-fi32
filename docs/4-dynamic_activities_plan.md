@@ -81,7 +81,7 @@ code changes are required.
 | 1 | Space Meteor Shower | `space_math.html` | Implemented | A1.1, A1.2, A1.3 |
 | 2 | Clown Fish Bubble Burst | `fish_math.html` | Implemented | A2.1, A2.2, A2.3 |
 | 3 | Rocket Asteroid Shooter | `shoot_math.html` | Implemented | A3.1, A3.2, A3.3 |
-| 4 | Math Battleship: Grid Commander | `battle_math.html` | Planned | A4.1, A4.2, A4.3 |
+| 4 | Math Battleship: Grid Commander | `battle_math.html` | Implemented | A4.1, A4.2, A4.3 |
 
 > To add a new activity: assign it the next available number, add a row to this table,
 > and create its own `## Activity N` section followed by phases `AN.1` (Design),
