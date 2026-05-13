@@ -209,23 +209,35 @@ esp_err_t session_log_write(const session_trk_record_t * p_rec)
         return ret;
     }
 
-    g_next_write_slot =
+    /* Compute new metadata values locally.  Only promote them to the
+     * module-level variables after a successful NVS commit so that
+     * g_next_write_slot and g_entry_count always mirror the last
+     * successfully persisted state.  If the commit fails the in-memory
+     * state is left unchanged, which keeps it consistent with NVS; the
+     * orphaned blob at the current slot will be overwritten on the next
+     * successful write. */
+    uint16_t new_head =
         (uint16_t)(((uint32_t)g_next_write_slot + 1U) % (uint32_t)SESSION_LOG_MAX_ENTRIES);
-    if (g_entry_count < (uint16_t)SESSION_LOG_MAX_ENTRIES)
-    {
-        g_entry_count++;
-    }
+    uint16_t new_count = (g_entry_count < (uint16_t)SESSION_LOG_MAX_ENTRIES) ?
+                             (uint16_t)(g_entry_count + 1U) :
+                             g_entry_count;
 
-    ret = nvs_set_u16(handle, SESSION_LOG_KEY_HEAD, g_next_write_slot);
+    ret = nvs_set_u16(handle, SESSION_LOG_KEY_HEAD, new_head);
     if (ESP_OK == ret)
     {
-        ret = nvs_set_u16(handle, SESSION_LOG_KEY_COUNT, g_entry_count);
+        ret = nvs_set_u16(handle, SESSION_LOG_KEY_COUNT, new_count);
     }
     if (ESP_OK == ret)
     {
         ret = nvs_commit(handle);
     }
-    if (ESP_OK != ret)
+
+    if (ESP_OK == ret)
+    {
+        g_next_write_slot = new_head;
+        g_entry_count     = new_count;
+    }
+    else
     {
         ESP_LOGE(gp_tag, "failed to commit metadata: %s", esp_err_to_name(ret));
     }
