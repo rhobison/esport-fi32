@@ -239,9 +239,7 @@
         .input-strip {
             flex-shrink: 0;
             display: flex;
-            flex-wrap: nowrap;
-            align-items: center;
-            gap: 0.35em;
+            flex-direction: column;
             padding: 0.45em 0.6em;
             background: rgba(0, 8, 18, 0.95);
             border-top: 1px solid #003028
@@ -311,7 +309,6 @@
         }
 
         .warn-msg {
-            flex-basis: 100%;
             font-size: 0.75em;
             color: #ff8844;
             padding: 1px 6px;
@@ -449,6 +446,7 @@
         /* --- on-screen keypad --- */
         .kpad-wrap {
             flex-shrink: 0;
+            width: 100%;
             padding: 3px 0 2px
         }
 
