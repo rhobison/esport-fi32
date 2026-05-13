@@ -162,12 +162,15 @@ esp_err_t http_srv_activities_manage_get_handler(httpd_req_t * p_req)
             (unsigned long)entry.id, (unsigned long)tl_h, (unsigned long)tl_m, (unsigned long)tl_s);
         APPEND("<td><input type='number' name='act_daily_%lu' min='1' max='255' value='%u'></td>",
             (unsigned long)entry.id, (unsigned int)entry.daily_limit);
-        APPEND("<td>"
+        APPEND("<td style='white-space:nowrap'>"
+               "<label style='font-size:.9em;margin-right:.4em'>"
+               "<input type='checkbox' name='is_dynamic_%lu' value='1'%s>Dyn</label>"
                "<button type='submit' name='action' value='update_%lu'>Update</button> "
                "<button type='submit' name='action' value='delete_%lu'"
                " onclick=\"return confirm('Delete this activity?')\">Delete</button>"
                "</td>",
-            (unsigned long)entry.id, (unsigned long)entry.id);
+            (unsigned long)entry.id, entry.b_is_dynamic ? " checked" : "", (unsigned long)entry.id,
+            (unsigned long)entry.id);
         APPEND("</tr>");
     }
     APPEND("</table>");
@@ -417,8 +420,11 @@ esp_err_t http_srv_activities_manage_post_handler(httpd_req_t * p_req)
         (void)http_srv_form_field_get(body, fn_limit, limit_str, sizeof(limit_str));
         (void)http_srv_form_field_get(body, fn_daily, daily_str, sizeof(daily_str));
 
-        /* Parse is_dynamic checkbox (present only when checked). */
-        esp_err_t dyn_ret = http_srv_form_field_get(body, "is_dynamic", val_buf, sizeof(val_buf));
+        /* Parse is_dynamic checkbox — keyed by activity ID to avoid colliding
+         * with the add-activity row's generic 'is_dynamic' field. */
+        char fn_dyn[32];
+        (void)snprintf(fn_dyn, sizeof(fn_dyn), "is_dynamic_%lu", (unsigned long)act_id);
+        esp_err_t dyn_ret      = http_srv_form_field_get(body, fn_dyn, val_buf, sizeof(val_buf));
         uint8_t   b_is_dynamic = ((ESP_OK == dyn_ret) && ('1' == val_buf[0])) ? 1U : 0U;
 
         uint32_t credit_s     = 0U;

@@ -753,6 +753,7 @@ Must be called after `buzzer_init()`, `config_mngr_init()`, and `ota_mngr_init()
 - Track per-device activity assignments (up to 4 devices) and per-device daily done-counts.
 - Persist the pool and per-device data to NVS namespace `esport_act`.
 - On NVS load, zero-pad blobs shorter than `sizeof(act_mngr_entry_t)` (backward compatibility — old entries pre-Feature 8 have `b_is_dynamic = 0` by default).
+- After loading the pool, auto-heal any entry that has `b_is_dynamic = 0` but whose name matches a `g_dyn_act_registry` entry (compiled-in mini-game).  The corrected entry is immediately re-saved to NVS so the fix persists across reboots.  A log line at INFO level is emitted for each healed entry.
 
 **Data model:**
 
@@ -771,7 +772,7 @@ typedef struct act_mngr_entry_tag
 } act_mngr_entry_t;
 ```
 
-**NVS backward compatibility:** When loading a pool entry blob whose stored size is smaller than `sizeof(act_mngr_entry_t)`, the struct is first zeroed and then populated with only the available bytes.  This means entries written before Feature 8 load with `b_is_dynamic = 0` (static activity).
+**NVS backward compatibility:** When loading a pool entry blob whose stored size is smaller than `sizeof(act_mngr_entry_t)`, the struct is first zeroed and then populated with only the available bytes.  This means entries written before Feature 8 load with `b_is_dynamic = 0` (static activity).  After the pool is fully loaded, `act_mngr_init()` auto-heals any such entry whose `name` matches a compiled-in `g_dyn_act_registry` entry by setting `b_is_dynamic = 1` and re-saving the blob to NVS.
 
 **`credit_s == 0` validation:** `act_mngr_activity_add()` and `act_mngr_activity_update()` reject `credit_s == 0` with `ESP_ERR_INVALID_ARG`.  All activities must specify a non-zero reference credit.
 
@@ -1162,8 +1163,11 @@ All three routes require HTTP Basic Auth (same credentials as `/config`).
 **`GET /activities/manage`** — Pool & assignment management page.
 
 - Renders the global activity pool as a table with editable name, credit time (`h:mm:ss`), daily
-  time cap (`h:mm:ss`), and daily click limit fields.  Each row has **Update** and **Delete**
-  buttons.
+  time cap (`h:mm:ss`), and daily click limit fields.  Each row has a **Dyn** checkbox
+  (`is_dynamic_<id>`, pre-checked when `b_is_dynamic = 1`), an **Update** button, and a
+  **Delete** button.  The checkbox name is keyed to the activity ID to prevent it from
+  interfering with the **Add Activity** row's generic `is_dynamic` field when both live in the
+  same `<form>`.
 - All `h:mm:ss` time fields use an `oninput` JavaScript handler (`hmsInput`) that auto-formats
   the value as the user types, stripping non-digit characters and inserting colons automatically.
   This is consistent with the counter field on the Config page.
@@ -1189,7 +1193,7 @@ Reads a hidden `action` field from the URL-encoded POST body:
 | `action` value    | Effect                                                   |
 | ----------------- | -------------------------------------------------------- |
 | `add_activity`    | Creates a new pool entry from `new_act_*` fields         |
-| `update_<id>`     | Updates name, credit, limit, and daily_limit for pool ID |
+| `update_<id>`     | Updates name, credit, limit, daily_limit, and `b_is_dynamic` (read from `is_dynamic_<id>`) for pool ID |
 | `delete_<id>`     | Removes pool entry; auto-unassigns from all devices      |
 | `assign_<dev>`    | Assigns selected activity to device `dev`                |
 | `unassign_<dev>_<id>` | Removes activity `id` from device `dev`'s assignment list |
