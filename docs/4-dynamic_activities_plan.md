@@ -2769,8 +2769,9 @@ body            → dark navy bg; flex column; safe-area insets applied
                   textContent: '\uD83D\uDCA5' (explosion emoji)
 .cell.revealed  → background: #601010; cursor: default;
                   textContent: '\uD83D\uDEA2' (ship emoji — unhit ship cell revealed at end)
-.input-strip    → flex column; flex-shrink: 0; padding: 0.45em 0.6em;
+.input-strip    → flex-direction: column (NOT flex-row/wrap); flex-shrink: 0; padding: 0.45em 0.6em;
                   background: rgba(0,8,18,0.95); border-top: 1px solid #003028
+                  — stacks .inputs-row on top, then .warn-msg, then .kpad-wrap below
 .inputs-row     → flex row; flex-wrap: nowrap; align-items: center; gap: 0.35em; width: 100%
 .input-strip label → font-size: clamp(11px,3.2vw,15px); color: #4af
 .coord-input    → type=text; inputmode=none; width: 3em; height: 44px; text-align: center;
@@ -2870,6 +2871,7 @@ body            → dark navy bg; flex column; safe-area insets applied
 - [ ] Minimum cell size 28 px enforced; cells remain tappable on 320 px viewport.
 - [ ] All three inputs use `inputmode="none"`; device soft keyboard does NOT appear on focus.
 - [ ] On-screen keypad row 1 shows digits 0–4; row 2 shows 5–9 and a backspace button.
+- [ ] On-screen keypad rows appear **below** the `V × H = [answer] FIRE` inputs row, not to their right (`flex-direction: column` on `.input-strip`).
 - [ ] Tapping a keypad digit appends it to the currently focused input (respects maxlength).
 - [ ] Tapping the backspace button removes the last character from the focused input.
 - [ ] Keypad buttons do not steal focus from the active input (`pointerdown` with `preventDefault`).
