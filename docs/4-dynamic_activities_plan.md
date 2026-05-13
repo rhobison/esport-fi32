@@ -18,9 +18,9 @@
   - [Credit Calculation](#credit-calculation)
   - [URL Parameters & API Integration](#url-parameters--api-integration)
   - [Security Considerations](#security-considerations)
-- [Phase A1.1 — Game Design & UI Specification](#phase-a11--game-design--ui-specification)
-- [Phase A1.2 — HTML/JS/CSS Implementation](#phase-a12--htmljscss-implementation)
-- [Phase A1.3 — Integration & Verification](#phase-a13--integration--verification)
+  - [Phase A1.1 — Game Design & UI Specification](#phase-a11--game-design--ui-specification)
+  - [Phase A1.2 — HTML/JS/CSS Implementation](#phase-a12--htmljscss-implementation)
+  - [Phase A1.3 — Integration & Verification](#phase-a13--integration--verification)
 - [Activity 2 — Clown Fish Bubble Burst](#activity-2--clown-fish-bubble-burst)
   - [Concept](#concept-1)
   - [Math Problem Rules](#math-problem-rules-1)
@@ -28,9 +28,9 @@
   - [Credit Calculation](#credit-calculation-1)
   - [URL Parameters & API Integration](#url-parameters--api-integration-1)
   - [Security Considerations](#security-considerations-1)
-- [Phase A2.1 — Game Design & UI Specification](#phase-a21--game-design--ui-specification)
-- [Phase A2.2 — HTML/JS/CSS Implementation](#phase-a22--htmljscss-implementation)
-- [Phase A2.3 — Integration & Verification](#phase-a23--integration--verification)
+  - [Phase A2.1 — Game Design & UI Specification](#phase-a21--game-design--ui-specification)
+  - [Phase A2.2 — HTML/JS/CSS Implementation](#phase-a22--htmljscss-implementation)
+  - [Phase A2.3 — Integration & Verification](#phase-a23--integration--verification)
 - [Activity 3 — Rocket Asteroid Shooter](#activity-3--rocket-asteroid-shooter)
   - [Concept](#concept-2)
   - [Math Problem Rules](#math-problem-rules-2)
@@ -38,9 +38,19 @@
   - [Credit Calculation](#credit-calculation-2)
   - [URL Parameters & API Integration](#url-parameters--api-integration-2)
   - [Security Considerations](#security-considerations-2)
-- [Phase A3.1 — Game Design & UI Specification](#phase-a31--game-design--ui-specification)
-- [Phase A3.2 — HTML/JS/CSS Implementation](#phase-a32--htmljscss-implementation)
-- [Phase A3.3 — Integration & Verification](#phase-a33--integration--verification)
+  - [Phase A3.1 — Game Design & UI Specification](#phase-a31--game-design--ui-specification)
+  - [Phase A3.2 — HTML/JS/CSS Implementation](#phase-a32--htmljscss-implementation)
+  - [Phase A3.3 — Integration & Verification](#phase-a33--integration--verification)
+- [Activity 4 — Math Battleship: Grid Commander](#activity-4--math-battleship-grid-commander)
+  - [Concept](#concept-3)
+  - [Math Problem Rules](#math-problem-rules-3)
+  - [Timing & Scoring Model](#timing--scoring-model-3)
+  - [Credit Calculation](#credit-calculation-3)
+  - [URL Parameters & API Integration](#url-parameters--api-integration-3)
+  - [Security Considerations](#security-considerations-3)
+  - [Phase A4.1 — Game Design & UI Specification](#phase-a41--game-design--ui-specification)
+  - [Phase A4.2 — HTML/JS/CSS Implementation](#phase-a42--htmljscss-implementation)
+  - [Phase A4.3 — Integration & Verification](#phase-a43--integration--verification)
 - [Dependency Notes](#dependency-notes)
 - [Summary of Design Decisions](#summary-of-design-decisions)
 
@@ -71,6 +81,7 @@ code changes are required.
 | 1 | Space Meteor Shower | `space_math.html` | Implemented | A1.1, A1.2, A1.3 |
 | 2 | Clown Fish Bubble Burst | `fish_math.html` | Implemented | A2.1, A2.2, A2.3 |
 | 3 | Rocket Asteroid Shooter | `shoot_math.html` | Implemented | A3.1, A3.2, A3.3 |
+| 4 | Math Battleship: Grid Commander | `battle_math.html` | Planned | A4.1, A4.2, A4.3 |
 
 > To add a new activity: assign it the next available number, add a row to this table,
 > and create its own `## Activity N` section followed by phases `AN.1` (Design),
@@ -92,6 +103,15 @@ must fit within the partition table allocation.
 | 1        | `space_math.html` | < 40 KB | < 80 KB | ~ 10–15 KB |
 | 2        | `fish_math.html`  | < 40 KB | < 80 KB | ~ 10–15 KB |
 | 3        | `shoot_math.html` | < 40 KB | < 80 KB | ~ 10–15 KB |
+| 4        | `battle_math.html` | < 200 KB | < 400 KB | < 100 KB |
+
+> **Activity 4 — relaxed size budget.**  `battle_math.html` has a richer visual design
+> (SVG ship silhouettes, sonar radar animation, per-cell state graphics) that justifies a
+> larger source file.  The **hard limit is a compressed size of < 100 KB** in the firmware
+> binary artefact — this is the figure that matters for flash allocation.  The uncompressed
+> cap of 400 KB keeps the source file human-readable in a text editor.  All other rules
+> from §Rules for Controlling File Size (no minification, no external resources, no
+> base64 binary assets, vanilla JS/CSS only) still apply.
 
 > **Note**: the size targets and hard maximum apply to the **uncompressed source file**
 > in the repository.  The figure that directly determines flash consumption is the
@@ -2010,23 +2030,947 @@ device, and verify the complete play-through flow end-to-end.
 
 ---
 
+---
+
+## Activity 4 — Math Battleship: Grid Commander
+
+### Concept
+
+The player is a naval commander at a sonar console.  Enemy ships are hidden in a
+**10 × 10 multiplication table grid**.  Rows are numbered **V = 1–10** (top to bottom)
+and columns are numbered **H = 1–10** (left to right), so each cell (V, H) directly
+represents the multiplication fact V × H.
+
+To fire a torpedo at a target cell, the player fills in three input boxes:
+
+```
+V [__]  ×  H [__]  =  [____]
+```
+
+- **V** selects the row (1–10); **H** selects the column (1–10); the rightmost box
+  must contain the product V × H.
+- **Correct answer:** the torpedo fires at cell (V, H).  If a ship occupies that cell,
+  the segment is revealed as a **hit** 🔥.  If not, the cell is marked as a **miss** 〜.
+  No shot is consumed for a miss — only correct answers trigger a shot.
+- **Wrong answer:** one shot is lost **without** firing.  The cell is not revealed.
+- The player starts with **10 shots**.  A **streak mechanic** awards +1 bonus shot every
+  3 consecutive correct answers, resetting the streak counter on each bonus.  A wrong
+  answer resets the streak to zero.
+- An already-shot cell (hit or miss) cannot be targeted again; the FIRE button is
+  disabled when (V, H) corresponds to a cell that has already been revealed.
+
+**Tap-to-target:** tapping any unrevealed grid cell pre-fills the V and H input boxes
+and moves focus to the answer box.  The player only needs to type the product.  Tapping
+an already-revealed cell has no effect.
+
+**Win condition:** all enemy ships fully sunk (all 19 ship cells hit) before shots are
+exhausted and before time expires.
+
+**Engagement hooks:**
+- Sonar/radar aesthetic: phosphor-green grid lines on dark navy, subtle rotating
+  conic-gradient radar sweep overlay (pure CSS animation).
+- Per-cell hit and miss animations (CSS keyframe bursts and ripples).
+- "SUNK! 🔥" toast notification when a ship is fully sunk, with the ship's cells
+  flashing simultaneously.
+- Shot counter displayed as torpedo icons; streak counter with ⚡ glow; bonus shot
+  animation on streak completion.
+- Ship status strip showing each ship's health segments — intact segments bright,
+  hit segments dark.
+- Full grid revealed on game end (all ship positions shown).
+- Sound is NOT used (avoids permission issues and distraction in shared spaces).
+
+Size budget: target < 200 KB, hard maximum 400 KB uncompressed; **< 100 KB compressed**
+(the figure that matters for flash allocation).
+See [Flash Storage Constraints](#flash-storage-constraints).
+
+---
+
+### Math Problem Rules
+
+This game uses **multiplication only**.  The 10 × 10 grid maps directly to the standard
+multiplication table, so restricting to one operation is both educationally coherent and
+mechanically self-consistent.
+
+| Type           | Operand ranges                           | Result constraint | Example      |
+| -------------- | ---------------------------------------- | ----------------- | ------------ |
+| Multiplication | V: 1–10 (player-chosen row); H: 1–10 (player-chosen column) | Product 1–100 | `7 × 8 = ?` |
+
+- **Problems are player-chosen, not randomly generated.**  The educational challenge is
+  strategic: the player selects which cell to target and must prove knowledge of that
+  specific fact.
+- A child who knows their tables can aim precisely; one who does not will waste shots on
+  wrong answers.  Mathematical fluency is directly rewarded with more efficient play.
+
+---
+
+### Timing & Scoring Model
+
+A single global countdown timer runs for `time_limit_s` seconds.  There is no per-shot
+countdown — the player can think between shots.
+
+**Constants (hardcoded in the HTML):**
+
+| Constant              | Value | Rationale                                                          |
+| --------------------- | ----- | ------------------------------------------------------------------ |
+| `STARTING_SHOTS`      | 10    | Enough shots for a strategic game; not enough for brute-force (100 cells) |
+| `STREAK_BONUS_AT`     | 3     | Bonus shot every 3 consecutive correct answers; rewards mathematical fluency |
+| `TOTAL_SHIP_CELLS`    | 19    | Carrier(5) + Battleship(4) + 2×Destroyer(3) + 2×PatrolBoat(2)     |
+
+**Fleet composition:**
+
+| Ship name    | Length | Count | Total cells |
+| ------------ | ------ | ----- | ----------- |
+| Carrier      | 5      | 1     | 5           |
+| Battleship   | 4      | 1     | 4           |
+| Destroyer    | 3      | 2     | 6           |
+| Patrol Boat  | 2      | 2     | 4           |
+| **Total**    |        | **6** | **19**      |
+
+There is no `targetProblems` concept as in Activities 1–3.  Credit is proportional to
+the number of ship cells hit.
+
+---
+
+### Credit Calculation
+
+```
+cellsHit     = number of distinct ship cells revealed as hits
+earnedCredit = Math.floor(credit_s * cellsHit / TOTAL_SHIP_CELLS)
+submitCredit = Math.min(earnedCredit, credit_s)   // server will cap anyway
+```
+
+- `cellsHit == 0` → `earnedCredit = 0` → `submitCredit = 0`.  Claim POST still sent.
+- `cellsHit == 19` (all ships sunk) → WIN state; `earnedCredit == credit_s` (full credit).
+- Shots exhausted before all ships sunk → GAME OVER; proportional credit based on
+  `cellsHit` at the moment shots reach zero.
+- Time expires before all ships sunk → GAME OVER; proportional credit based on `cellsHit`
+  at the moment the timer reaches zero.
+
+---
+
+### URL Parameters & API Integration
+
+Identical to Activities 1–3 — same six URL parameters (`pin`, `device_idx`, `act_id`,
+`credits_s`, `time_limit_s`, `token`), same `POST /api/activities/credit` contract, and
+same response handling.
+
+`time_limit_s` is used directly as the global countdown (no `targetProblems` derivation).
+`credits_s` is the maximum credit awarded for sinking the entire fleet.
+
+Launch URL:
+
+```
+/dyn_activities/battle_math?pin=<PIN>&device_idx=<N>&act_id=<ID>&credits_s=<CREDIT_S>&time_limit_s=<N>&token=<TOKEN>
+```
+
+Credit claim POST: identical to Activities 1–3 (`POST /api/activities/credit` with the
+same six fields).
+
+---
+
+### Security Considerations
+
+Identical to Activities 1–3.  `time_limit_s` is informational — a tampered-up value
+gives more countdown time but does not increase the credit cap.  Ship placement is
+generated client-side; the server performs no placement validation and trusts only
+`credits_s` (capped at `activity.credit_s`) and `completion_time_s` (informational).
+There is no incentive to forge a higher `credits_s` in the URL.
+
+---
+
+## Phase A4.1 — Game Design & UI Specification (Activity 4)
+
+### Goal
+
+Define the full visual layout, grid mechanics, cell state model, ship placement
+algorithm, input behaviour, animation specification, and all screen states for
+`battle_math.html` so that Phase A4.2 can proceed without ambiguity.
+
+---
+
+### Screen States
+
+| State     | Trigger                                        | Description                                               |
+| --------- | ---------------------------------------------- | --------------------------------------------------------- |
+| `LOADING` | Page load                                      | Validates URL params; transitions to `SETUP` or `ERROR`   |
+| `ERROR`   | Missing/invalid URL params                     | Error message + `← Back to Games` link                   |
+| `SETUP`   | After `LOADING` succeeds                       | Fleet briefing + instructions → **Launch Torpedoes!**     |
+| `PLAYING` | Player presses **Launch Torpedoes!**           | Main turn-based game loop                                 |
+| `END`     | All ships sunk (WIN) OR shots = 0 OR timer = 0 | WIN or GAME OVER result; credit claim auto-triggered      |
+
+Same single `<div id="screen">` swap pattern as Activities 1–3.
+
+---
+
+### SETUP State Layout
+
+```
+┌──────────────────────────────────────┐
+│   ⚓  Grid Commander                  │
+│   Naval Multiplication               │
+│                                      │
+│  FLEET BRIEFING:                     │
+│  🚢 Carrier      ■■■■■  (5 cells)    │
+│  ⛴  Battleship   ■■■■   (4 cells)    │
+│  🚤 Destroyer ×2  ■■■    (3 cells)   │
+│  ⛵ Patrol ×2     ■■     (2 cells)   │
+│                                      │
+│  HOW TO PLAY:                        │
+│  Pick row V and column H, then type  │
+│  V × H to fire a torpedo.  Correct = │
+│  shoot; wrong = lose a shot.  Sink   │
+│  all ships to win!                   │
+│                                      │
+│  [ Launch Torpedoes! ]               │
+└──────────────────────────────────────┘
+```
+
+- No problem-type checkboxes (multiplication is the only operation).
+- Ship segments in the briefing use small `<span>` blocks styled as coloured squares
+  (`8 × 8 px`, `background: #4af`, `border-radius: 2px`) — same visual language as the
+  in-game ship segments.
+- The **Launch Torpedoes!** button is always enabled (no configuration required).
+- The setup screen uses the same dark-navy ocean theme (`#001220` background) as the game.
+
+---
+
+### PLAYING State Layout
+
+Both portrait and landscape orientations use the **same single-column layout** — no
+right-column control panel.  The grid occupies all available vertical space between the
+header bar and the input strip, maximising the battlefield in both orientations.
+
+```
+┌──────────────────────────────────────────────┐
+│ ⚓  💣 ×8   ⚡×2  ⏱ 1:45  🚢■■■■■ ⛴■■■■...│  ← header bar (single row)
+├────┬─────────────────────────────────────────┤
+│    │  1    2    3    4    5    6    7  … 10   │  ← column (H) labels
+│  1 │[   ][   ][   ][   ][   ][   ][   ]…[   ]│
+│  2 │[   ][   ][   ][ 🔥][   ][   ][   ]…[   ]│  ← hit cell (V=2, H=4)
+│  3 │[   ][   ][   ][   ][ 〜][   ][   ]…[   ]│  ← miss cell (V=3, H=5)
+│    │  …                                      │  ← grid fills flex: 1 1 0
+│ 10 │[   ][   ][   ][   ][   ][   ][   ]…[   ]│
+├────┴─────────────────────────────────────────┤
+│  V [__]  ×  H [__]  =  [______]  [🔥 FIRE!] │  ← input strip (fixed height)
+│  ⚠ Already targeted! Choose another cell.   │  ← warning label (hidden when n/a)
+└──────────────────────────────────────────────┘
+```
+
+**Header bar fields (left to right):**
+- `⚓` title glyph (small, does not spell out the full title to save space).
+- `💣 ×N` — shots remaining; the number pulses briefly (CSS scale animation) when
+  a shot is gained or lost.
+- `⚡×N` — current consecutive-correct streak (0–2); shows `⚡×0` when no streak;
+  when `N` hits 3, a bonus shot fires and the counter resets.
+- `⏱ MM:SS` — countdown timer.
+- Ship status segments (right-aligned): one group per ship type showing small coloured
+  squares; intact segments are bright (`#4af`), hit segments are dark (`#222`), sunk
+  ships are crossed (`#f44` with a diagonal SVG line or opacity 0.3).  Font size
+  `0.65em` keeps this compact.
+
+**In landscape orientation** the header remains a single row.  The grid cells grow taller
+(more vertical space available) but the single-column layout is unchanged — there is no
+right-side control panel.  The grid auto-scales uniformly in both dimensions because cell
+width and height are kept equal via `aspect-ratio: 1`.
+
+---
+
+### Grid CSS Layout
+
+The grid is implemented with CSS Grid:
+
+```css
+.grid {
+    display: grid;
+    grid-template-columns: 1.8em repeat(10, 1fr);  /* row-label col + 10 data cols */
+    grid-template-rows:    1.4em repeat(10, 1fr);  /* col-label row + 10 data rows */
+}
+.cell {
+    aspect-ratio: 1;  /* cells are always square regardless of viewport */
+    min-width: 0;
+    min-height: 0;
+}
+```
+
+The `.grid-wrap` container is `flex: 1 1 0; min-height: 0; overflow: hidden`, so the
+grid expands to fill all space between the header and the input strip.  With `1fr`
+columns and `aspect-ratio: 1` on each cell, the grid auto-scales uniformly in both
+portrait and landscape without any JS size calculations.
+
+**Minimum cell size:** 28 px (enforced via `min-width: 28px` on `.grid`'s data columns)
+so cells remain tappable on a 320 px phone (320 − 1.8 em label ≈ 293 px / 10 ≈ 29 px
+per cell).
+
+---
+
+### Cell State Model
+
+Each cell is in exactly one of these states at any time:
+
+| State        | CSS class        | Visual description                                                          |
+| ------------ | ---------------- | --------------------------------------------------------------------------- |
+| `unknown`    | `.cell`          | Dark navy `#001a2e`; subtle green border `#003828`; hover tint `#003040`.  Tappable — pre-fills V and H. |
+| `targeted`   | `.cell.targeted` | Pulsing bright-green ring (`@keyframes targetPulse`); pre-filled in inputs. Tappable (re-selects). |
+| `hit`        | `.cell.hit`      | Orange-red background `#c04010`; 🔥 emoji centred; `@keyframes hitFlash` on entry. Not tappable. |
+| `miss`       | `.cell.miss`     | Dark blue `#002040`; `〜` text centred; `@keyframes missRipple` on entry.  Not tappable. |
+| `sunk`       | `.cell.sunk`     | Bright red `#e83020`; 💥 emoji; `@keyframes sunkPulse` (3× repeating) on entry. Cells that were `.hit` transition to `.sunk` when the ship is fully hit. |
+
+**Targeted cell highlight is live:** as the player types into the V and H inputs (both
+valid 1–10 numbers), the corresponding cell gains the `.targeted` class immediately.
+When the player clears V or H, the `.targeted` class is removed.
+
+---
+
+### Input Strip Behaviour
+
+The strip is a horizontal flex row pinned to the bottom of the screen:
+
+```
+  V [input]  ×  H [input]  =  [input]  [ 🔥 FIRE! ]
+```
+
+| Element        | Type / HTML                                        | Constraints                          |
+| -------------- | -------------------------------------------------- | ------------------------------------ |
+| `V` label      | `<label>`                                          | Tap targets the V input              |
+| V input        | `<input type="number" min="1" max="10" step="1">`  | Required; range 1–10                 |
+| `×` separator  | `<span>`                                           | Non-interactive                      |
+| `H` label      | `<label>`                                          | Tap targets the H input              |
+| H input        | `<input type="number" min="1" max="10" step="1">`  | Required; range 1–10                 |
+| `=` separator  | `<span>`                                           | Non-interactive                      |
+| Answer input   | `<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3">` | Required; 1–100 |
+| FIRE! button   | `<button>`                                         | See disabled conditions below        |
+
+**Tab / Enter navigation:** Tab advances focus V → H → answer.  Enter on the answer
+field triggers FIRE (same as clicking the button).
+
+**FIRE button disabled conditions (any of the following):**
+1. V input is empty, invalid, or outside 1–10.
+2. H input is empty, invalid, or outside 1–10.
+3. Answer input is empty.
+4. Cell (V, H) has already been revealed (hit or miss) — show the already-targeted warning.
+
+Note: the FIRE button is **not** disabled when the answer is wrong.  Wrong-answer
+detection happens on submit, not on keystroke, so the player does not receive
+correctness feedback before pressing FIRE.
+
+**Already-targeted warning:** a one-line `<p class="warn-msg">` below the input strip
+that reads `⚠ Already targeted! Choose another cell.`  It is `visibility: hidden` by
+default and becomes `visibility: visible` only when conditions 1–3 are met but condition
+4 prevents firing (i.e. all inputs are valid but the cell is already shot).
+
+**Tap-to-target interaction:** tapping a `.cell` (not `.cell.hit`, `.cell.miss`, or
+`.cell.sunk`) sets the V and H inputs to the cell's row and column, removes
+`.targeted` from any previously highlighted cell, adds `.targeted` to the tapped cell,
+clears the answer input, and moves focus to the answer input.
+
+---
+
+### Shot Mechanics
+
+| Event                                         | Effect                                                                      |
+| --------------------------------------------- | --------------------------------------------------------------------------- |
+| FIRE with correct answer, hit cell            | `shotsRemaining` unchanged; `cellsHit++`; `streakCount++`; `hitCell()`.    |
+| FIRE with correct answer, miss cell           | `shotsRemaining` unchanged; `streakCount++`; `missCell()`.                 |
+| FIRE with wrong answer                        | `shotsRemaining--`; `streakCount = 0`; no cell revealed; shake animation.  |
+| `streakCount` reaches `STREAK_BONUS_AT` (3)   | `shotsRemaining++`; `streakCount = 0`; bonus-shot pulse animation.         |
+| `shotsRemaining` reaches 0                    | `endGame('no_shots')`.                                                      |
+| Timer reaches 0                               | `endGame('timeout')`.                                                       |
+| All 19 ship cells hit                         | `endGame('win')`.                                                           |
+
+---
+
+### Ship Placement Algorithm
+
+Ships are placed randomly client-side using `Math.random()`.  The algorithm must
+guarantee the following rules:
+
+1. All cells of a ship are within the 10 × 10 grid (1–10 for both V and H).
+2. Ships may be horizontal (constant V, varying H) or vertical (varying V, constant H).
+   Orientation is chosen at random (50/50).
+3. No two ships overlap (their cell sets are disjoint).
+4. No two ships are adjacent (a 1-cell buffer in all 8 directions is enforced between
+   any two ships).  This prevents ambiguous partial-sink scenarios where hit cells from
+   two ships are side-by-side.
+5. Placement is attempted by shuffling a random order for each ship and retrying up to
+   200 times if a placement violates rules 1–4.  A placement failure after 200 attempts
+   retriggers the entire placement from scratch (rare; the 10 × 10 grid accommodates
+   19 cells with buffer comfortably).
+
+The final `ships[]` array is never serialised to the URL or sent to the server — it
+exists only in JS memory during the game session.
+
+---
+
+### Animation Specifications
+
+**`@keyframes hitFlash`** (triggered on a `.hit` cell):
+- 0 %: `background: #001a2e; transform: scale(1)`
+- 30 %: `background: #ff8020; transform: scale(1.15)` (orange burst)
+- 100 %: `background: #c04010; transform: scale(1)` (settles to hit colour)
+- Duration: 500 ms, fill: forwards.
+
+**`@keyframes missRipple`** (triggered on a `.miss` cell):
+- 0 %: `box-shadow: 0 0 0 0 rgba(60,120,255,0.6)`
+- 60 %: `box-shadow: 0 0 0 8px rgba(60,120,255,0)`
+- 100 %: `box-shadow: 0 0 0 0 rgba(60,120,255,0)`
+- Duration: 400 ms.
+
+**`@keyframes sunkPulse`** (triggered on all cells of a fully sunk ship):
+- 0 %, 100 %: `background: #e83020`
+- 50 %: `background: #ff6040; box-shadow: 0 0 12px 4px #ff4020`
+- Duration: 400 ms; iteration-count: 3.
+
+**`@keyframes targetPulse`** (continuous on `.targeted` cell):
+- 0 %, 100 %: `box-shadow: 0 0 0 2px #00ff88`
+- 50 %: `box-shadow: 0 0 0 5px #00ff88, 0 0 14px 4px rgba(0,255,136,0.4)`
+- Duration: 1.2 s; infinite.
+
+**`@keyframes shake`** (wrong answer — applied to input strip `.input-strip`):
+- `0%, 100%: translateX(0); 20%, 60%: translateX(-6px); 40%, 80%: translateX(6px)`
+- Duration: 380 ms.  Strip border briefly turns `#ff4444`.
+
+**`@keyframes radarSweep`** (continuous CSS radar overlay):
+- A `<div class="radar-overlay">` is positioned `absolute` over `.grid-wrap`.
+- `background: conic-gradient(from 0deg, rgba(0,255,136,0.10) 0deg, transparent 25deg, transparent 360deg)`
+- `@keyframes radarSweep { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`
+- `animation: radarSweep 4s linear infinite`
+- `pointer-events: none` (does not intercept taps).
+- `border-radius: 0` (square grid, not circular — the gradient sweeps across the grid).
+
+**`@keyframes bonusPulse`** (bonus shot awarded — applied to `.shot-counter`):
+- Brief `transform: scale(1.35)` + `color: #00ff88` flash, 350 ms.
+
+**"SUNK!" toast:**
+- `<div class="toast">🔥 [Ship name] SUNK!</div>` inserted into `<body>`.
+- `position: fixed; top: 10px; left: 50%; transform: translateX(-50%)`.
+- `@keyframes toastSlide`: `opacity 0 → 1` over 200 ms, holds for 1400 ms, `opacity 1 → 0` over 400 ms.
+- Removed from DOM after 2000 ms total.
+
+---
+
+### Background
+
+- Body background: `#001220` (very dark navy).
+- `.grid-wrap` background: `#001a2e`.
+- Grid cell borders: `1px solid #003828` (dark phosphor-green).
+- Header bar: `rgba(0, 10, 20, 0.9)` with a subtle bottom border `1px solid #004030`.
+- Input strip: `rgba(0, 8, 18, 0.95)` with a subtle top border `1px solid #003028`.
+- No external images; all colour is CSS.
+
+---
+
+### WIN State Layout
+
+```
+┌──────────────────────────────────────┐
+│   ⚓  FLEET DESTROYED! 🎉             │
+│                                      │
+│  All 6 ships sunk!  💥               │
+│  You fired N shots.                  │
+│  Time remaining: M:SS               │
+│                                      │
+│  Credits earned: h:mm:ss             │
+│                                      │
+│  Saving your credits…                │
+│  ← Back to Games                     │
+└──────────────────────────────────────┘
+```
+
+WIN title colour: `#00ff88` (phosphor-green) with a matching `text-shadow` glow.
+The full grid is revealed (all ships shown) after a 600 ms celebration delay.
+
+---
+
+### GAME OVER State Layout (shots exhausted)
+
+```
+┌──────────────────────────────────────┐
+│   💣  OUT OF AMMO!                   │
+│                                      │
+│  You sank N / 6 ships.               │
+│  Cells hit: N / 19                   │
+│  Credits earned: h:mm:ss             │
+│                                      │
+│  Saving your credits…                │
+│  ← Back to Games                     │
+└──────────────────────────────────────┘
+```
+
+---
+
+### GAME OVER State Layout (time expired)
+
+```
+┌──────────────────────────────────────┐
+│   ⏱  TIME'S UP!                      │
+│                                      │
+│  You sank N / 6 ships.               │
+│  Cells hit: N / 19                   │
+│  Credits earned: h:mm:ss             │
+│                                      │
+│  Saving your credits…                │
+│  ← Back to Games                     │
+└──────────────────────────────────────┘
+```
+
+On both GAME OVER screens, the full grid is revealed (all ship positions shown) 600 ms
+after the END screen renders.
+
+---
+
+### Responsiveness and Orientation
+
+**Primary target**: tablet (768–1024 px) in either orientation; smartphone (360–414 px)
+in portrait.  The single-column layout with bottom input strip works equally in both
+orientations — no layout switch is required.
+
+**Viewport meta tag** (required — must be exactly this):
+
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+```
+
+**Portrait and landscape:** identical structure (`flex-direction: column` always).
+- Header at top (`flex-shrink: 0`).
+- `.grid-wrap` (`flex: 1 1 0; min-height: 0; overflow: hidden`): fills all remaining
+  space; the CSS Grid inside auto-scales cells via `1fr` + `aspect-ratio: 1`.
+- Input strip at bottom (`flex-shrink: 0`).
+
+**Minimum supported width:** 320 px.  At 320 px: label column ≈ 29 px; 10 data columns
+= (320 − 29) / 10 ≈ 29 px per cell — at the 28 px minimum, workable with tap-to-target
+eliminating the need for precision tapping.
+
+**Input strip on narrow screens:** use `flex-wrap: nowrap` with `font-size: clamp(12px,
+3.5vw, 15px)` on the strip so all elements fit on one line down to 320 px.  Input widths
+are `3em` for V/H and `4em` for the answer.
+
+**Font sizes:**
+- `:root { font-size: 16px }`.
+- `@media (max-width: 400px) { :root { font-size: 13px } }`.
+- `@media (orientation: landscape) and (max-height: 500px) { :root { font-size: 12px } }`.
+
+**Safe-area insets:** `padding: env(safe-area-inset-top) … env(safe-area-inset-bottom) …`
+applied to `body`.
+
+**Keypad / input tap targets:** V and H inputs: minimum `44 × 44 px`.  FIRE button:
+minimum `44 px` height; width `min-content` but at least 80 px.
+
+---
+
+## Phase A4.2 — HTML/JS/CSS Implementation (Activity 4)
+
+### Goal
+
+Implement `main/dyn_activities/battle_math.html` as a single self-contained HTML5 file
+following all rules from Phase A4.1 and the esport-fi32 dynamic activity interface
+contract.
+
+### Inputs
+
+- Phase A4.1 (this document).
+- `main/dyn_activities/space_math.html` — reference for credit-claim POST flow, URL param
+  parsing, `formatHMS()`, `showBanner()`, screen-swap pattern, and timer skeleton.
+- `main/dyn_activities/fish_math.html` — reference for ocean colour scheme and dark-navy
+  CSS theme.
+- `docs/1-specification.md` §6.9 (credit API), §6.10 (dynamic activities URL contract).
+
+### File
+
+`main/dyn_activities/battle_math.html`
+
+### Required URL Query Parameters
+
+| Parameter      | Type   | Description                                              |
+| -------------- | ------ | -------------------------------------------------------- |
+| `pin`          | string | 8-char device PIN from `GET /api/dyn`                    |
+| `device_idx`   | int    | Device slot index (0–3)                                  |
+| `act_id`       | int    | Activity ID                                              |
+| `credits_s`    | int    | Reference credit in seconds (`activity.credit_s`)        |
+| `time_limit_s` | int    | Activity time limit in seconds (`activity.time_limit_s`) |
+| `token`        | string | One-time nonce from `GET /api/dyn`                       |
+
+If any required parameter is absent, zero (for numeric params), or fails to parse, the
+game must show the `ERROR` screen immediately before any game logic runs.
+
+### Structural Requirements
+
+1. **Single file, no external resources.**  All CSS, JS, and graphics are inline.
+2. **File size target < 200 KB** (uncompressed, unminified).  Hard maximum: 400 KB
+   uncompressed; **< 100 KB compressed** (the flash-allocation limit).
+3. **`<meta charset="UTF-8">` and `<meta name="viewport" ...>`** present (exact form
+   specified in Phase A4.1).
+4. **`<title>Battle Math: Grid Commander</title>`**.
+5. **CSS reset**: `box-sizing: border-box` on `*`; `margin: 0; padding: 0` on `body`.
+6. **Dark navy ocean theme**: `background: #001220` on body.
+7. **No `alert()`, `confirm()`, or `prompt()`** calls.
+8. **No `eval()` or `innerHTML` injection of user-supplied data.**  Only game-generated
+   integers (V, H, product) are inserted via `textContent` or numeric template literals.
+9. **`var` is forbidden** — use `const` and `let` throughout (ES6 minimum target).
+10. **No game loop RAF required** — the game is turn-based.  A `setInterval(1000)`
+    decrements the countdown timer.  All cell updates are event-driven (input changes +
+    FIRE button click).
+
+### JavaScript Architecture
+
+```
+┌─ Constants
+│   ├─ STARTING_SHOTS = 10
+│   ├─ STREAK_BONUS_AT = 3
+│   ├─ TOTAL_SHIP_CELLS = 19
+│   └─ FLEET = [ {name, size, count}, … ]  (Carrier×1, Battleship×1, Destroyer×2, Patrol×2)
+├─ State variables
+│   ├─ pin, deviceIdx, actId, creditsS, timeLimitS, token  (URL params)
+│   ├─ gameState: 'loading' | 'setup' | 'playing' | 'end'
+│   ├─ grid[10][10]  (cell state per (v-1, h-1): 'unknown' | 'hit' | 'miss')
+│   ├─ ships[]       ({ name, cells:[{v,h}], hitCount, sunk })
+│   ├─ shotsRemaining
+│   ├─ streakCount
+│   ├─ cellsHit
+│   ├─ shipsSunk
+│   ├─ remainingS   (countdown, starts at timeLimitS)
+│   ├─ elapsedS     (increments each tick)
+│   └─ timerHandle  (setInterval ref, cleared on game end)
+├─ Ship placement
+│   └─ placeShips()  → populates ships[]; modifies no DOM; pure computation
+│       (implements the 4-rule algorithm from Phase A4.1 §Ship Placement Algorithm)
+├─ Grid DOM helpers
+│   ├─ buildGrid()             → creates label + data cells; attaches tap listeners
+│   ├─ cellEl(v, h)            → returns the <div> for cell (v, h)
+│   ├─ setCellState(v, h, st)  → updates grid[v-1][h-1] and cell CSS class
+│   ├─ setTargeted(v, h)       → adds .targeted; clears previous targeted cell
+│   └─ clearTargeted()         → removes .targeted from any highlighted cell
+├─ Input handling
+│   ├─ onVInput()              → validate; update targeted cell; update FIRE state
+│   ├─ onHInput()              → validate; update targeted cell; update FIRE state
+│   ├─ onAnswerInput()         → update FIRE state
+│   ├─ onAnswerKeydown(e)      → Enter → onFire()
+│   ├─ onVHKeydown(e)          → Enter on V → focus H; Enter on H → focus answer
+│   ├─ onCellTap(v, h)         → setTargeted; fill inputs; focus answer
+│   └─ updateFireBtn()         → enables/disables FIRE; shows/hides warn-msg
+├─ Fire logic (onFire)
+│   1. Read v, h, ans from inputs (parseInt)
+│   2. If grid[v-1][h-1] !== 'unknown': show warn-msg; return
+│   3. If ans !== v * h: loseShot(); shakeStrip(); clear answer; return
+│   4. streakCount++; if streakCount === STREAK_BONUS_AT: gainBonusShot()
+│   5. Find ship at (v, h) (if any)
+│   6. If ship found: hitCell(v, h, ship); else: missCell(v, h)
+│   7. Clear inputs; clearTargeted(); focus V input; updateFireBtn()
+├─ Game state transitions
+│   ├─ hitCell(v, h, ship)
+│   │     setCellState(v,h,'hit'); cellsHit++; ship.hitCount++
+│   │     if ship.hitCount === ship.cells.length: sinkShip(ship)
+│   │     else: checkWin()
+│   ├─ missCell(v, h)
+│   │     setCellState(v,h,'miss')
+│   ├─ loseShot()
+│   │     shotsRemaining--; updateHeader(); if shotsRemaining===0: endGame('no_shots')
+│   ├─ gainBonusShot()
+│   │     shotsRemaining++; updateHeader(); animate bonus pulse on shot counter
+│   ├─ sinkShip(ship)
+│   │     all ship.cells → setCellState(.., 'sunk'); shipsSunk++
+│   │     showToast(`🔥 ${ship.name} SUNK!`)
+│   │     checkWin()
+│   └─ checkWin()
+│         if cellsHit === TOTAL_SHIP_CELLS: endGame('win')
+├─ endGame(reason)   ('win' | 'no_shots' | 'timeout')
+│     clearInterval(timerHandle); elapsedS = timeLimitS - remainingS
+│     revealAllShips() after 600 ms; renderEnd(reason)
+├─ revealAllShips()
+│     for each unsunk ship cell: setCellState(v,h,'hit') with no animation
+├─ Timer
+│   └─ onTick()
+│         remainingS--; elapsedS++; updateHeader()
+│         if remainingS === 0: endGame('timeout')
+├─ Header updater
+│   └─ updateHeader()  → updates shot count, streak counter, timer display,
+│                         ship-status segment colours
+├─ Screen renderers
+│   ├─ renderSetup()    → fleet briefing + launch button
+│   ├─ renderPlaying()  → buildGrid(); set up input listeners; start timer
+│   ├─ renderEnd(reason)→ 'win' | 'no_shots' | 'timeout'
+│   └─ renderError(msg)
+└─ Credit claim
+    └─ claimCredits()   → same POST flow as Activities 1–3
+```
+
+### CSS Architecture
+
+```
+:root           → colour vars (--bg #001220, --grid-bg #001a2e, --cell-border #003828,
+                  --cell-hit #c04010, --cell-miss #002040, --cell-sunk #e83020,
+                  --cell-targeted-glow #00ff88, --accent #4af, --warn #ff4444, ...)
+body            → dark navy bg; flex column; safe-area insets applied
+.header-bar     → flex row; flex-shrink: 0; dark bg; bottom border; gap 0.6em
+.ship-seg       → inline-block 8×8 px coloured square; border-radius 2px
+                  .ship-seg.hit  → background: #222
+                  .ship-seg.sunk → background: #f44; opacity 0.5
+.grid-wrap      → flex: 1 1 0; min-height: 0; overflow: hidden; position: relative
+.radar-overlay  → position: absolute; inset: 0; conic-gradient sweep; pointer-events: none
+.grid           → display: grid; grid-template-columns: 1.8em repeat(10, 1fr);
+                  grid-template-rows: 1.4em repeat(10, 1fr)
+.col-label      → small text; text-align: center; color: #4af; font-size: 0.75em
+.row-label      → small text; text-align: right; padding-right: 4px; color: #4af; font-size: 0.75em
+.cell           → aspect-ratio: 1; border: 1px solid var(--cell-border); cursor: pointer;
+                  display: flex; align-items: center; justify-content: center;
+                  font-size: 1.1em; transition: background 100ms
+.cell:hover     → background: #003040 (unknown cells only)
+.cell.targeted  → animation: targetPulse 1.2s infinite
+.cell.hit       → background: #c04010; cursor: default; animation: hitFlash 500ms forwards
+.cell.miss      → background: #002040; cursor: default; animation: missRipple 400ms
+.cell.sunk      → background: #e83020; cursor: default; animation: sunkPulse 400ms 3
+.input-strip    → flex row; flex-shrink: 0; flex-wrap: nowrap; align-items: center;
+                  gap: 0.4em; padding: 0.5em 0.6em; background: rgba(0,8,18,0.95);
+                  border-top: 1px solid #003028
+.input-strip label → font-size: 0.9em; color: #4af
+.coord-input    → type=number; width: 3em; height: 44px; text-align: center;
+                  background: #001a2e; color: #fff; border: 1px solid #4af
+.ans-input      → type=text; width: 4em; height: 44px; text-align: center;
+                  background: #001a2e; color: #fff; border: 1px solid #4af
+.fire-btn       → min-height: 44px; min-width: 80px; background: #c04010; color: #fff;
+                  border: none; border-radius: 4px; font-weight: bold
+.fire-btn:disabled → opacity: 0.4; cursor: not-allowed
+.warn-msg       → font-size: 0.75em; color: #ff8844; padding: 2px 6px;
+                  visibility: hidden  (toggled to visible when needed)
+.input-strip.shake → animation: shake 380ms
+.shot-counter.bonus → animation: bonusPulse 350ms
+.toast          → position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+                  background: rgba(0,0,0,0.85); color: #ff8844; padding: 6px 14px;
+                  border-radius: 20px; font-weight: bold; z-index: 100;
+                  animation: toastSlide 2000ms forwards
+.setup-screen   → centred flex column; height: 100%; dark navy bg
+.fleet-legend   → list of ships; each row: icon + segments + label
+.fleet-row      → flex row; align-items: center; gap 0.5em; margin 0.3em 0
+.end-screen     → centred flex column; height: 100%; dark navy bg
+@keyframes hitFlash, missRipple, sunkPulse, targetPulse
+@keyframes radarSweep
+@keyframes shake
+@keyframes bonusPulse
+@keyframes toastSlide
+```
+
+### Acceptance Criteria
+
+- [ ] File is a valid HTML5 document with no external resource references.
+- [ ] Uncompressed file size < 200 KB (target); must not exceed 400 KB.
+- [ ] Compressed size < 100 KB (verify with `gzip -9`).
+- [ ] Source code is human-readable; no minification, no obfuscation.
+- [ ] `<title>` is `"Battle Math: Grid Commander"`.
+- [ ] Missing/zero URL params → ERROR screen; game does not start.
+- [ ] Valid URL params → SETUP screen shown before game logic runs.
+- [ ] SETUP screen shows fleet briefing (all 6 ships with sizes) and `[ Launch Torpedoes! ]` button.
+- [ ] `[ Launch Torpedoes! ]` button is always enabled.
+- [ ] Pressing `[ Launch Torpedoes! ]` transitions to PLAYING; timer starts; grid renders.
+- [ ] Grid is 10 × 10; V labels 1–10 on left; H labels 1–10 on top.
+- [ ] Ship placement: all ships within grid; no overlaps; 1-cell buffer between ships.
+- [ ] Ships placed randomly — positions differ between sessions.
+- [ ] Tapping an unrevealed cell pre-fills V and H inputs; focuses answer input; cell gains `.targeted`.
+- [ ] Typing valid V and H values in the inputs highlights the corresponding cell with `.targeted`.
+- [ ] `.targeted` moves to the newly indicated cell whenever V or H changes to a valid value.
+- [ ] `.targeted` is removed when V or H is cleared or invalid.
+- [ ] FIRE button disabled when V or H is empty/invalid.
+- [ ] FIRE button disabled when answer is empty.
+- [ ] FIRE button disabled when cell (V, H) is already revealed; warn-msg visible.
+- [ ] Warn-msg hidden in all other states.
+- [ ] Tab key advances focus: V → H → answer.
+- [ ] Enter on V focuses H; Enter on H focuses answer; Enter on answer triggers FIRE.
+- [ ] FIRE with correct answer (ans == V×H) and unknown cell: cell revealed; no shot lost.
+- [ ] FIRE with correct answer, hit: cell → `.hit` with `hitFlash`; `cellsHit++`; ship hitCount updated.
+- [ ] FIRE with correct answer, miss: cell → `.miss` with `missRipple`; shot count unchanged.
+- [ ] FIRE with wrong answer (ans ≠ V×H): `shotsRemaining--`; `streakCount = 0`; input-strip `.shake` plays; answer cleared; no cell revealed.
+- [ ] `streakCount` increments on each correct answer.
+- [ ] At `streakCount == 3`: `shotsRemaining++`; `streakCount = 0`; `.shot-counter.bonus` animation plays; header updated.
+- [ ] Shot count displayed in header updates after every gain/loss.
+- [ ] Streak counter displayed in header updates correctly (0–2, resets to 0 on bonus or wrong).
+- [ ] Ship fully sunk: all its cells transition from `.hit` to `.sunk` with `sunkPulse`; `shipsSunk++`; SUNK toast displayed.
+- [ ] SUNK toast shows ship name; disappears after 2000 ms.
+- [ ] `shotsRemaining == 0` → `endGame('no_shots')` immediately.
+- [ ] Timer reaches 0 → `endGame('timeout')` immediately.
+- [ ] All 19 cells hit → `endGame('win')` immediately.
+- [ ] All ship positions revealed on the grid 600 ms after END screen renders.
+- [ ] WIN screen: "FLEET DESTROYED! 🎉" title; ships sunk count; shots used; time remaining; credits as h:mm:ss.
+- [ ] GAME OVER (no shots) screen: "OUT OF AMMO! 💣" title; ships sunk; cells hit / 19; credits.
+- [ ] GAME OVER (timeout) screen: "TIME'S UP! ⏱" title; ships sunk; cells hit / 19; credits.
+- [ ] `earnedCredit = Math.floor(credit_s * cellsHit / 19)`.
+- [ ] `submitCredit = Math.min(earnedCredit, credit_s)`.
+- [ ] Credits submitted automatically on END screen; "Saving your credits…" shown while in flight.
+- [ ] HTTP 200 → green banner "Credits added! Counter: `new_counter_hms`".
+- [ ] HTTP 403 → red non-retriable banner; no retry button.
+- [ ] HTTP 429 → orange non-retriable banner; no retry button.
+- [ ] Other HTTP or network error → red banner with **Try again** button (retriable).
+- [ ] Radar sweep animation runs continuously on `.grid-wrap` during PLAYING.
+- [ ] `targetPulse` animation runs on the `.targeted` cell.
+- [ ] `hitFlash` plays on a cell transitioning to `.hit`.
+- [ ] `missRipple` plays on a cell transitioning to `.miss`.
+- [ ] `sunkPulse` plays on cells transitioning to `.sunk`.
+- [ ] No `var`, no `eval()`, no `alert()/confirm()`, no external resources.
+- [ ] `<meta name="viewport">` includes `maximum-scale=1.0` and `user-scalable=no`.
+- [ ] Layout is single-column (header / grid-wrap / input strip) in BOTH portrait and landscape.
+- [ ] No horizontal scrollbar at 320 px wide in portrait.
+- [ ] No horizontal scrollbar at 568 × 320 px in landscape.
+- [ ] `env(safe-area-inset-*)` padding applied to `body`.
+- [ ] Minimum cell size 28 px enforced; cells remain tappable on 320 px viewport.
+- [ ] Input strip elements (`V`, `H`, answer, FIRE) fit on one line at 320 px with `clamp` font size.
+
+### Required `POST /api/activities/credit` Fields
+
+```javascript
+{
+  device_idx:        deviceIdx,    // int
+  act_id:            actId,        // int
+  credits_s:         submitCredit, // Math.floor(creditsS * cellsHit / 19), capped at creditsS
+  completion_time_s: elapsedS,     // seconds elapsed since game start
+  pin:               pin,          // string from URL
+  token:             token         // string from URL
+}
+```
+
+---
+
+## Phase A4.3 — Integration & Verification (Activity 4)
+
+### Goal
+
+Register `battle_math.html` as a dynamic activity in the firmware, wire it to a test
+device, and verify the complete play-through flow end-to-end across all three game
+outcomes (WIN, out-of-ammo GAME OVER, timeout GAME OVER) and all edge cases.
+
+### Inputs
+
+- Phase A4.2 output: `main/dyn_activities/battle_math.html`.
+- Existing Feature 8 infrastructure (Phases 8.1–8.5 must be complete).
+
+### Tasks
+
+1. **Build**: run `idf.py reconfigure && idf.py build`.  The CMake glob picks up
+   `battle_math.html` automatically; `g_dyn_act_count` increments by 1.
+
+2. **Create activity via admin UI**:
+   - Navigate to `/activities/manage`.
+   - Tick "Dynamic activity".
+   - Select `battle_math` from the combobox.
+   - Set **Credit** to `0:10:00` (600 s), **Time Limit** to `0:05:00` (300 s),
+     **Daily Limit** to `2`.
+   - Submit → HTTP 303 redirect.
+
+3. **Assign to device 0** via the same manage page.
+
+4. **Kid workflow test — WIN path**:
+   - Navigate to `/dyn` from device 0's browser.
+   - Verify device 0's nickname and the `battle_math` button appear.
+   - Click the button; confirm URL contains `pin`, `device_idx=0`, `act_id`,
+     `credits_s=600`, `time_limit_s=300`, `token`.
+   - Game loads; verify SETUP screen shows fleet briefing.
+   - Press **Launch Torpedoes!**; verify 10×10 grid renders with V and H labels.
+   - Play through until all 6 ships are sunk (WIN state triggered).
+   - Verify WIN screen: "FLEET DESTROYED!" + correct credits; grid reveals all ships.
+   - Verify green "Credits added!" banner and `new_counter_hms` after claim POST.
+
+5. **GAME OVER — out of ammo path**:
+   - Start a new game; deliberately enter wrong answers until `shotsRemaining = 0`.
+   - Verify GAME OVER screen "OUT OF AMMO!" with proportional credit.
+   - Verify claim POST accepted; green banner shown.
+
+6. **GAME OVER — timeout path**:
+   - Create activity with `time_limit_s=30` (30 s); play slowly until timer reaches 0.
+   - Verify GAME OVER screen "TIME'S UP!" with proportional credit.
+
+7. **Correct-answer no-shot-loss test**:
+   - Fire at an empty (miss) cell with a correct answer; verify `shotsRemaining`
+     unchanged, cell marked as miss, streak increments.
+
+8. **Wrong-answer shot-loss test**:
+   - Enter a wrong answer; verify `shotsRemaining--`; streak resets to 0; input-strip
+     shakes; no cell is revealed; answer input cleared.
+
+9. **Streak bonus test**:
+   - Enter 3 correct answers in a row; verify `shotsRemaining++` on the third, shot
+     counter animates, streak resets to 0.
+   - Enter a correct answer then a wrong answer; verify streak resets; no bonus awarded.
+
+10. **Already-targeted cell test**:
+    - Reveal a cell; type V and H matching that cell; verify FIRE button is disabled
+      and warn-msg is visible.  Verify no shot is lost on attempted FIRE.
+
+11. **Tap-to-target test**:
+    - Tap an unrevealed cell; verify V and H inputs are pre-filled and answer input
+      receives focus.
+    - Tap a revealed (hit/miss) cell; verify inputs are NOT changed.
+
+12. **Ship placement variety test**:
+    - Reload the game 5 times; verify ship positions differ between sessions (ships
+      are randomised, not fixed).
+
+13. **SUNK toast test**:
+    - Sink a ship; verify the correct ship name appears in the toast notification; toast
+      disappears after ~2000 ms.
+
+14. **Grid reveal on END test**:
+    - Trigger GAME OVER; verify all ship positions are revealed on the grid ~600 ms
+      after the END screen renders.
+
+15. **Replay attack test**: after claiming, re-submit same POST (same `token`) →
+    server must return HTTP 403; non-retriable banner shown.
+
+16. **Daily limit test**: claim twice (daily limit = 2); third attempt → HTTP 429 banner.
+
+17. **Missing param test**: manually load URL with `token` omitted → ERROR screen;
+    game does not start.
+
+18. **Responsiveness test**: load game on a 320 px portrait viewport (browser DevTools);
+    full 10×10 grid, header, and input strip must all be visible without horizontal scroll.
+
+19. **Landscape test**: rotate device or set DevTools to 568 × 320 px landscape;
+    verify grid adapts to fill the taller space; input strip remains at bottom; no layout
+    breakage.
+
+20. **Build artefact check**: `g_dyn_act_registry` must include an entry with
+    `p_name == "battle_math"`.
+
+### Acceptance Criteria
+
+- [ ] `idf.py build` succeeds with zero errors and zero warnings.
+- [ ] `g_dyn_act_count` increases by 1 compared to pre-game build.
+- [ ] `GET /dyn_activities/battle_math` returns HTTP 200 with `Content-Type: text/html`.
+- [ ] `GET /dyn_activities/battle_math.html` returns HTTP 200 (`.html` extension handled).
+- [ ] `/dyn` page shows `battle_math` button for registered device.
+- [ ] Launch URL contains all 6 required parameters including `time_limit_s`.
+- [ ] WIN flow: all 19 cells hit → WIN screen → POST 200 → green banner.
+- [ ] Out-of-ammo GAME OVER: proportional credits posted and accepted.
+- [ ] Timeout GAME OVER: proportional credits posted and accepted.
+- [ ] Correct answer on miss: no shot lost; cell marked miss; streak increments.
+- [ ] Wrong answer: shot lost; streak reset; no cell revealed; shake plays.
+- [ ] Streak 3 correct: bonus shot added; streak resets to 0.
+- [ ] Already-targeted cell: FIRE disabled; warn-msg visible; no shot lost.
+- [ ] Tap-to-target: V and H pre-filled; answer focused; `.targeted` class applied.
+- [ ] Ship placement is random across sessions.
+- [ ] SUNK toast shows correct ship name; disappears after 2 s.
+- [ ] All ships revealed on grid 600 ms after END screen.
+- [ ] Replay of consumed token → HTTP 403 banner.
+- [ ] Third daily claim → HTTP 429 banner.
+- [ ] Missing URL param → ERROR screen (game does not start).
+- [ ] No horizontal scroll at 320 px portrait or 568 × 320 px landscape.
+- [ ] No regression in Activities 1–3 tests or Phases 8.1–8.5 criteria.
+
+---
+
 ## Dependency Notes
 
-- Feature 8, Phases 8.1–8.5 must be complete before Phases A1.3 and A2.3 can run.
-- Phases A1.2 and A2.2 (HTML files) are independent of their respective integration
-  phases and can be developed and reviewed on a desktop browser without firmware.
+- Feature 8, Phases 8.1–8.5 must be complete before Phases A1.3, A2.3, A3.3, and A4.3
+  can run.
+- Phases A1.2, A2.2, A3.2, and A4.2 (HTML files) are independent of firmware and can be
+  developed and reviewed on a desktop browser without any firmware build.
 - The `/dyn` page launch URL must include `time_limit_s` (Option A, Phase A1.1 §URL
   Parameters).  This requires a **one-line change** in `http_server_dyn.c` Phase 8.4
   task 2b: append `&time_limit_s=%lu` with `act_entry.time_limit_s` to the JS
-  `navigateTo` URL string.  This change applies to both activities and should be tracked
-  as part of Phase A1.3 task 1 (or retrofitted into Phase 8.4 if not yet implemented).
-- Phase A2.2 (`fish_math.html`) shares the same infrastructure as Phase A1.2 and can be
-  developed independently or in parallel with Activity 1 phases.
-- Phase A3.2 (`shoot_math.html`) is independent of firmware and can be developed and
-  reviewed on a desktop browser without any firmware build.  The same `time_limit_s`
-  URL-parameter change required for Activities 1 and 2 covers Activity 3 as well — no
-  additional server-side change is needed.
-- Phases A3.2 and A1.2/A2.2 are fully independent and can be developed in parallel.
+  `navigateTo` URL string.  This change applies to all four activities and should be
+  tracked as part of Phase A1.3 task 1 (or retrofitted into Phase 8.4 if not yet
+  implemented).
+- Phases A2.2 (`fish_math.html`), A3.2 (`shoot_math.html`), and A4.2
+  (`battle_math.html`) are fully independent of each other and of Phase A1.2 — they
+  can be developed in parallel.
+- Phase A4.2 (`battle_math.html`) has no dependency on Activities 1–3 beyond borrowing
+  the credit-claim POST pattern from `space_math.html` as a reference.  It can be
+  developed independently at any time after Phase 8.5 is complete.
 
 ---
 
@@ -2070,5 +3014,25 @@ device, and verify the complete play-through flow end-to-end.
 | Landscape primary | Horizontal play field suits horizontal movement natively | Natural orientation for a side-scrolling shooter; portrait supported as fallback |
 | Star-field background | Reused from `space_math.html` | Consistent space theme; zero additional code cost |
 | Stat label | "Shot" instead of "Solved" | Thematically appropriate for shooting mechanic |
+| **Activity 4** | | |
+| Multiplication only | 10×10 grid maps directly to the standard times table | The map and the math are the same object — knowing facts 1–10 unlocks the entire grid |
+| Player-chosen target (V × H) | Player fills V, H, AND answer | Player must both select a strategic target AND prove knowledge of that fact; one mechanic rewards two skills simultaneously |
+| No random problem generation | Problems are player-chosen, not randomly presented | Adds spatial strategy layer absent in Activities 1–3; replayability from random ship placement rather than random questions |
+| Wrong answer = shot lost, no reveal | Shot consumed without firing | Directly rewards mathematical fluency; a child who knows all 100 facts never wastes shots on wrong answers |
+| Correct answer, miss = no shot lost | Miss does not cost a shot | Separates "strategic mistake" (bad cell choice) from "mathematical mistake" (wrong answer); only math errors are penalised |
+| 10 starting shots | Enough for strategic play; not enough for brute force (100 cells) | Forces the player to be selective and strategic, not exhaustive |
+| Streak bonus shot (+1 per 3 correct) | Rewards consecutive correct answers | Encourages fluency; gives mathematically confident players more tactical flexibility |
+| `TOTAL_SHIP_CELLS = 19` | Carrier(5)+Battleship(4)+2×Destroyer(3)+2×PatrolBoat(2) | Classic Battleship fleet; 19% grid coverage is enough to make random guessing inefficient |
+| Credit = proportional to cells hit | `Math.floor(credit_s * cellsHit / 19)` | Cell-based credit is more granular than ship-based; every hit matters regardless of whether the ship sinks |
+| Tap-to-target | Tap cell → pre-fills V and H; focuses answer input | Removes coordinate typing overhead on mobile; player focuses purely on the multiplication fact |
+| Single-column layout (no right panel) | Header / grid / input strip stacked vertically | Maximises grid size in both orientations; no horizontal space split needed for a turn-based game |
+| `aspect-ratio: 1` CSS grid cells | Grid auto-scales in both orientations without JS | Uniform square cells at any viewport size; no JS resize listener needed |
+| Bottom input strip (3 inputs in a row) | `V [input] × H [input] = [input] [FIRE!]` | Minimal vertical footprint; keeps grid large; familiar calculator-style left-to-right flow |
+| Disabled FIRE for already-shot cells | FIRE button disabled + warn-msg | Prevents accidental shot waste on known cells; cleaner than silent ignore |
+| Ship placement 1-cell buffer | No two ships touch (including diagonals) | Avoids ambiguous partial-sink scenarios where adjacent ships share a border; makes each SUNK event unambiguous |
+| Radar sweep overlay (CSS conic-gradient) | Rotating overlay at low opacity on `.grid-wrap` | Sonar/radar aesthetic at zero JS cost; `pointer-events: none` so it never intercepts taps |
+| SUNK toast notification | Fixed-position sliding toast with ship name | Immediate gratifying feedback; does not disrupt the grid or require the player to dismiss it |
+| Grid revealed on END | All ship positions shown 600 ms after END screen | Satisfying reveal moment; helps the child learn where ships were and why they missed |
+| Relaxed file size budget | < 100 KB compressed (vs ~10–15 KB for Activities 1–3) | Richer SVG assets and more CSS animation detail justified for a visually richer game; larger budget approved by project |
 
 /*** end of file ***/
