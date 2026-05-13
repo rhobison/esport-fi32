@@ -1,7 +1,7 @@
 # esport-fi32 Firmware Specification
 
-**Version:** 2.4
-**Date:** 2026-04-18
+**Version:** 2.5
+**Date:** 2026-05-01
 **Target:** ESP32-C6 (ESP-IDF v5.x)
 
 ---
@@ -659,6 +659,7 @@ esp_err_t device_reg_entry_add(const uint8_t *p_mac, const char *p_nickname);
 esp_err_t device_reg_entry_remove(uint8_t idx);
 uint8_t   device_reg_entry_count(void);
 esp_err_t device_reg_entry_get(uint8_t idx, device_reg_entry_t *p_out);
+esp_err_t device_reg_entry_mac_set(uint8_t idx, const uint8_t *p_mac);
 esp_err_t device_reg_entry_nickname_set(uint8_t idx, const char *p_nickname);
 esp_err_t device_reg_entry_enabled_set(uint8_t idx, bool b_enabled);
 esp_err_t device_reg_entry_counter_set(uint8_t idx, uint32_t val);
@@ -936,7 +937,7 @@ in NVS key `cfg_pwd`).  A "Change Config Password" link navigates to `GET /confi
 
 | Element                   | Description                                                                                       |
 | ------------------------- | ------------------------------------------------------------------------------------------------- |
-| Registered Devices table  | One row per device: nickname input, MAC (read-only), counter h:mm:ss input (with `oninput` auto-format: strips non-digits, limits to 6 digits, inserts colons automatically as user types), enabled checkbox, current-rider radio, Remove button |
+| Registered Devices table  | One row per device: nickname input, MAC editable text input (same `oninput` autoformat as the Add Device field: strips non-hex chars, uppercases, inserts colons progressively as the user types), counter h:mm:ss input (with `oninput` auto-format: strips non-digits, limits to 6 digits, inserts colons automatically as user types), enabled checkbox, current-rider radio, Remove button |
 | No Rider radio            | Clears the current rider assignment (`DEVICE_REG_NO_RIDER`)                                        |
 | Add Device sub-form       | MAC address text input (`AA:BB:CC:DD:EE:FF` or `AABBCCDDEEFF`), nickname text input, Add button  |
 
@@ -944,6 +945,7 @@ POST handling for device management fields:
 - `current_rider`: sets current rider index or `DEVICE_REG_NO_RIDER` if value is `"255"`.
 - `dev_N_remove`: removes device at index N.
 - `dev_N_nickname`: updates nickname for device N.
+- `dev_N_mac`: editable MAC address for device N (`AA:BB:CC:DD:EE:FF` format); validated and applied via `device_reg_entry_mac_set()` only when changed. Returns HTTP 400 if the format is invalid or the MAC is already registered in another slot.
 - `dev_N_enabled`: checkbox; absence means `false`.
 - `dev_N_counter_hms`: h:mm:ss counter value; parsed to seconds and applied via `device_reg_entry_counter_set()`.
 - `action=add_device` + `new_dev_mac` + `new_dev_nickname`: adds a new device entry.

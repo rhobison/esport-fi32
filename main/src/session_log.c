@@ -279,6 +279,7 @@ uint16_t session_log_read(session_trk_record_t * p_out, uint16_t max_count)
     }
 
     uint16_t copied = 0U;
+    bool     b_gap  = false;
     for (uint16_t i = 0U; i < actual; i++)
     {
         /* Traverse newest-first: idx points to the entry written i steps ago. */
@@ -295,12 +296,32 @@ uint16_t session_log_read(session_trk_record_t * p_out, uint16_t max_count)
         {
             ESP_LOGW(gp_tag, "nvs_get_blob(%s) failed: %s - skipping slot", key,
                 esp_err_to_name(rd_ret));
+            b_gap = true;
             continue;
         }
         copied++;
     }
 
     nvs_close(handle);
+
+    /* If any blobs were missing the stored count is inconsistent with the
+     * actual NVS contents.  Reset the in-memory count to 0 and commit the
+     * correction so that subsequent reads do not repeatedly attempt to
+     * fetch the same non-existent keys. */
+    if (b_gap)
+    {
+        ESP_LOGW(gp_tag, "NVS blob gap detected - resetting session log count to 0");
+        g_entry_count = 0U;
+        nvs_handle_t wr_handle;
+        esp_err_t    wr_ret = nvs_open(SESSION_LOG_NAMESPACE, NVS_READWRITE, &wr_handle);
+        if (ESP_OK == wr_ret)
+        {
+            (void)nvs_set_u16(wr_handle, SESSION_LOG_KEY_COUNT, 0U);
+            (void)nvs_commit(wr_handle);
+            nvs_close(wr_handle);
+        }
+    }
+
     return copied;
 }
 

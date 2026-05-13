@@ -367,10 +367,25 @@ esp_err_t http_srv_config_get_handler(httpd_req_t * p_req)
         }
         (void)httpd_resp_sendstr_chunk(p_req, "\"></td>");
 
-        /* MAC (read-only). */
-        static char mac_cell[64];
-        snprintf(mac_cell, sizeof(mac_cell), "<td><span>%s</span></td>", mac_str);
-        (void)httpd_resp_sendstr_chunk(p_req, mac_cell);
+        /* MAC (editable, same autoformat as Add Device). */
+        static char mac_name[20];
+        snprintf(mac_name, sizeof(mac_name), "dev_%u_mac", (unsigned)dev_i);
+        (void)httpd_resp_sendstr_chunk(p_req, "<td><input type=\"text\" name=\"");
+        (void)httpd_resp_sendstr_chunk(p_req, mac_name);
+        (void)httpd_resp_sendstr_chunk(p_req, "\" value=\"");
+        (void)httpd_resp_sendstr_chunk(p_req, mac_str);
+        (void)httpd_resp_sendstr_chunk(p_req,
+            "\" maxlength=\"17\" style=\"width:130px\""
+            " oninput=\"var d=this.value.replace(/[^0-9A-Fa-f]/g,'').toUpperCase().slice(0,12);"
+            "if(d.length>10)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4,6)+':'"
+            "+d.slice(6,8)+':'+d.slice(8,10)+':'+d.slice(10);"
+            "else if(d.length>8)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4,6)+':'"
+            "+d.slice(6,8)+':'+d.slice(8);"
+            "else if(d.length>6)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4,6)+':'"
+            "+d.slice(6);"
+            "else if(d.length>4)this.value=d.slice(0,2)+':'+d.slice(2,4)+':'+d.slice(4);"
+            "else if(d.length>2)this.value=d.slice(0,2)+':'+d.slice(2);"
+            "else this.value=d;\"></td>");
 
         /* Counter input - oninput auto-formats as h:mm:ss while typing;
          * server-side parsing rejects malformed values with HTTP 400. */
@@ -1037,6 +1052,40 @@ esp_err_t http_srv_config_post_handler(httpd_req_t * p_req)
                 if (dev_i == device_reg_current_rider_get())
                 {
                     (void)time_ctr_counter_set(total_s);
+                }
+            }
+
+            /* dev_N_mac */
+            char mac_key[20];
+            snprintf(mac_key, sizeof(mac_key), "dev_%u_mac", (unsigned)dev_i);
+            char mac_val[20];
+            if (ESP_OK == http_srv_form_field_get(body, mac_key, mac_val, sizeof(mac_val)))
+            {
+                uint8_t new_mac[6];
+                if (ESP_OK != parse_mac_address(mac_val, new_mac))
+                {
+                    httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST, "Invalid MAC address format");
+                    return ESP_FAIL;
+                }
+                device_reg_entry_t existing;
+                if (ESP_OK == device_reg_entry_get(dev_i, &existing))
+                {
+                    if (0 != memcmp(existing.mac, new_mac, 6U))
+                    {
+                        esp_err_t mac_ret = device_reg_entry_mac_set(dev_i, new_mac);
+                        if (ESP_ERR_INVALID_STATE == mac_ret)
+                        {
+                            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                                "MAC address already registered");
+                            return ESP_FAIL;
+                        }
+                        if (ESP_OK != mac_ret)
+                        {
+                            httpd_resp_send_err(p_req, HTTPD_400_BAD_REQUEST,
+                                "Failed to update MAC address");
+                            return ESP_FAIL;
+                        }
+                    }
                 }
             }
         }
