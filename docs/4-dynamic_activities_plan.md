@@ -2208,6 +2208,7 @@ Same single `<div id="screen">` swap pattern as Activities 1–3.
 ┌──────────────────────────────────────┐
 │   ⚓  Grid Commander                  │
 │   Naval Multiplication               │
+│   [SVG ship silhouette decoration]   │
 │                                      │
 │  FLEET BRIEFING:                     │
 │  🚢 Carrier      ■■■■■  (5 cells)    │
@@ -2226,9 +2227,11 @@ Same single `<div id="screen">` swap pattern as Activities 1–3.
 ```
 
 - No problem-type checkboxes (multiplication is the only operation).
-- Ship segments in the briefing use small `<span>` blocks styled as coloured squares
-  (`8 × 8 px`, `background: #4af`, `border-radius: 2px`) — same visual language as the
-  in-game ship segments.
+- A small inline SVG ship silhouette (`180 × 38 px`) is displayed between the title and
+  the fleet briefing — pure SVG paths, no external images.
+- Ship segments in the briefing are pill-shaped `<span>` blocks with per-ship colours
+  (`#4af` Carrier, `#6cf` Battleship, `#4df` Destroyer, `#8df` Patrol Boat) and rounded
+  end-caps that form a connected bar — same visual language as the in-game ship segments.
 - The **Launch Torpedoes!** button is always enabled (no configuration required).
 - The setup screen uses the same dark-navy ocean theme (`#001220` background) as the game.
 
@@ -2251,7 +2254,9 @@ header bar and the input strip, maximising the battlefield in both orientations.
 │    │  …                                      │  ← grid fills flex: 1 1 0
 │ 10 │[   ][   ][   ][   ][   ][   ][   ]…[   ]│
 ├────┴─────────────────────────────────────────┤
-│  V [__]  ×  H [__]  =  [______]  [🔥 FIRE!] │  ← input strip (fixed height)
+│  V [__]  ×  H [__]  =  [______]  [🔥 FIRE!] │  ← inputs + fire button
+│  [ 0 ][ 1 ][ 2 ][ 3 ][ 4 ]                  │  ← on-screen keypad row 1
+│  [ 5 ][ 6 ][ 7 ][ 8 ][ 9 ][ ⌫ ]             │  ← on-screen keypad row 2
 │  ⚠ Already targeted! Choose another cell.   │  ← warning label (hidden when n/a)
 └──────────────────────────────────────────────┘
 ```
@@ -2323,22 +2328,42 @@ When the player clears V or H, the `.targeted` class is removed.
 
 ### Input Strip Behaviour
 
-The strip is a horizontal flex row pinned to the bottom of the screen:
+The strip is a flex column pinned to the bottom of the screen.  The top row contains
+the coordinate inputs and FIRE button; below it are two rows of on-screen digit buttons:
 
 ```
-  V [input]  ×  H [input]  =  [input]  [ 🔥 FIRE! ]
+  V [input]  ×  H [input]  =  [input]  [ 🔥 FIRE! ]   ← inputs row
+  [ 0 ][ 1 ][ 2 ][ 3 ][ 4 ]                            ← keypad row 1
+  [ 5 ][ 6 ][ 7 ][ 8 ][ 9 ][ ⌫ ]                       ← keypad row 2
 ```
 
-| Element        | Type / HTML                                        | Constraints                          |
-| -------------- | -------------------------------------------------- | ------------------------------------ |
-| `V` label      | `<label>`                                          | Tap targets the V input              |
-| V input        | `<input type="number" min="1" max="10" step="1">`  | Required; range 1–10                 |
-| `×` separator  | `<span>`                                           | Non-interactive                      |
-| `H` label      | `<label>`                                          | Tap targets the H input              |
-| H input        | `<input type="number" min="1" max="10" step="1">`  | Required; range 1–10                 |
-| `=` separator  | `<span>`                                           | Non-interactive                      |
-| Answer input   | `<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3">` | Required; 1–100 |
-| FIRE! button   | `<button>`                                         | See disabled conditions below        |
+| Element        | Type / HTML                                                            | Constraints                 |
+| -------------- | ---------------------------------------------------------------------- | --------------------------- |
+| `V` label      | `<label>`                                                              | Tap targets the V input     |
+| V input        | `<input type="text" inputmode="none" maxlength="2" pattern="[0-9]*">` | Required; range 1–10        |
+| `×` separator  | `<span>`                                                               | Non-interactive              |
+| `H` label      | `<label>`                                                              | Tap targets the H input     |
+| H input        | `<input type="text" inputmode="none" maxlength="2" pattern="[0-9]*">` | Required; range 1–10        |
+| `=` separator  | `<span>`                                                               | Non-interactive              |
+| Answer input   | `<input type="text" inputmode="none" pattern="[0-9]*" maxlength="3">` | Required; 1–100              |
+| FIRE! button   | `<button>`                                                             | See disabled conditions below |
+| Keypad row 1   | 5 `<button>` elements: `0` through `4`                                | Digit entry via `pointerdown` |
+| Keypad row 2   | 5 `<button>` elements: `5` through `9`, plus `⌫` backspace            | Digit entry / backspace      |
+
+**`inputmode="none"`** is set on all three text inputs to suppress the device soft
+keyboard entirely — the on-screen keypad replaces it.  Physical keyboard entry still
+works (key events are not blocked).
+
+**Keypad digit routing:** each digit button fires `pointerdown` with
+`preventDefault()` (so it does not steal focus from the currently active input), then
+calls `onKeypadDigit(ch)`.  `onKeypadDigit` appends the digit to `document.getElementById(focusedInputId)`
+provided the field has not reached its `maxlength`.  The backspace button calls
+`onKeypadBackspace()`, which removes the last character.
+
+**Focus tracking:** a module-level variable `focusedInputId` (default `'v-input'`)
+tracks which input is currently focused.  Each input has an `onfocus` listener that
+updates `focusedInputId`.  Tapping a grid cell also sets `focusedInputId = 'ans-input'`.
+After a successful FIRE, `focusedInputId` resets to `'v-input'`.
 
 **Tab / Enter navigation:** Tab advances focus V → H → answer.  Enter on the answer
 field triggers FIRE (same as clicking the button).
@@ -2440,6 +2465,14 @@ exists only in JS memory during the game session.
 **`@keyframes bonusPulse`** (bonus shot awarded — applied to `.shot-counter`):
 - Brief `transform: scale(1.35)` + `color: #00ff88` flash, 350 ms.
 
+**`@keyframes waveScroll`** (continuous CSS ocean wave animation on `.wave-layer` divs
+inside `.grid-wrap`):
+- Two absolutely-positioned `.wave-layer` `<div>`s at the bottom of the grid area;
+  each has `width: 200%` and a repeating-linear-gradient stripe pattern.
+- `from { transform: translateX(0) }` → `to { transform: translateX(-50%) }`
+- First layer: 6 s duration, `opacity: 0.7`; second layer: 9 s reversed, `opacity: 0.4`.
+- `pointer-events: none` on both layers.
+
 **"SUNK!" toast:**
 - `<div class="toast">🔥 [Ship name] SUNK!</div>` inserted into `<body>`.
 - `position: fixed; top: 10px; left: 50%; transform: translateX(-50%)`.
@@ -2451,11 +2484,12 @@ exists only in JS memory during the game session.
 ### Background
 
 - Body background: `#001220` (very dark navy).
-- `.grid-wrap` background: `#001a2e`.
+- `.grid-wrap` background: `#001a2e`; contains two `.wave-layer` `<div>`s with the
+  `waveScroll` CSS animation (see Animation Specifications) and the `.radar-overlay`.
 - Grid cell borders: `1px solid #003828` (dark phosphor-green).
 - Header bar: `rgba(0, 10, 20, 0.9)` with a subtle bottom border `1px solid #004030`.
 - Input strip: `rgba(0, 8, 18, 0.95)` with a subtle top border `1px solid #003028`.
-- No external images; all colour is CSS.
+- No external images; all colour is CSS and inline SVG.
 
 ---
 
@@ -2636,16 +2670,24 @@ game must show the `ERROR` screen immediately before any game logic runs.
 ├─ Grid DOM helpers
 │   ├─ buildGrid()             → creates label + data cells; attaches tap listeners
 │   ├─ cellEl(v, h)            → returns the <div> for cell (v, h)
-│   ├─ setCellState(v, h, st)  → updates grid[v-1][h-1] and cell CSS class
+│   ├─ setCellState(v, h, st)  → updates grid[v-1][h-1], cell CSS class, and cell
+│   │                             textContent ('' unknown, '\uD83D\uDD25' hit,
+│   │                             '~' miss, '\uD83D\uDCA5' sunk, '\uD83D\uDEA2' revealed)
 │   ├─ setTargeted(v, h)       → adds .targeted; clears previous targeted cell
 │   └─ clearTargeted()         → removes .targeted from any highlighted cell
 ├─ Input handling
+│   ├─ focusedInputId          → module-level var tracking active input id
+│   ├─ onKeypadDigit(ch)       → appends ch to focusedInputId element (respects maxlength)
+│   ├─ onKeypadBackspace()     → removes last char from focusedInputId element
+│   ├─ buildKeypad()           → creates .kpad-wrap with two .kpad-row divs; each
+│   │                             button uses pointerdown+preventDefault to avoid
+│   │                             stealing focus before routing to onKeypadDigit/Backspace
 │   ├─ onVInput()              → validate; update targeted cell; update FIRE state
 │   ├─ onHInput()              → validate; update targeted cell; update FIRE state
 │   ├─ onAnswerInput()         → update FIRE state
 │   ├─ onAnswerKeydown(e)      → Enter → onFire()
 │   ├─ onVHKeydown(e)          → Enter on V → focus H; Enter on H → focus answer
-│   ├─ onCellTap(v, h)         → setTargeted; fill inputs; focus answer
+│   ├─ onCellTap(v, h)         → setTargeted; fill inputs; set focusedInputId='ans-input'; focus answer
 │   └─ updateFireBtn()         → enables/disables FIRE; shows/hides warn-msg
 ├─ Fire logic (onFire)
 │   1. Read v, h, ans from inputs (parseInt)
@@ -2705,7 +2747,11 @@ body            → dark navy bg; flex column; safe-area insets applied
                   .ship-seg.hit  → background: #222
                   .ship-seg.sunk → background: #f44; opacity 0.5
 .grid-wrap      → flex: 1 1 0; min-height: 0; overflow: hidden; position: relative
+                  contains: .radar-overlay, .wave-layer (x2), .grid
 .radar-overlay  → position: absolute; inset: 0; conic-gradient sweep; pointer-events: none
+.wave-layer     → position: absolute; bottom: 0; width: 200%; height: 30/18 px;
+                  repeating-linear-gradient stripe; animation: waveScroll 6s/9s infinite;
+                  pointer-events: none
 .grid           → display: grid; grid-template-columns: 1.8em repeat(10, 1fr);
                   grid-template-rows: 1.4em repeat(10, 1fr)
 .col-label      → small text; text-align: center; color: #4af; font-size: 0.75em
@@ -2715,17 +2761,28 @@ body            → dark navy bg; flex column; safe-area insets applied
                   font-size: 1.1em; transition: background 100ms
 .cell:hover     → background: #003040 (unknown cells only)
 .cell.targeted  → animation: targetPulse 1.2s infinite
-.cell.hit       → background: #c04010; cursor: default; animation: hitFlash 500ms forwards
-.cell.miss      → background: #002040; cursor: default; animation: missRipple 400ms
-.cell.sunk      → background: #e83020; cursor: default; animation: sunkPulse 400ms 3
-.input-strip    → flex row; flex-shrink: 0; flex-wrap: nowrap; align-items: center;
-                  gap: 0.4em; padding: 0.5em 0.6em; background: rgba(0,8,18,0.95);
-                  border-top: 1px solid #003028
-.input-strip label → font-size: 0.9em; color: #4af
-.coord-input    → type=number; width: 3em; height: 44px; text-align: center;
+.cell.hit       → background: #c04010; cursor: default; animation: hitFlash 500ms forwards;
+                  textContent: '\uD83D\uDD25' (fire emoji set by setCellState)
+.cell.miss      → background: #002040; cursor: default; animation: missRipple 400ms;
+                  textContent: '~'
+.cell.sunk      → background: #e83020; cursor: default; animation: sunkPulse 400ms 3;
+                  textContent: '\uD83D\uDCA5' (explosion emoji)
+.cell.revealed  → background: #601010; cursor: default;
+                  textContent: '\uD83D\uDEA2' (ship emoji — unhit ship cell revealed at end)
+.input-strip    → flex column; flex-shrink: 0; padding: 0.45em 0.6em;
+                  background: rgba(0,8,18,0.95); border-top: 1px solid #003028
+.inputs-row     → flex row; flex-wrap: nowrap; align-items: center; gap: 0.35em; width: 100%
+.input-strip label → font-size: clamp(11px,3.2vw,15px); color: #4af
+.coord-input    → type=text; inputmode=none; width: 3em; height: 44px; text-align: center;
                   background: #001a2e; color: #fff; border: 1px solid #4af
-.ans-input      → type=text; width: 4em; height: 44px; text-align: center;
+.ans-input      → type=text; inputmode=none; width: 4em; height: 44px; text-align: center;
                   background: #001a2e; color: #fff; border: 1px solid #4af
+.kpad-wrap      → flex-shrink: 0; padding: 3px 0 2px
+.kpad-row       → display: flex; gap: 3px; margin-bottom: 3px
+.kpad-btn       → flex: 1; min-height: 44px; background: #002a3a; color: #fff;
+                  border: 1px solid #004a5a; border-radius: 4px; font-weight: bold;
+                  user-select: none; -webkit-tap-highlight-color: transparent
+.kpad-btn.bksp  → flex: 1.5; background: #2a1a0a; border-color: #6a3a1a; color: #fa8
 .fire-btn       → min-height: 44px; min-width: 80px; background: #c04010; color: #fff;
                   border: none; border-radius: 4px; font-weight: bold
 .fire-btn:disabled → opacity: 0.4; cursor: not-allowed
@@ -2746,6 +2803,7 @@ body            → dark navy bg; flex column; safe-area insets applied
 @keyframes shake
 @keyframes bonusPulse
 @keyframes toastSlide
+@keyframes waveScroll
 ```
 
 ### Acceptance Criteria
@@ -2798,6 +2856,7 @@ body            → dark navy bg; flex column; safe-area insets applied
 - [ ] HTTP 429 → orange non-retriable banner; no retry button.
 - [ ] Other HTTP or network error → red banner with **Try again** button (retriable).
 - [ ] Radar sweep animation runs continuously on `.grid-wrap` during PLAYING.
+- [ ] Two `waveScroll` wave layers animate at the bottom of `.grid-wrap` during PLAYING.
 - [ ] `targetPulse` animation runs on the `.targeted` cell.
 - [ ] `hitFlash` plays on a cell transitioning to `.hit`.
 - [ ] `missRipple` plays on a cell transitioning to `.miss`.
@@ -2809,7 +2868,18 @@ body            → dark navy bg; flex column; safe-area insets applied
 - [ ] No horizontal scrollbar at 568 × 320 px in landscape.
 - [ ] `env(safe-area-inset-*)` padding applied to `body`.
 - [ ] Minimum cell size 28 px enforced; cells remain tappable on 320 px viewport.
-- [ ] Input strip elements (`V`, `H`, answer, FIRE) fit on one line at 320 px with `clamp` font size.
+- [ ] All three inputs use `inputmode="none"`; device soft keyboard does NOT appear on focus.
+- [ ] On-screen keypad row 1 shows digits 0–4; row 2 shows 5–9 and a backspace button.
+- [ ] Tapping a keypad digit appends it to the currently focused input (respects maxlength).
+- [ ] Tapping the backspace button removes the last character from the focused input.
+- [ ] Keypad buttons do not steal focus from the active input (`pointerdown` with `preventDefault`).
+- [ ] Physical keyboard entry still works (digits, Enter, Backspace).
+- [ ] `focusedInputId` defaults to `'v-input'`; updates on input `focus` events and after cell tap.
+- [ ] Input strip inputs row (`V`, `H`, answer, FIRE) fits on one line at 320 px with `clamp` font size.
+- [ ] Hit cells display a fire emoji; miss cells display `~`; sunk cells display an explosion emoji.
+- [ ] Revealed (unhit ship, shown at end) cells display a ship emoji.
+- [ ] SETUP screen includes an inline SVG ship silhouette above the fleet briefing.
+- [ ] Fleet briefing segments are pill-shaped and coloured per ship type.
 
 ### Required `POST /api/activities/credit` Fields
 
