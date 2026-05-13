@@ -130,6 +130,20 @@ esp_err_t device_reg_entry_remove(uint8_t idx);
 esp_err_t device_reg_entry_get(uint8_t idx, device_reg_entry_t * p_out);
 
 /**
+ * \brief Update the MAC address for the entry at \p idx.
+ *
+ * The new MAC must not already be registered under a different slot.
+ *
+ * \param[in] idx    Entry index (0 to count-1).
+ * \param[in] p_mac  Pointer to a 6-byte MAC address array.
+ *
+ * \return \c ESP_OK on success.
+ * \return \c ESP_ERR_INVALID_ARG when \p idx is out of range or \p p_mac is NULL.
+ * \return \c ESP_ERR_INVALID_STATE when the MAC is already registered in another slot.
+ */
+esp_err_t device_reg_entry_mac_set(uint8_t idx, const uint8_t * p_mac);
+
+/**
  * \brief Update the nickname for the entry at \p idx.
  *
  * \param[in] idx        Entry index (0 to count-1).

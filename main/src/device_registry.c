@@ -409,6 +409,41 @@ esp_err_t device_reg_entry_get(uint8_t idx, device_reg_entry_t * p_out)
 
 //--------------------------------------------------------------------------------------------------
 
+esp_err_t device_reg_entry_mac_set(uint8_t idx, const uint8_t * p_mac)
+{
+    if (NULL == p_mac)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    portENTER_CRITICAL(&g_dev_mux);
+
+    if (idx >= g_count)
+    {
+        portEXIT_CRITICAL(&g_dev_mux);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Reject the new MAC if it is already registered in another slot. */
+    for (uint8_t i = 0U; i < g_count; i++)
+    {
+        if ((i != idx) && (0 == memcmp(g_entries[i].mac, p_mac, DEVICE_REG_MAC_LEN)))
+        {
+            portEXIT_CRITICAL(&g_dev_mux);
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+
+    memcpy(g_entries[idx].mac, p_mac, DEVICE_REG_MAC_LEN);
+    portEXIT_CRITICAL(&g_dev_mux);
+
+    (void)device_reg_entry_meta_save(idx);
+    (void)esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_DEVICE_REGISTRY_CHANGED, NULL, 0U, 0U);
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 esp_err_t device_reg_entry_nickname_set(uint8_t idx, const char * p_nickname)
 {
     if ((NULL == p_nickname) || ('\0' == p_nickname[0]))
