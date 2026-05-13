@@ -7,7 +7,9 @@
     <title>Battle Math: Grid Commander</title>
     <style>
         /* reset */
-        * { box-sizing: border-box }
+        * {
+            box-sizing: border-box
+        }
 
         :root {
             font-size: 16px;
@@ -23,8 +25,17 @@
             --warn: #ff4444
         }
 
-        @media (max-width: 400px) { :root { font-size: 13px } }
-        @media (orientation: landscape) and (max-height: 500px) { :root { font-size: 12px } }
+        @media (max-width: 400px) {
+            :root {
+                font-size: 13px
+            }
+        }
+
+        @media (orientation: landscape) and (max-height: 500px) {
+            :root {
+                font-size: 12px
+            }
+        }
 
         body {
             margin: 0;
@@ -60,10 +71,24 @@
             overflow: hidden
         }
 
-        .hdr-title { color: var(--accent); font-weight: bold; flex-shrink: 0 }
-        .hdr-shots { flex-shrink: 0 }
-        .hdr-streak { flex-shrink: 0 }
-        .hdr-timer { flex-shrink: 0; font-variant-numeric: tabular-nums }
+        .hdr-title {
+            color: var(--accent);
+            font-weight: bold;
+            flex-shrink: 0
+        }
+
+        .hdr-shots {
+            flex-shrink: 0
+        }
+
+        .hdr-streak {
+            flex-shrink: 0
+        }
+
+        .hdr-timer {
+            flex-shrink: 0;
+            font-variant-numeric: tabular-nums
+        }
 
         .ship-status {
             display: flex;
@@ -74,7 +99,11 @@
             flex-shrink: 1
         }
 
-        .ship-grp { display: flex; gap: 1px; flex-shrink: 0 }
+        .ship-grp {
+            display: flex;
+            gap: 1px;
+            flex-shrink: 0
+        }
 
         .ship-seg {
             display: inline-block;
@@ -84,8 +113,14 @@
             border-radius: 2px
         }
 
-        .ship-seg.hit { background: #222 }
-        .ship-seg.sunk { background: #f44; opacity: 0.5 }
+        .ship-seg.hit {
+            background: #222
+        }
+
+        .ship-seg.sunk {
+            background: #f44;
+            opacity: 0.5
+        }
 
         /* --- grid area --- */
         .grid-wrap {
@@ -150,7 +185,9 @@
             -webkit-tap-highlight-color: transparent
         }
 
-        .cell:hover { background: #003040 }
+        .cell:hover {
+            background: #003040
+        }
 
         .cell.targeted {
             animation: targetPulse 1.2s ease-in-out infinite;
@@ -163,7 +200,9 @@
             animation: hitFlash 500ms forwards
         }
 
-        .cell.hit:hover { background: var(--cell-hit) }
+        .cell.hit:hover {
+            background: var(--cell-hit)
+        }
 
         .cell.miss {
             background: var(--cell-miss);
@@ -171,7 +210,9 @@
             animation: missRipple 400ms
         }
 
-        .cell.miss:hover { background: var(--cell-miss) }
+        .cell.miss:hover {
+            background: var(--cell-miss)
+        }
 
         .cell.sunk {
             background: var(--cell-sunk);
@@ -179,7 +220,9 @@
             animation: sunkPulse 400ms 3
         }
 
-        .cell.sunk:hover { background: var(--cell-sunk) }
+        .cell.sunk:hover {
+            background: var(--cell-sunk)
+        }
 
         /* revealed at end: ship was here but not found */
         .cell.revealed {
@@ -188,7 +231,9 @@
             border-color: #802020
         }
 
-        .cell.revealed:hover { background: var(--cell-revealed) }
+        .cell.revealed:hover {
+            background: var(--cell-revealed)
+        }
 
         /* --- input strip --- */
         .input-strip {
@@ -232,8 +277,13 @@
 
         /* hide number input spinners */
         .coord-input::-webkit-inner-spin-button,
-        .coord-input::-webkit-outer-spin-button { -webkit-appearance: none }
-        .coord-input { -moz-appearance: textfield }
+        .coord-input::-webkit-outer-spin-button {
+            -webkit-appearance: none
+        }
+
+        .coord-input {
+            -moz-appearance: textfield
+        }
 
         .fire-btn {
             min-height: 44px;
@@ -249,7 +299,10 @@
             padding: 0 0.7em
         }
 
-        .fire-btn:disabled { opacity: 0.4; cursor: not-allowed }
+        .fire-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed
+        }
 
         .sep {
             color: #fff;
@@ -265,10 +318,13 @@
             visibility: hidden
         }
 
-        .input-strip.shake { animation: shake 380ms }
+        .input-strip.shake {
+            animation: shake 380ms
+        }
 
         /* --- setup / end screens --- */
-        .setup-screen, .end-screen {
+        .setup-screen,
+        .end-screen {
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -279,7 +335,8 @@
             background: var(--bg)
         }
 
-        .setup-screen h1, .end-screen h1 {
+        .setup-screen h1,
+        .end-screen h1 {
             font-size: 1.5em;
             margin-bottom: 0.3em;
             color: var(--accent)
@@ -300,7 +357,10 @@
             font-size: 0.9em
         }
 
-        .fleet-segs { display: flex; gap: 2px }
+        .fleet-segs {
+            display: flex;
+            gap: 2px
+        }
 
         .fleet-seg {
             display: inline-block;
@@ -331,16 +391,50 @@
             min-height: 48px
         }
 
-        .launch-btn:hover { background: #d05020 }
+        .launch-btn:hover {
+            background: #d05020
+        }
 
-        .end-screen .stat { font-size: 1em; margin: 0.25em 0; color: #cde }
-        .end-screen .credits-line { font-size: 1.1em; margin: 0.5em 0; color: var(--green); font-weight: bold }
-        .end-screen .claiming { color: #aac; font-size: 0.9em; margin: 0.4em 0 }
+        .end-screen .stat {
+            font-size: 1em;
+            margin: 0.25em 0;
+            color: #cde
+        }
 
-        .banner { margin: 0.4em 0; padding: 0.5em 1em; border-radius: 4px; font-weight: bold }
-        .banner.ok  { background: #1a4a1a; color: #4f4 }
-        .banner.err { background: #4a1a1a; color: #f88 }
-        .banner.warn { background: #4a3a1a; color: #fa8 }
+        .end-screen .credits-line {
+            font-size: 1.1em;
+            margin: 0.5em 0;
+            color: var(--green);
+            font-weight: bold
+        }
+
+        .end-screen .claiming {
+            color: #aac;
+            font-size: 0.9em;
+            margin: 0.4em 0
+        }
+
+        .banner {
+            margin: 0.4em 0;
+            padding: 0.5em 1em;
+            border-radius: 4px;
+            font-weight: bold
+        }
+
+        .banner.ok {
+            background: #1a4a1a;
+            color: #4f4
+        }
+
+        .banner.err {
+            background: #4a1a1a;
+            color: #f88
+        }
+
+        .banner.warn {
+            background: #4a3a1a;
+            color: #fa8
+        }
 
         .retry-btn {
             margin-top: 0.4em;
@@ -352,8 +446,59 @@
             cursor: pointer
         }
 
-        .back-link { display: block; margin-top: 0.9em; color: var(--accent); text-decoration: none; font-size: 0.9em }
-        .back-link:hover { text-decoration: underline }
+        /* --- on-screen keypad --- */
+        .kpad-wrap {
+            flex-shrink: 0;
+            padding: 3px 0 2px
+        }
+
+        .kpad-row {
+            display: flex;
+            gap: 3px;
+            margin-bottom: 3px
+        }
+
+        .kpad-btn {
+            flex: 1;
+            min-height: 44px;
+            background: #002a3a;
+            color: #fff;
+            border: 1px solid #004a5a;
+            border-radius: 4px;
+            font-size: 1.05em;
+            font-weight: bold;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none
+        }
+
+        .kpad-btn:active {
+            background: #004a6a;
+            border-color: var(--accent)
+        }
+
+        .kpad-btn.bksp {
+            background: #2a1a0a;
+            border-color: #6a3a1a;
+            color: #fa8;
+            flex: 1.5
+        }
+
+        .kpad-btn.bksp:active {
+            background: #4a2a0a
+        }
+
+        .back-link {
+            display: block;
+            margin-top: 0.9em;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.9em
+        }
+
+        .back-link:hover {
+            text-decoration: underline
+        }
 
         .error-screen {
             display: flex;
@@ -365,7 +510,10 @@
             text-align: center
         }
 
-        .win-title { color: var(--green) !important; text-shadow: 0 0 14px var(--green) }
+        .win-title {
+            color: var(--green) !important;
+            text-shadow: 0 0 14px var(--green)
+        }
 
         /* --- toast --- */
         .toast {
@@ -386,48 +534,160 @@
 
         /* --- keyframes --- */
         @keyframes hitFlash {
-            0%   { background: #001a2e; transform: scale(1) }
-            30%  { background: #ff8020; transform: scale(1.15) }
-            100% { background: #c04010; transform: scale(1) }
+            0% {
+                background: #001a2e;
+                transform: scale(1)
+            }
+
+            30% {
+                background: #ff8020;
+                transform: scale(1.15)
+            }
+
+            100% {
+                background: #c04010;
+                transform: scale(1)
+            }
         }
 
         @keyframes missRipple {
-            0%   { box-shadow: 0 0 0 0 rgba(60, 120, 255, 0.6) }
-            60%  { box-shadow: 0 0 0 8px rgba(60, 120, 255, 0) }
-            100% { box-shadow: 0 0 0 0 rgba(60, 120, 255, 0) }
+            0% {
+                box-shadow: 0 0 0 0 rgba(60, 120, 255, 0.6)
+            }
+
+            60% {
+                box-shadow: 0 0 0 8px rgba(60, 120, 255, 0)
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(60, 120, 255, 0)
+            }
         }
 
         @keyframes sunkPulse {
-            0%, 100% { background: #e83020 }
-            50%       { background: #ff6040; box-shadow: 0 0 12px 4px #ff4020 }
+
+            0%,
+            100% {
+                background: #e83020
+            }
+
+            50% {
+                background: #ff6040;
+                box-shadow: 0 0 12px 4px #ff4020
+            }
         }
 
         @keyframes targetPulse {
-            0%, 100% { box-shadow: 0 0 0 2px #00ff88 }
-            50%       { box-shadow: 0 0 0 5px #00ff88, 0 0 14px 4px rgba(0, 255, 136, 0.4) }
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 2px #00ff88
+            }
+
+            50% {
+                box-shadow: 0 0 0 5px #00ff88, 0 0 14px 4px rgba(0, 255, 136, 0.4)
+            }
         }
 
         @keyframes shake {
-            0%, 100%  { transform: translateX(0) }
-            20%, 60%  { transform: translateX(-6px) }
-            40%, 80%  { transform: translateX(6px) }
+
+            0%,
+            100% {
+                transform: translateX(0)
+            }
+
+            20%,
+            60% {
+                transform: translateX(-6px)
+            }
+
+            40%,
+            80% {
+                transform: translateX(6px)
+            }
         }
 
         @keyframes radarSweep {
-            from { transform: rotate(0deg) }
-            to   { transform: rotate(360deg) }
+            from {
+                transform: rotate(0deg)
+            }
+
+            to {
+                transform: rotate(360deg)
+            }
         }
 
         @keyframes bonusPulse {
-            0%, 100% { transform: scale(1) }
-            50%      { transform: scale(1.4); color: #00ff88 }
+
+            0%,
+            100% {
+                transform: scale(1)
+            }
+
+            50% {
+                transform: scale(1.4);
+                color: #00ff88
+            }
         }
 
         @keyframes toastSlide {
-            0%   { opacity: 0 }
-            10%  { opacity: 1 }
-            80%  { opacity: 1 }
-            100% { opacity: 0 }
+            0% {
+                opacity: 0
+            }
+
+            10% {
+                opacity: 1
+            }
+
+            80% {
+                opacity: 1
+            }
+
+            100% {
+                opacity: 0
+            }
+        }
+
+        /* --- ocean wave background --- */
+        .wave-layer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 200%;
+            height: 30px;
+            background: repeating-linear-gradient(90deg,
+                    transparent 0px,
+                    transparent 20px,
+                    rgba(0, 120, 180, 0.18) 20px,
+                    rgba(0, 120, 180, 0.18) 40px);
+            animation: waveScroll 6s linear infinite;
+            pointer-events: none;
+            opacity: 0.7
+        }
+
+        .wave-layer:nth-child(2) {
+            height: 18px;
+            bottom: 8px;
+            opacity: 0.4;
+            animation-duration: 9s;
+            animation-direction: reverse
+        }
+
+        @keyframes waveScroll {
+            from {
+                transform: translateX(0)
+            }
+
+            to {
+                transform: translateX(-50%)
+            }
+        }
+
+        /* --- setup SVG ship decoration --- */
+        .setup-ship-svg {
+            display: block;
+            margin: 0.4em auto 0.2em;
+            opacity: 0.7
         }
     </style>
 </head>
@@ -440,20 +700,20 @@
         const STREAK_BONUS_AT = 3;
         const TOTAL_SHIP_CELLS = 19;
         const FLEET = [
-            { name: 'Carrier',     size: 5, count: 1 },
-            { name: 'Battleship',  size: 4, count: 1 },
-            { name: 'Destroyer',   size: 3, count: 2 },
+            { name: 'Carrier', size: 5, count: 1 },
+            { name: 'Battleship', size: 4, count: 1 },
+            { name: 'Destroyer', size: 3, count: 2 },
             { name: 'Patrol Boat', size: 2, count: 2 }
         ];
 
         /* ---- url params ---- */
         const _p = new URLSearchParams(location.search);
-        const pin       = _p.get('pin') || '';
+        const pin = _p.get('pin') || '';
         const deviceIdx = parseInt(_p.get('device_idx') || '0', 10);
-        const actId     = parseInt(_p.get('act_id')     || '0', 10);
-        const creditsS  = parseInt(_p.get('credits_s')  || '0', 10);
+        const actId = parseInt(_p.get('act_id') || '0', 10);
+        const creditsS = parseInt(_p.get('credits_s') || '0', 10);
         const timeLimitS = parseInt(_p.get('time_limit_s') || '0', 10);
-        const token     = _p.get('token') || '';
+        const token = _p.get('token') || '';
 
         /* ---- state ---- */
         let gameState = 'loading';
@@ -469,6 +729,51 @@
         let targetedV = 0;
         let targetedH = 0;
         let totalFires = 0;   // total FIRE presses (correct answers)
+        let focusedInputId = 'v-input'; // tracks which input receives keypad digits
+
+        /* ---- on-screen keypad ---- */
+        function onKeypadDigit(d) {
+            const el = document.getElementById(focusedInputId);
+            if (!el) return;
+            const maxLen = (focusedInputId === 'ans-input') ? 3 : 2;
+            if (el.value.length < maxLen) {
+                el.value += d;
+                el.dispatchEvent(new Event('input'));
+            }
+        }
+
+        function onKeypadBackspace() {
+            const el = document.getElementById(focusedInputId);
+            if (!el) return;
+            el.value = el.value.slice(0, -1);
+            el.dispatchEvent(new Event('input'));
+        }
+
+        function buildKeypad() {
+            const wrap = document.createElement('div');
+            wrap.className = 'kpad-wrap';
+            const rows = [
+                ['0', '1', '2', '3', '4'],
+                ['5', '6', '7', '8', '9', '⌫']
+            ];
+            for (const row of rows) {
+                const rowEl = document.createElement('div');
+                rowEl.className = 'kpad-row';
+                for (const ch of row) {
+                    const btn = document.createElement('button');
+                    btn.className = ch === '⌫' ? 'kpad-btn bksp' : 'kpad-btn';
+                    btn.textContent = ch;
+                    btn.addEventListener('pointerdown', e => {
+                        e.preventDefault(); /* keep focus on input */
+                        if (ch === '⌫') onKeypadBackspace();
+                        else onKeypadDigit(ch);
+                    });
+                    rowEl.appendChild(btn);
+                }
+                wrap.appendChild(rowEl);
+            }
+            return wrap;
+        }
 
         /* ---- ship placement ---- */
         function tryPlacement() {
@@ -489,7 +794,7 @@
                         const cells = [];
                         let valid = true;
                         for (let i = 0; i < type.size; i++) {
-                            const cv = horiz ? v     : v + i;
+                            const cv = horiz ? v : v + i;
                             const ch = horiz ? h + i : h;
                             if (occ[cv][ch] || buf[cv][ch]) { valid = false; break; }
                             cells.push({ v: cv, h: ch });
@@ -574,7 +879,13 @@
             /* Remove and re-add class to re-trigger CSS animation */
             el.classList.remove('targeted', 'hit', 'miss', 'sunk', 'revealed');
             void el.offsetWidth; /* force reflow */
-            if (st !== 'unknown') el.classList.add(st);
+            if (st !== 'unknown') {
+                el.classList.add(st);
+                const icons = { hit: '\uD83D\uDD25', miss: '\u007E', sunk: '\uD83D\uDCA5', revealed: '\uD83D\uDEA2' };
+                el.textContent = icons[st] || '';
+            } else {
+                el.textContent = '';
+            }
         }
 
         function setTargeted(v, h) {
@@ -595,11 +906,11 @@
         }
 
         /* ---- input helpers ---- */
-        function vInput()   { return document.getElementById('v-input');   }
-        function hInput()   { return document.getElementById('h-input');   }
+        function vInput() { return document.getElementById('v-input'); }
+        function hInput() { return document.getElementById('h-input'); }
         function ansInput() { return document.getElementById('ans-input'); }
-        function fireBtn()  { return document.getElementById('fire-btn');  }
-        function warnMsg()  { return document.getElementById('warn-msg');  }
+        function fireBtn() { return document.getElementById('fire-btn'); }
+        function warnMsg() { return document.getElementById('warn-msg'); }
         function inputStrip() { return document.getElementById('input-strip'); }
 
         function parseCoord(val) {
@@ -638,16 +949,17 @@
             vInput().value = v;
             hInput().value = h;
             ansInput().value = '';
+            focusedInputId = 'ans-input';
             updateFireBtn();
             ansInput().focus();
         }
 
         function updateFireBtn() {
-            const v   = parseCoord(vInput()   ? vInput().value   : '');
-            const h   = parseCoord(hInput()   ? hInput().value   : '');
+            const v = parseCoord(vInput() ? vInput().value : '');
+            const h = parseCoord(hInput() ? hInput().value : '');
             const ans = ansInput() ? ansInput().value.trim() : '';
             const btn = fireBtn();
-            const wm  = warnMsg();
+            const wm = warnMsg();
             if (!btn) return;
 
             let disabled = false;
@@ -667,8 +979,8 @@
         /* ---- fire logic ---- */
         function onFire() {
             if (gameState !== 'playing') return;
-            const v   = parseCoord(vInput().value);
-            const h   = parseCoord(hInput().value);
+            const v = parseCoord(vInput().value);
+            const h = parseCoord(hInput().value);
             const ans = parseInt(ansInput().value.trim(), 10);
 
             if (!v || !h || isNaN(ans)) return;
@@ -705,9 +1017,10 @@
 
             /* Clear inputs after every correct shot */
             clearTargeted();
-            vInput().value   = '';
-            hInput().value   = '';
+            vInput().value = '';
+            hInput().value = '';
             ansInput().value = '';
+            focusedInputId = 'v-input';
             updateFireBtn();
             updateHeader();
             vInput().focus();
@@ -824,8 +1137,8 @@
 
         /* ---- screens ---- */
         function formatHMS(s) {
-            const h  = Math.floor(s / 3600);
-            const m  = Math.floor((s % 3600) / 60);
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
             const sc = s % 60;
             return h + ':' + String(m).padStart(2, '0') + ':' + String(sc).padStart(2, '0');
         }
@@ -840,14 +1153,19 @@
             gameState = 'setup';
             const ICONS = { Carrier: '\uD83D\uDEA2', Battleship: '\u26F4\uFE0F', Destroyer: '\uD83D\uDEA4', 'Patrol Boat': '\u26F5' };
 
+            const SHIP_COLORS = { Carrier: '#4af', Battleship: '#6cf', Destroyer: '#4df', 'Patrol Boat': '#8df' };
             /* Build fleet briefing rows — deduplicated (one row per ship type) */
             const seen = new Set();
             let rowsHtml = '';
             for (const type of FLEET) {
                 if (seen.has(type.name)) continue;
                 seen.add(type.name);
+                const col = SHIP_COLORS[type.name] || '#4af';
                 let segsHtml = '';
-                for (let i = 0; i < type.size; i++) segsHtml += '<span class="fleet-seg"></span>';
+                for (let i = 0; i < type.size; i++) {
+                    const r = i === 0 ? '3px 0 0 3px' : (i === type.size - 1 ? '0 3px 3px 0' : '0');
+                    segsHtml += '<span class="fleet-seg" style="background:' + col + ';border-radius:' + r + ';width:14px;height:10px"></span>';
+                }
                 const label = type.count > 1
                     ? (ICONS[type.name] || '') + ' ' + type.name + ' \xD7' + type.count + '  (' + type.size + ' cells)'
                     : (ICONS[type.name] || '') + ' ' + type.name + '  (' + type.size + ' cells)';
@@ -861,8 +1179,17 @@
             document.getElementById('screen').innerHTML =
                 '<div class="setup-screen">' +
                 '<h1>\u2693 Grid Commander</h1>' +
-                '<p style="color:#aac;font-size:0.9em;margin-bottom:0.5em">Naval Multiplication</p>' +
-                '<p style="font-weight:bold;color:var(--accent)">FLEET BRIEFING:</p>' +
+                '<p style="color:#aac;font-size:0.9em;margin-bottom:0.3em">Naval Multiplication</p>' +
+                '<svg class="setup-ship-svg" width="180" height="38" viewBox="0 0 180 38" aria-hidden="true">' +
+                '<rect x="20" y="18" width="140" height="12" rx="4" fill="#1a4a6a" stroke="#4af" stroke-width="1"/>' +
+                '<rect x="50" y="8" width="60" height="12" rx="3" fill="#1a3a5a" stroke="#4af" stroke-width="1"/>' +
+                '<rect x="72" y="2" width="16" height="8" rx="2" fill="#0a2a4a" stroke="#4af" stroke-width="1"/>' +
+                '<ellipse cx="30" cy="30" rx="14" ry="6" fill="#0a2030" stroke="#4af" stroke-width="1"/>' +
+                '<ellipse cx="150" cy="30" rx="14" ry="6" fill="#0a2030" stroke="#4af" stroke-width="1"/>' +
+                '<line x1="80" y1="2" x2="80" y2="0" stroke="#4af" stroke-width="1.5"/>' +
+                '<line x1="76" y1="0" x2="88" y2="0" stroke="#4af" stroke-width="1.5"/>' +
+                '</svg>' +
+                '<p style="font-weight:bold;color:var(--accent);margin-bottom:0.3em">FLEET BRIEFING:</p>' +
                 '<ul class="fleet-legend">' + rowsHtml + '</ul>' +
                 '<p class="how-to">Pick row <b>V</b> and column <b>H</b>, then type V \xD7 H to fire a torpedo. ' +
                 'Correct = shoot that cell; wrong = lose a shot. Sink all ships to win!</p>' +
@@ -895,17 +1222,21 @@
                 /* grid area */
                 '<div class="grid-wrap" id="grid-wrap">' +
                 '<div class="radar-overlay"></div>' +
+                '<div class="wave-layer"></div>' +
+                '<div class="wave-layer"></div>' +
                 '</div>' +
                 /* input strip */
                 '<div class="input-strip" id="input-strip">' +
+                '<div class="inputs-row" style="display:flex;flex-wrap:nowrap;align-items:center;gap:0.35em;width:100%">' +
                 '<label for="v-input">V</label>' +
-                '<input type="number" id="v-input" class="coord-input" min="1" max="10" inputmode="numeric">' +
+                '<input type="text" id="v-input" class="coord-input" inputmode="none" maxlength="2" pattern="[0-9]*">' +
                 '<span class="sep">\xD7</span>' +
                 '<label for="h-input">H</label>' +
-                '<input type="number" id="h-input" class="coord-input" min="1" max="10" inputmode="numeric">' +
+                '<input type="text" id="h-input" class="coord-input" inputmode="none" maxlength="2" pattern="[0-9]*">' +
                 '<span class="sep">=</span>' +
-                '<input type="text" id="ans-input" class="ans-input" inputmode="numeric" pattern="[0-9]*" maxlength="3">' +
+                '<input type="text" id="ans-input" class="ans-input" inputmode="none" pattern="[0-9]*" maxlength="3">' +
                 '<button id="fire-btn" class="fire-btn" disabled>\uD83D\uDD25 FIRE!</button>' +
+                '</div>' +
                 '<p class="warn-msg" id="warn-msg">\u26A0 Already targeted! Choose another cell.</p>' +
                 '</div>';
 
@@ -913,13 +1244,21 @@
             document.getElementById('grid-wrap').appendChild(buildGrid());
 
             /* Input event listeners */
-            vInput().addEventListener('input',   onVInput);
-            hInput().addEventListener('input',   onHInput);
+            vInput().addEventListener('input', onVInput);
+            hInput().addEventListener('input', onHInput);
             ansInput().addEventListener('input', onAnswerInput);
             ansInput().addEventListener('keydown', onAnswerKeydown);
-            vInput().addEventListener('keydown',   e => onCoordKeydown(e, 'h-input'));
-            hInput().addEventListener('keydown',   e => onCoordKeydown(e, 'ans-input'));
+            vInput().addEventListener('keydown', e => onCoordKeydown(e, 'h-input'));
+            hInput().addEventListener('keydown', e => onCoordKeydown(e, 'ans-input'));
             fireBtn().addEventListener('click', onFire);
+
+            /* focus tracking for on-screen keypad */
+            vInput().addEventListener('focus', () => { focusedInputId = 'v-input'; });
+            hInput().addEventListener('focus', () => { focusedInputId = 'h-input'; });
+            ansInput().addEventListener('focus', () => { focusedInputId = 'ans-input'; });
+
+            /* attach on-screen keypad */
+            document.getElementById('input-strip').appendChild(buildKeypad());
 
             vInput().focus();
         }
@@ -943,26 +1282,26 @@
 
         function renderEnd(reason) {
             gameState = 'end';
-            const earned       = Math.floor(creditsS * cellsHit / TOTAL_SHIP_CELLS);
+            const earned = Math.floor(creditsS * cellsHit / TOTAL_SHIP_CELLS);
             const submitCredit = Math.min(earned, creditsS);
 
             let title, titleClass, extra;
             if (reason === 'win') {
-                title      = 'FLEET DESTROYED! \uD83C\uDF89';
+                title = 'FLEET DESTROYED! \uD83C\uDF89';
                 titleClass = 'win-title';
-                extra      = '<p class="stat">All 6 ships sunk! \uD83D\uDCA5</p>' +
-                             '<p class="stat">Torpedoes fired: ' + totalFires + '</p>' +
-                             '<p class="stat">Time remaining: ' + fmtTimer(remainingS) + '</p>';
+                extra = '<p class="stat">All 6 ships sunk! \uD83D\uDCA5</p>' +
+                    '<p class="stat">Torpedoes fired: ' + totalFires + '</p>' +
+                    '<p class="stat">Time remaining: ' + fmtTimer(remainingS) + '</p>';
             } else if (reason === 'no_shots') {
-                title      = '\uD83D\uDCA3 OUT OF AMMO!';
+                title = '\uD83D\uDCA3 OUT OF AMMO!';
                 titleClass = '';
-                extra      = '<p class="stat">You sank ' + shipsSunk + ' / 6 ships.</p>' +
-                             '<p class="stat">Cells hit: ' + cellsHit + ' / ' + TOTAL_SHIP_CELLS + '</p>';
+                extra = '<p class="stat">You sank ' + shipsSunk + ' / 6 ships.</p>' +
+                    '<p class="stat">Cells hit: ' + cellsHit + ' / ' + TOTAL_SHIP_CELLS + '</p>';
             } else {
-                title      = '\u23F1 TIME\'S UP!';
+                title = '\u23F1 TIME\'S UP!';
                 titleClass = '';
-                extra      = '<p class="stat">You sank ' + shipsSunk + ' / 6 ships.</p>' +
-                             '<p class="stat">Cells hit: ' + cellsHit + ' / ' + TOTAL_SHIP_CELLS + '</p>';
+                extra = '<p class="stat">You sank ' + shipsSunk + ' / 6 ships.</p>' +
+                    '<p class="stat">Cells hit: ' + cellsHit + ' / ' + TOTAL_SHIP_CELLS + '</p>';
             }
 
             document.getElementById('screen').innerHTML =
@@ -983,12 +1322,12 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    device_idx:        deviceIdx,
-                    act_id:            actId,
-                    credits_s:         submitCredit,
+                    device_idx: deviceIdx,
+                    act_id: actId,
+                    credits_s: submitCredit,
                     completion_time_s: elapsedS,
-                    pin:               pin,
-                    token:             token
+                    pin: pin,
+                    token: token
                 })
             }).then(r => {
                 if (r.ok) return r.json().then(d => showBanner('ok', '\uD83C\uDF89 Credits added! Counter: ' + (d.new_counter_hms || '')));
@@ -1034,14 +1373,14 @@
         function startGame() {
             /* Initialise state */
             shotsRemaining = STARTING_SHOTS;
-            streakCount    = 0;
-            cellsHit       = 0;
-            shipsSunk      = 0;
-            totalFires     = 0;
-            remainingS     = timeLimitS;
-            elapsedS       = 0;
-            targetedV      = 0;
-            targetedH      = 0;
+            streakCount = 0;
+            cellsHit = 0;
+            shipsSunk = 0;
+            totalFires = 0;
+            remainingS = timeLimitS;
+            elapsedS = 0;
+            targetedV = 0;
+            targetedH = 0;
 
             /* Blank 10×10 grid */
             grid = Array.from({ length: 10 }, () => new Array(10).fill('unknown'));
@@ -1058,12 +1397,12 @@
         /* ---- init ---- */
         (function init() {
             const missing = [];
-            if (!pin)                      missing.push('pin');
-            if (!token)                    missing.push('token');
-            if (!actId)                    missing.push('act_id');
-            if (!creditsS)                 missing.push('credits_s');
-            if (!timeLimitS)               missing.push('time_limit_s');
-            if (!_p.has('device_idx'))     missing.push('device_idx');
+            if (!pin) missing.push('pin');
+            if (!token) missing.push('token');
+            if (!actId) missing.push('act_id');
+            if (!creditsS) missing.push('credits_s');
+            if (!timeLimitS) missing.push('time_limit_s');
+            if (!_p.has('device_idx')) missing.push('device_idx');
             if (missing.length > 0) {
                 renderError('Oops! Missing game parameters (' + missing.join(', ') + '). Please go back to the games page.');
                 return;
