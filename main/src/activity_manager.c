@@ -26,6 +26,7 @@
 #include "buzzer.h"
 #include "config_manager.h"
 #include "device_registry.h"
+#include "dyn_act_registry.h"
 #include "event_ids.h"
 #include "time_manager.h"
 
@@ -181,6 +182,28 @@ esp_err_t act_mngr_init(void)
     }
 
     nvs_close(handle);
+
+    /* Auto-heal: any entry whose name matches a compiled-in dynamic activity but
+     * has b_is_dynamic=0 (old NVS blob or clobbered by a previous Update) is
+     * corrected in RAM and immediately re-saved so the fix survives the next boot. */
+    for (uint8_t s = 0U; s < cnt; s++)
+    {
+        if (0U != g_pool[s].b_is_dynamic)
+        {
+            continue;
+        }
+        for (uint8_t di = 0U; di < g_dyn_act_count; di++)
+        {
+            if (0 == strcmp(g_pool[s].name, g_dyn_act_registry[di].p_name))
+            {
+                g_pool[s].b_is_dynamic = 1U;
+                (void)act_mngr_pool_save(s);
+                ESP_LOGI(gp_tag, "auto-healed b_is_dynamic for activity id=%lu name='%s'",
+                    (unsigned long)g_pool[s].id, g_pool[s].name);
+                break;
+            }
+        }
+    }
 
     g_pool_count = cnt;
     g_next_id    = nxt;
