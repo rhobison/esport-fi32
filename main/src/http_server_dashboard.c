@@ -90,8 +90,8 @@ static const char * gp_tag = "http_srv_dashboard";
  */
 esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
 {
-    /* ---- Heap allocations ---- */
-    char *                 p_buf   = malloc(HTTP_SRV_HTML_BUF_LEN);
+    /* ---- Buffer acquisition ---- */
+    char *                 p_buf   = http_srv_scratch_take(HTTP_SRV_SCRATCH_WAIT_MS);
     session_trk_record_t * p_hist  = malloc(HTTP_SRV_HIST_MAX * sizeof(*p_hist));
     session_trk_record_t * p_graph = malloc(HTTP_SRV_GRAPH_MAX * sizeof(*p_graph));
     http_srv_daily_bin_t * p_bins  = malloc(HTTP_SRV_DAILY_WINDOW_DAYS * sizeof(*p_bins));
@@ -99,7 +99,10 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     if ((NULL == p_buf) || (NULL == p_hist) || (NULL == p_graph) || (NULL == p_bins))
     {
         ESP_LOGE(gp_tag, "heap alloc failed");
-        free(p_buf);
+        if (NULL != p_buf)
+        {
+            http_srv_scratch_give();
+        }
         free(p_hist);
         free(p_graph);
         free(p_bins);
@@ -222,6 +225,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
         "<a class=\"btn\" href=\"/activities\">Activities</a>"
         "<a class=\"btn\" href=\"/activities/manage\">Manage Activities</a>"
         "<a class=\"btn\" href=\"/dyn\">Mini-Games</a>"
+        "<a class=\"btn\" style=\"grid-column:1/-1\" href=\"/telemetry\">Telemetry</a>"
         "</div></div>",
         time_local_str, b_synced ? "ok" : "err", b_synced ? "Synced" : "Not synced", up_d, up_h,
         up_m, up_s_rem);
@@ -546,7 +550,7 @@ esp_err_t http_srv_root_get_handler(httpd_req_t * p_req)
     /* Terminate chunked response */
     (void)httpd_resp_sendstr_chunk(p_req, NULL);
 
-    free(p_buf);
+    http_srv_scratch_give();
     free(p_hist);
     free(p_graph);
     free(p_bins);

@@ -65,9 +65,44 @@ extern "C"
 /** Maximum session entries fetched for graph aggregation. */
 #define HTTP_SRV_GRAPH_MAX (SESSION_LOG_MAX_ENTRIES)
 
+/** Size of the shared HTTP response scratch buffer.  Sized to the largest
+ *  response body (the dashboard HTML) so it can also back every JSON/CSV
+ *  response, replacing per-request multi-kB heap allocations. */
+#define HTTP_SRV_SCRATCH_LEN (HTTP_SRV_HTML_BUF_LEN)
+
+/** Default time (ms) a handler waits to acquire the shared scratch buffer. */
+#define HTTP_SRV_SCRATCH_WAIT_MS (2000U)
+
 //==================================================================================================
 // Public Function Declarations
 //==================================================================================================
+
+/**
+ * \brief Initialise shared HTTP utility state (the response scratch buffer mutex).
+ *
+ * Must be called once before any request handler uses #http_srv_scratch_take.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_utils_init(void);
+
+/**
+ * \brief Acquire the shared response scratch buffer.
+ *
+ * Blocks up to \p timeout_ms for exclusive access.  The caller must release it
+ * with #http_srv_scratch_give on every code path once finished.
+ *
+ * \param[in] timeout_ms  Maximum time to wait for the buffer, in milliseconds.
+ *
+ * \return Pointer to a #HTTP_SRV_SCRATCH_LEN-byte buffer, or \c NULL on timeout
+ *         or if the subsystem was not initialised.
+ */
+char * http_srv_scratch_take(uint32_t timeout_ms);
+
+/**
+ * \brief Release the shared response scratch buffer previously taken.
+ */
+void http_srv_scratch_give(void);
 
 /**
  * \brief Decode a URL-encoded string into \p p_dst.

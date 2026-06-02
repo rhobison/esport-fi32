@@ -21,6 +21,8 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 //==================================================================================================
 // Variables/Data
@@ -29,21 +31,65 @@
 /** Module log tag. */
 static const char * gp_tag = "http_srv_utils";
 
+/** Shared response scratch buffer reused across requests instead of large
+ *  per-request heap allocations.  Reusing a single static buffer avoids the
+ *  long-run internal-heap fragmentation that repeated multi-kB malloc/free
+ *  cycles (every dashboard/status poll) would otherwise cause, which can
+ *  eventually starve the Wi-Fi driver of dynamic buffers. */
+static char g_scratch[HTTP_SRV_SCRATCH_LEN];
+
+/** Mutex serialising access to #g_scratch. */
+static SemaphoreHandle_t g_scratch_mux = NULL;
+
+/** Static storage backing #g_scratch_mux. */
+static StaticSemaphore_t g_scratch_mux_buf;
+
 //==================================================================================================
 // Public Functions
 //==================================================================================================
 
-/**
- * \brief Decode a URL-encoded string into \p p_dst.
- *
- * Converts '+' to space and '%XX' hex-escape sequences to their byte values.
- * The output is always NUL-terminated and never written past \p dst_len bytes
- * (including the terminator).
- *
- * \param[in]  p_src   NUL-terminated URL-encoded source string.
- * \param[out] p_dst   Destination buffer.
- * \param[in]  dst_len Total size of \p p_dst in bytes including the NUL terminator.
- */
+esp_err_t http_srv_utils_init(void)
+{
+    if (NULL == g_scratch_mux)
+    {
+        g_scratch_mux = xSemaphoreCreateMutexStatic(&g_scratch_mux_buf);
+        if (NULL == g_scratch_mux)
+        {
+            ESP_LOGE(gp_tag, "scratch mutex create failed");
+            return ESP_FAIL;
+        }
+    }
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+char * http_srv_scratch_take(uint32_t timeout_ms)
+{
+    if (NULL == g_scratch_mux)
+    {
+        return NULL;
+    }
+    if (pdTRUE != xSemaphoreTake(g_scratch_mux, pdMS_TO_TICKS(timeout_ms)))
+    {
+        ESP_LOGW(gp_tag, "scratch buffer busy");
+        return NULL;
+    }
+    return g_scratch;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+void http_srv_scratch_give(void)
+{
+    if (NULL != g_scratch_mux)
+    {
+        (void)xSemaphoreGive(g_scratch_mux);
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
 void http_srv_url_decode(const char * p_src, char * p_dst, size_t dst_len)
 {
     if ((NULL == p_src) || (NULL == p_dst) || (0U == dst_len))

@@ -18,6 +18,7 @@
 #include "http_server_ota.h"
 #include "http_server_activities.h"
 #include "http_server_dyn.h"
+#include "http_server_telemetry.h"
 
 #include <string.h>
 
@@ -55,10 +56,17 @@ static httpd_handle_t gp_server_handle = NULL;
  */
 esp_err_t http_srv_init(void)
 {
+    esp_err_t util_ret = http_srv_utils_init();
+    if (ESP_OK != util_ret)
+    {
+        ESP_LOGE(gp_tag, "http_srv_utils_init failed: %s", esp_err_to_name(util_ret));
+        return util_ret;
+    }
+
     httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = 80U;
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    cfg.max_uri_handlers = 24U;
+    cfg.max_uri_handlers = 28U;
     cfg.lru_purge_enable = true; /* evict idle keep-alive sockets when pool is full */
 
     esp_err_t ret = httpd_start(&gp_server_handle, &cfg);
@@ -211,6 +219,25 @@ esp_err_t http_srv_init(void)
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_dyn_page_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_dyn_file_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_dyn_get);
+
+    static const httpd_uri_t sc_uri_telemetry_page_get = {
+        .uri     = "/telemetry",
+        .method  = HTTP_GET,
+        .handler = http_srv_telemetry_page_get_handler,
+    };
+    static const httpd_uri_t sc_uri_api_telemetry_get = {
+        .uri     = "/api/telemetry",
+        .method  = HTTP_GET,
+        .handler = http_srv_api_telemetry_handler,
+    };
+    static const httpd_uri_t sc_uri_api_coredump_get = {
+        .uri     = "/api/coredump",
+        .method  = HTTP_GET,
+        .handler = http_srv_api_coredump_handler,
+    };
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_telemetry_page_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_telemetry_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_coredump_get);
 
     ESP_LOGI(gp_tag, "started on port %u", (unsigned)cfg.server_port);
     return ESP_OK;
