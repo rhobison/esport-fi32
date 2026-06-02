@@ -21,6 +21,8 @@
 #include "esp_rom_crc.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -44,6 +46,12 @@
 
 /** NVS key for the current rider index (uint8). */
 #define DEVICE_REG_NVS_KEY_RIDER ("dev_rider")
+
+/** Depth of the asynchronous NVS-save request queue. */
+#define DEVICE_REG_NVS_QUEUE_LEN (8U)
+
+/** Queue message value requesting a full counter save. */
+#define DEVICE_REG_NVS_SAVE_ALL (0xFFU)
 
 //==================================================================================================
 // Internal Type Definitions
@@ -75,6 +83,10 @@ static uint8_t g_rider = DEVICE_REG_NO_RIDER;
 
 /** Spinlock protecting all in-RAM device state. */
 static portMUX_TYPE g_dev_mux = portMUX_INITIALIZER_UNLOCKED;
+
+/** Queue of asynchronous NVS-save requests serviced by #device_reg_nvs_task.
+ *  Flash commits must not run in the high-priority esp_timer task. */
+static QueueHandle_t g_nvs_queue = NULL;
 
 /** Tick counter used to trigger periodic NVS saves. */
 static uint16_t g_tick_count = 0U;
@@ -122,6 +134,8 @@ static esp_err_t device_reg_entry_meta_save(uint8_t idx);
 static esp_err_t device_reg_entry_ctr_save(uint8_t idx);
 static esp_err_t device_reg_meta_save(void);
 static void      device_reg_counters_save_all(void);
+static void      device_reg_nvs_task(void * p_arg);
+static void      device_reg_nvs_request(uint8_t msg);
 
 //==================================================================================================
 // Public Functions
@@ -141,6 +155,25 @@ esp_err_t device_reg_init(void)
     g_rider           = DEVICE_REG_NO_RIDER;
     g_tick_count      = 0U;
     gb_counters_dirty = false;
+
+    /* Create the asynchronous NVS-save worker so that periodic flash
+     * commits never run in the esp_timer task (which also hosts the Wi-Fi
+     * reconnect timer and the 1 s tick). */
+    if (NULL == g_nvs_queue)
+    {
+        g_nvs_queue = xQueueCreate(DEVICE_REG_NVS_QUEUE_LEN, sizeof(uint8_t));
+        if (NULL == g_nvs_queue)
+        {
+            ESP_LOGE(gp_tag, "init: xQueueCreate(nvs) failed");
+            return ESP_ERR_NO_MEM;
+        }
+        if (pdPASS !=
+            xTaskCreate(device_reg_nvs_task, "dev_reg_nvs", 4096, NULL, 3, NULL))
+        {
+            ESP_LOGE(gp_tag, "init: xTaskCreate(nvs) failed");
+            return ESP_ERR_NO_MEM;
+        }
+    }
 
     nvs_handle_t handle;
     esp_err_t    ret = nvs_open(DEVICE_REG_NVS_NS, NVS_READWRITE, &handle);
@@ -727,12 +760,13 @@ esp_err_t device_reg_tick(void)
 
     portEXIT_CRITICAL(&g_dev_mux);
 
-    /* Post-tick saves (outside spinlock). */
+    /* Post-tick saves (outside spinlock).  Queued to the worker task so
+     * the flash commit never blocks the esp_timer task. */
     for (uint8_t i = 0U; i < count_snap; i++)
     {
         if (b_zero[i])
         {
-            (void)device_reg_entry_ctr_save(i);
+            device_reg_nvs_request(i);
         }
     }
 
@@ -749,7 +783,7 @@ esp_err_t device_reg_tick(void)
     {
         if (gb_counters_dirty)
         {
-            device_reg_counters_save_all();
+            device_reg_nvs_request(DEVICE_REG_NVS_SAVE_ALL);
             gb_counters_dirty = false;
         }
         g_tick_count = 0U;
@@ -1008,6 +1042,57 @@ static void device_reg_counters_save_all(void)
     for (uint8_t i = 0U; i < count; i++)
     {
         (void)device_reg_entry_ctr_save(i);
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Worker task that performs queued NVS counter saves off the timer task.
+ *
+ * NVS commits block on flash erase/write and must not run in the
+ * high-priority esp_timer task (which also dispatches the Wi-Fi reconnect
+ * timer).  This low-priority task drains #g_nvs_queue and performs the actual
+ * flash writes.
+ *
+ * \param[in] p_arg  Unused.
+ */
+static void device_reg_nvs_task(void * p_arg)
+{
+    (void)p_arg;
+
+    for (;;)
+    {
+        uint8_t msg = 0U;
+        if (pdTRUE == xQueueReceive(g_nvs_queue, &msg, portMAX_DELAY))
+        {
+            if (DEVICE_REG_NVS_SAVE_ALL == msg)
+            {
+                device_reg_counters_save_all();
+            }
+            else if (msg < (uint8_t)DEVICE_REG_MAX_ENTRIES)
+            {
+                (void)device_reg_entry_ctr_save(msg);
+            }
+        }
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Enqueue an NVS-save request for the worker task (non-blocking).
+ *
+ * Drops the request if the queue is full; the next periodic save will persist
+ * the latest in-RAM state, so no data is lost.
+ *
+ * \param[in] msg  Entry index to save, or #DEVICE_REG_NVS_SAVE_ALL.
+ */
+static void device_reg_nvs_request(uint8_t msg)
+{
+    if (NULL != g_nvs_queue)
+    {
+        (void)xQueueSend(g_nvs_queue, &msg, 0);
     }
 }
 

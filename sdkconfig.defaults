@@ -31,3 +31,35 @@ CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
 # causes a stack overflow that corrupts libc mutex state, resulting in an
 # abort() inside lock_acquire_generic.
 CONFIG_ESP_TIMER_TASK_STACK_SIZE=6144
+
+# Reboot the device if any watchdog-subscribed task is starved long enough to
+# trip the task watchdog, instead of only logging.  Combined with the Wi-Fi
+# connectivity supervisor this recovers the device from a wedged task that
+# would otherwise leave it unreachable for the rest of the session.
+CONFIG_ESP_TASK_WDT_PANIC=y
+
+# NAT/port forwarding for reward AP clients sharing the upstream STA link.
+CONFIG_LWIP_IPV4_NAPT_PORTMAP=y
+
+# FreeRTOS run-time stats (esp_timer based) power the /telemetry CPU-load and
+# per-task diagnostics used to investigate long-uptime behaviour.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER=y
+
+# Crash capture: write an ELF core dump to the dedicated `coredump` flash
+# partition on every panic / abort / watchdog so a `other_wdt`/`panic`
+# reboot loop in the field can be decoded after the fact with
+# `esp-coredump info_corefile` / `dbg_corefile`.  Without this the reset
+# reason is the only post-mortem evidence available.  CRC32 keeps the per-crash
+# write cost low; the 128K partition holds the task stacks + registers.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_CHECK_BOOT=y
+# Dedicated stack for the coredump handler.  Without this (default=0) the
+# handler runs on the panicking task's stack -- which is already corrupted
+# when the panic is a FreeRTOS stack-canary violation, causing the write to
+# fail silently and leaving the coredump partition empty.
+CONFIG_ESP_COREDUMP_STACK_SIZE=4096
+

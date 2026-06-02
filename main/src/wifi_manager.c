@@ -23,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -41,6 +42,17 @@
 
 /** Reconnect retry period in microseconds (10 s, hardcoded per spec §5.2). */
 #define WIFI_MNGR_RECONNECT_PERIOD_US ((int64_t)10000000)
+
+/** If no IP is obtained within this period after a successful
+ *  esp_wifi_connect(), force a disconnect+reconnect ("associated but no IP"). */
+#define WIFI_MNGR_CONN_WD_PERIOD_US ((int64_t)30000000)
+
+/** Connectivity-supervisor poll period. */
+#define WIFI_MNGR_SUPERVISOR_PERIOD_US ((int64_t)30000000)
+
+/** Continuous STA-down time after which the device reboots as a last
+ *  resort.  Only triggers when an SSID is configured. */
+#define WIFI_MNGR_STA_DOWN_REBOOT_US ((int64_t)600000000)
 
 /** Maximum number of stations allowed on the reward AP. */
 #define WIFI_MNGR_REWARD_AP_MAX_STA (4U)
@@ -110,6 +122,30 @@ static volatile bool gb_reward_ap_active = false;
 /** One-shot timer used to trigger STA reconnect attempts. */
 static esp_timer_handle_t gp_reconnect_timer = NULL;
 
+/** One-shot timer: fires if a connect attempt never yields an IP. */
+static esp_timer_handle_t gp_conn_wd_timer = NULL;
+
+/** Periodic timer: connectivity supervisor / last-resort reboot. */
+static esp_timer_handle_t gp_supervisor_timer = NULL;
+
+/** When true, suppress STA connect + supervisor in #wifi_mngr_init (safe mode). */
+static volatile bool gb_safe_mode = false;
+
+/** Timestamp (esp_timer_get_time) when the STA went/stayed down, or 0 if up. */
+static volatile int64_t g_sta_down_since_us = 0;
+
+/** Total STA (re)connect attempts since boot (telemetry). */
+static volatile uint32_t g_reconnect_attempts = 0U;
+
+/** Total STA disconnect events since boot (telemetry). */
+static volatile uint32_t g_sta_disconnect_count = 0U;
+
+/** Cached last DNS server forwarded to AP clients (DHCP churn reduction). */
+static uint32_t g_last_fwd_dns = 0U;
+
+/** True once a DNS server has been forwarded to the AP DHCP server. */
+static bool gb_dns_forwarded = false;
+
 /** true when NAPT should be armed on the next WIFI_EVENT_AP_START. */
 static volatile bool gb_napt_pending = false;
 
@@ -160,13 +196,17 @@ static portMUX_TYPE g_ap_bytes_mux = portMUX_INITIALIZER_UNLOCKED;
 static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, int32_t event_id,
     void * p_event_data);
 static void wifi_mngr_reconnect_timer_cb(void * p_arg);
-static void wifi_mngr_ap_dns_forward(void);
+static void wifi_mngr_conn_wd_timer_cb(void * p_arg);
+static void wifi_mngr_supervisor_timer_cb(void * p_arg);
+static void wifi_mngr_schedule_reconnect(void);
+static void wifi_mngr_ap_dns_forward(bool b_force);
 static void wifi_mngr_config_changed_handler(void * p_arg, esp_event_base_t base, int32_t event_id,
     void * p_event_data);
 static esp_err_t wifi_mngr_sta_connect(void);
 static err_t     wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp);
 static err_t     wifi_mngr_ap_linkoutput_hook(struct netif * netif, struct pbuf * p);
 static void      wifi_mngr_ap_hooks_install(void);
+static esp_err_t wifi_mngr_ap_hooks_install_cb(void * ctx);
 
 //==================================================================================================
 // Public Functions
@@ -265,6 +305,34 @@ esp_err_t wifi_mngr_init(void)
         return ret;
     }
 
+    /* Connection watchdog (one-shot, armed on each connect attempt). */
+    esp_timer_create_args_t conn_wd_args = {
+        .callback        = wifi_mngr_conn_wd_timer_cb,
+        .arg             = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name            = "wifi_conn_wd",
+    };
+    ret = esp_timer_create(&conn_wd_args, &gp_conn_wd_timer);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_timer_create(conn_wd) failed: 0x%x", ret);
+        return ret;
+    }
+
+    /* Connectivity supervisor (periodic). */
+    esp_timer_create_args_t supervisor_args = {
+        .callback        = wifi_mngr_supervisor_timer_cb,
+        .arg             = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name            = "wifi_supervisor",
+    };
+    ret = esp_timer_create(&supervisor_args, &gp_supervisor_timer);
+    if (ESP_OK != ret)
+    {
+        ESP_LOGE(gp_tag, "esp_timer_create(supervisor) failed: 0x%x", ret);
+        return ret;
+    }
+
     /* Start the WiFi driver. */
     ret = esp_wifi_start();
     if (ESP_OK != ret)
@@ -273,11 +341,20 @@ esp_err_t wifi_mngr_init(void)
         return ret;
     }
 
+    /* Disable Wi-Fi modem power-save.  In concurrent AP+STA the default
+     * WIFI_PS_MIN_MODEM causes missed beacons / downlink frames and long-run STA
+     * disconnects; the device is mains-powered so power-save offers no benefit. */
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
+
     /* Attempt STA connection only when an SSID is configured. */
     char ssid[33] = { 0 };
     config_mngr_wifi_ssid_get(ssid, sizeof(ssid));
 
-    if ('\0' == ssid[0])
+    if (gb_safe_mode)
+    {
+        ESP_LOGW(gp_tag, "SAFE MODE: skipping STA connection and connectivity supervisor");
+    }
+    else if ('\0' == ssid[0])
     {
         ESP_LOGI(gp_tag, "No STA SSID configured - skipping STA connection");
     }
@@ -293,8 +370,32 @@ esp_err_t wifi_mngr_init(void)
         ESP_LOGW(gp_tag, "wifi_mngr_init: reward AP start failed: %s", esp_err_to_name(ap_ret));
     }
 
+    /* Start the connectivity supervisor.  When an SSID is configured
+     * but the STA stays disconnected for WIFI_MNGR_STA_DOWN_REBOOT_US, the
+     * device reboots as a last resort.  Seed the down-since timestamp so a
+     * device that never manages to connect is still recovered.
+     *
+     * In safe mode the supervisor is NOT started: the device is already in a
+     * reboot loop and must stay up so an operator can reach the dashboard. */
+    if (!gb_safe_mode)
+    {
+        if ('\0' != ssid[0])
+        {
+            g_sta_down_since_us = esp_timer_get_time();
+        }
+        (void)esp_timer_start_periodic(gp_supervisor_timer,
+            (uint64_t)WIFI_MNGR_SUPERVISOR_PERIOD_US);
+    }
+
     ESP_LOGI(gp_tag, "initialised");
     return ret;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+void wifi_mngr_safe_mode_set(bool b_enable)
+{
+    gb_safe_mode = b_enable;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -451,18 +552,6 @@ void wifi_mngr_reward_ap_ip_get(char * p_buf, size_t len)
 
 //--------------------------------------------------------------------------------------------------
 
-/**
- * \brief Return the combined RX+TX throughput on the reward AP in kbps.
- *
- * Reads cumulative byte counters maintained by the netif input/linkoutput
- * hooks (#wifi_mngr_ap_input_hook and #wifi_mngr_ap_linkoutput_hook),
- * computes the delta since the previous call, and converts to kbps.
- * Designed to be called exactly once per second from the tick callback.
- * Returns \c 0 when the reward AP is inactive or on the first call after
- * activation.
- *
- * \return Combined RX+TX throughput in kbps.
- */
 uint32_t wifi_mngr_reward_ap_throughput_kbps(void)
 {
     if (!gb_reward_ap_active)
@@ -505,6 +594,36 @@ uint32_t wifi_mngr_reward_ap_throughput_kbps(void)
 
 //--------------------------------------------------------------------------------------------------
 
+int8_t wifi_mngr_sta_rssi(void)
+{
+    if (!gb_sta_connected)
+    {
+        return 0;
+    }
+    wifi_ap_record_t ap;
+    if (ESP_OK != esp_wifi_sta_get_ap_info(&ap))
+    {
+        return 0;
+    }
+    return ap.rssi;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+uint32_t wifi_mngr_sta_reconnect_count(void)
+{
+    return g_reconnect_attempts;
+}
+
+//--------------------------------------------------------------------------------------------------
+
+uint32_t wifi_mngr_sta_disconnect_count(void)
+{
+    return g_sta_disconnect_count;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 //==================================================================================================
 // Private Functions
 //==================================================================================================
@@ -525,6 +644,8 @@ static esp_err_t wifi_mngr_sta_connect(void)
     config_mngr_wifi_ssid_get(ssid, sizeof(ssid));
     config_mngr_wifi_password_get(password, sizeof(password));
 
+    g_reconnect_attempts++;
+
     wifi_config_t sta_cfg;
     memset(&sta_cfg, 0, sizeof(sta_cfg));
     strncpy((char *)sta_cfg.sta.ssid, ssid, sizeof(sta_cfg.sta.ssid) - 1U);
@@ -534,6 +655,9 @@ static esp_err_t wifi_mngr_sta_connect(void)
     if (ESP_OK != ret)
     {
         ESP_LOGE(gp_tag, "esp_wifi_set_config(STA) failed: 0x%x", ret);
+        /* A synchronous failure produces no STA_DISCONNECTED event, so
+         * the reconnect chain would otherwise die here.  Re-arm it explicitly. */
+        wifi_mngr_schedule_reconnect();
         return ret;
     }
 
@@ -541,7 +665,16 @@ static esp_err_t wifi_mngr_sta_connect(void)
     if (ESP_OK != ret)
     {
         ESP_LOGE(gp_tag, "esp_wifi_connect failed: 0x%x", ret);
+        /* Same as above - guarantee a future retry. */
+        wifi_mngr_schedule_reconnect();
+        return ret;
     }
+
+    /* Association started; guard against "associated but never gets an
+     * IP" by arming a watchdog that forces disconnect+reconnect if no
+     * IP_EVENT_STA_GOT_IP arrives in time. */
+    (void)esp_timer_stop(gp_conn_wd_timer);
+    (void)esp_timer_start_once(gp_conn_wd_timer, (uint64_t)WIFI_MNGR_CONN_WD_PERIOD_US);
 
     return ret;
 }
@@ -563,6 +696,76 @@ static void wifi_mngr_reconnect_timer_cb(void * p_arg)
 //--------------------------------------------------------------------------------------------------
 
 /**
+ * \brief (Re)arm the 10 s STA reconnect one-shot timer.
+ */
+static void wifi_mngr_schedule_reconnect(void)
+{
+    (void)esp_timer_stop(gp_reconnect_timer);
+    (void)esp_timer_start_once(gp_reconnect_timer, (uint64_t)WIFI_MNGR_RECONNECT_PERIOD_US);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Connection watchdog: force a reconnect if association never
+ *        produced an IP within #WIFI_MNGR_CONN_WD_PERIOD_US.
+ *
+ * \param[in] p_arg  Unused timer argument.
+ */
+static void wifi_mngr_conn_wd_timer_cb(void * p_arg)
+{
+    (void)p_arg;
+    if (!gb_sta_connected)
+    {
+        ESP_LOGW(gp_tag, "Connect watchdog: no IP obtained, forcing reconnect");
+        (void)esp_wifi_disconnect();
+        wifi_mngr_schedule_reconnect();
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief Connectivity supervisor: reboot as a last resort when the STA
+ *        has been disconnected for too long while an SSID is configured.
+ *
+ * \param[in] p_arg  Unused timer argument.
+ */
+static void wifi_mngr_supervisor_timer_cb(void * p_arg)
+{
+    (void)p_arg;
+
+    char ssid[33] = { 0 };
+    config_mngr_wifi_ssid_get(ssid, sizeof(ssid));
+    if ('\0' == ssid[0])
+    {
+        /* Unconfigured device: keep the AP up for setup, never reboot. */
+        return;
+    }
+
+    if (gb_sta_connected)
+    {
+        return;
+    }
+
+    int64_t since = g_sta_down_since_us;
+    if (0 == since)
+    {
+        g_sta_down_since_us = esp_timer_get_time();
+        return;
+    }
+
+    if ((esp_timer_get_time() - since) >= WIFI_MNGR_STA_DOWN_REBOOT_US)
+    {
+        ESP_LOGE(gp_tag, "STA down > %lld s with SSID configured - rebooting (last resort)",
+            (long long)(WIFI_MNGR_STA_DOWN_REBOOT_US / 1000000));
+        esp_restart();
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
  * \brief Forward the STA's primary DNS server into the AP DHCP server response.
  *
  * Reads the DNS address obtained from the home network via the STA interface
@@ -570,7 +773,7 @@ static void wifi_mngr_reconnect_timer_cb(void * p_arg)
  * connected to the reward AP receive a working name server.  The DHCP server
  * is stopped and restarted to pick up the new option value.
  */
-static void wifi_mngr_ap_dns_forward(void)
+static void wifi_mngr_ap_dns_forward(bool b_force)
 {
     esp_netif_dns_info_t dns;
 
@@ -580,12 +783,24 @@ static void wifi_mngr_ap_dns_forward(void)
         return;
     }
 
+    /* Avoid needless DHCP-server stop/restart churn on every STA flap.
+     * Only re-forward (which restarts the AP DHCP server) when forced (AP just
+     * (re)started and lost its option) or when the STA's DNS actually changed. */
+    uint32_t dns_ip = dns.ip.u_addr.ip4.addr;
+    if (!b_force && gb_dns_forwarded && (dns_ip == g_last_fwd_dns))
+    {
+        return;
+    }
+
     uint8_t dhcps_offer_dns = DHCPS_OFFER_DNS;
     esp_netif_dhcps_stop(gp_netif_ap);
     esp_netif_dhcps_option(gp_netif_ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER,
         &dhcps_offer_dns, sizeof(dhcps_offer_dns));
     esp_netif_set_dns_info(gp_netif_ap, ESP_NETIF_DNS_MAIN, &dns);
     esp_netif_dhcps_start(gp_netif_ap);
+
+    g_last_fwd_dns   = dns_ip;
+    gb_dns_forwarded = true;
 
     ESP_LOGI(gp_tag, "AP DNS forwarded from STA (" IPSTR ")", IP2STR(&dns.ip.u_addr.ip4));
 }
@@ -708,17 +923,36 @@ static err_t wifi_mngr_ap_linkoutput_hook(struct netif * netif, struct pbuf * p)
  */
 static void wifi_mngr_ap_hooks_install(void)
 {
+    /* lwIP netif pointers must only be mutated from the tcpip task when
+     * CONFIG_LWIP_TCPIP_CORE_LOCKING is disabled.  Run the actual swap inside the
+     * tcpip context. */
+    (void)esp_netif_tcpip_exec(wifi_mngr_ap_hooks_install_cb, NULL);
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief tcpip-context callback that performs the AP netif pointer swap.
+ *
+ * \param[in] ctx  Unused.
+ *
+ * \return \c ESP_OK on success, or an error if the AP netif is unavailable.
+ */
+static esp_err_t wifi_mngr_ap_hooks_install_cb(void * ctx)
+{
+    (void)ctx;
+
     struct netif * p_netif = (struct netif *)esp_netif_get_netif_impl(gp_netif_ap);
     if (NULL == p_netif)
     {
         ESP_LOGW(gp_tag, "hooks_install: AP lwIP netif unavailable");
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
 
     /* Guard against double-install: if our hook is already in place, skip. */
     if (p_netif->input == wifi_mngr_ap_input_hook)
     {
-        return;
+        return ESP_OK;
     }
 
     gp_orig_ap_input      = p_netif->input;
@@ -735,6 +969,7 @@ static void wifi_mngr_ap_hooks_install(void)
 
     ESP_LOGI(gp_tag, "AP byte-count hooks installed (input=%p linkoutput=%p)",
         (void *)gp_orig_ap_input, (void *)gp_orig_ap_linkoutput);
+    return ESP_OK;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -785,7 +1020,7 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
                  * preventing ALL traffic to the gateway including the web UI. */
                 if (gb_sta_connected)
                 {
-                    wifi_mngr_ap_dns_forward();
+                    wifi_mngr_ap_dns_forward(true);
                     /* Assert STA as the default netif so that the lwIP routing
                      * layer sends NATted AP-client traffic through the home
                      * network. */
@@ -818,6 +1053,12 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
         else if (WIFI_EVENT_STA_DISCONNECTED == event_id)
         {
             gb_sta_connected = false;
+            g_sta_disconnect_count++;
+            (void)esp_timer_stop(gp_conn_wd_timer);
+            if (0 == g_sta_down_since_us)
+            {
+                g_sta_down_since_us = esp_timer_get_time(); /* mark STA down */
+            }
 
             if (gb_reconnect_immediate)
             {
@@ -853,6 +1094,8 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
         {
             gb_sta_connected         = true;
             gb_first_connect_attempt = false;
+            g_sta_down_since_us      = 0;           /* STA is up */
+            (void)esp_timer_stop(gp_conn_wd_timer); /* got IP in time */
 
             /* Make STA the default netif so that the lwIP routing layer sends
              * outbound traffic (including NATted AP-client traffic) through
@@ -869,7 +1112,7 @@ static void wifi_mngr_event_handler(void * p_arg, esp_event_base_t event_base, i
              * and a valid STA IP exists for the routing layer. */
             if (gb_reward_ap_active)
             {
-                wifi_mngr_ap_dns_forward();
+                wifi_mngr_ap_dns_forward(false);
                 esp_netif_set_default_netif(gp_netif_sta);
                 esp_err_t napt_err = esp_netif_napt_enable(gp_netif_ap);
                 if (ESP_OK != napt_err)

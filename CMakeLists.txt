@@ -9,5 +9,11 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 # Enable lwip MIB2 per-interface byte counters for reward AP throughput measurement.
 idf_build_set_property(COMPILE_DEFINITIONS "MIB2_STATS=1" APPEND)
-set(PROJECT_VER "2.1.0")
+# NAPT hardening for long uptime with several streaming AP clients: enlarge the
+# NAT translation table (default 512) and reclaim stale TCP flows faster than the
+# 30-minute lwIP default so the table cannot silently fill and drop new
+# connections while the AP stays associated.
+idf_build_set_property(COMPILE_DEFINITIONS "IP_NAPT_MAX=1024" APPEND)
+idf_build_set_property(COMPILE_DEFINITIONS "IP_NAPT_TIMEOUT_MS_TCP=600000" APPEND)
+set(PROJECT_VER "2.2.2")
 project(esport-fi32)

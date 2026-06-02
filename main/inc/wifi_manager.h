@@ -51,6 +51,20 @@ extern "C"
 esp_err_t wifi_mngr_init(void);
 
 /**
+ * \brief Enable "safe mode" for the next #wifi_mngr_init() call.
+ *
+ * Must be called \e before #wifi_mngr_init().  In safe mode the reward AP is
+ * still brought up (so the dashboard stays reachable), but the STA connection
+ * attempt and the connectivity supervisor are suppressed.  This breaks a
+ * reboot loop in which a flaky uplink causes the supervisor to reboot the
+ * device every few minutes, and lets an operator log in to read crash
+ * telemetry / a captured core dump.
+ *
+ * \param[in] b_enable  \c true to enter safe mode on the next init.
+ */
+void wifi_mngr_safe_mode_set(bool b_enable);
+
+/**
  * \brief Enable or disable the reward Soft AP.
  *
  * When enabling, the AP is configured with the SSID and password from
@@ -120,6 +134,28 @@ uint32_t wifi_mngr_reward_ap_throughput_kbps(void);
  * \param[in]  len    Size of \p p_buf in bytes (including NUL terminator).
  */
 void wifi_mngr_reward_ap_ip_get(char * p_buf, size_t len);
+
+/**
+ * \brief Return the STA's current RSSI in dBm.
+ *
+ * \return RSSI in dBm when connected, or \c 0 when the STA is disconnected or
+ *         the value is unavailable.
+ */
+int8_t wifi_mngr_sta_rssi(void);
+
+/**
+ * \brief Return the cumulative number of STA (re)connect attempts since boot.
+ *
+ * \return Connect-attempt count (telemetry/diagnostics).
+ */
+uint32_t wifi_mngr_sta_reconnect_count(void);
+
+/**
+ * \brief Return the cumulative number of STA disconnect events since boot.
+ *
+ * \return Disconnect-event count (telemetry/diagnostics).
+ */
+uint32_t wifi_mngr_sta_disconnect_count(void);
 
 #ifdef __cplusplus
 }
