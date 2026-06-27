@@ -172,6 +172,28 @@ esp_err_t http_srv_api_telemetry_handler(httpd_req_t * p_req)
     wifi_mngr_sta_ip_get(sta_ip, sizeof(sta_ip));
     config_mngr_wifi_ssid_get(sta_ssid, sizeof(sta_ssid));
 
+    /* Per-task stack high-water-mark snapshot.  Identifies the most
+     * stack-constrained task so low-water alarms can be acted on before the
+     * next overflow.  usStackHighWaterMark is in 4-byte words. */
+    static TaskStatus_t s_hwm_tasks[32];
+    UBaseType_t         hwm_count         = uxTaskGetSystemState(s_hwm_tasks,
+                        (UBaseType_t)(sizeof(s_hwm_tasks) / sizeof(s_hwm_tasks[0])), NULL);
+    uint16_t            min_hwm_words     = 0xFFFFU;
+    const char *        min_hwm_task_name = "?";
+    for (UBaseType_t i = 0U; i < hwm_count; i++)
+    {
+        if (s_hwm_tasks[i].usStackHighWaterMark < min_hwm_words)
+        {
+            min_hwm_words     = s_hwm_tasks[i].usStackHighWaterMark;
+            min_hwm_task_name = s_hwm_tasks[i].pcTaskName;
+        }
+    }
+    if (0xFFFFU == min_hwm_words)
+    {
+        min_hwm_words     = 0U;
+        min_hwm_task_name = "?";
+    }
+
     int n = snprintf(p_buf, HTTP_SRV_JSON_BUF_LEN,
         "{\n"
         "  \"fw_version\": \"%s\",\n"
@@ -184,6 +206,8 @@ esp_err_t http_srv_api_telemetry_handler(httpd_req_t * p_req)
         "  \"total_internal_heap\": %" PRIu32 ",\n"
         "  \"cpu_load_pct\": %u,\n"
         "  \"task_count\": %u,\n"
+        "  \"task_min_stack_hwm_bytes\": %u,\n"
+        "  \"task_min_stack_hwm_name\": \"%s\",\n"
         "  \"sta_connected\": %s,\n"
         "  \"sta_ssid\": \"%s\",\n"
         "  \"sta_ip\": \"%s\",\n"
@@ -196,8 +220,9 @@ esp_err_t http_srv_api_telemetry_handler(httpd_req_t * p_req)
         "}\n",
         esp_app_get_description()->version, uptime_s, http_srv_reset_reason_str(esp_reset_reason()),
         b_synced ? "true" : "false", free_heap, min_free_heap, largest_block, total_internal,
-        (unsigned)cpu_load, (unsigned)task_count, b_sta ? "true" : "false", sta_ssid, sta_ip,
-        (int)rssi, reconnects, disconnects, b_rew_ap ? "true" : "false", ap_clients, throughput);
+        (unsigned)cpu_load, (unsigned)task_count, (unsigned)min_hwm_words * 4U, min_hwm_task_name,
+        b_sta ? "true" : "false", sta_ssid, sta_ip, (int)rssi, reconnects, disconnects,
+        b_rew_ap ? "true" : "false", ap_clients, throughput);
 
     if (n >= (int)HTTP_SRV_JSON_BUF_LEN)
     {
@@ -378,6 +403,9 @@ esp_err_t http_srv_telemetry_page_get_handler(httpd_req_t * p_req)
         "<dt>disc</dt><dd>STA disconnect events since boot.</dd>"
         "<dt>AP</dt><dd>Reward access point: connected client count and current "
         "throughput in kbps, or \"off\" when inactive.</dd>"
+        "<dt>hwm</dt><dd>Stack high-water mark: the task with the <em>least</em> remaining "
+        "stack across all FreeRTOS tasks. Bytes left before overflow. "
+        "Only the worst offender is shown. Below ~512 b warrants a stack size increase.</dd>"
         "<dt>* line</dt><dd>Static-state change marker, logged at start and whenever one of "
         "these changes: fw (firmware version), rst (last reset reason), ntp (time sync), "
         "link (STA up/down), ssid, ip, ap (reward AP on/off).</dd>"
@@ -397,9 +425,13 @@ esp_err_t http_srv_telemetry_page_get_handler(httpd_req_t * p_req)
         "function metrics(d){var w=d.sta_connected?('STA '+d.sta_rssi_dbm+' dBm'):'STA down';"
         "var ap=d.reward_ap_active?('AP '+d.reward_ap_clients+' cli '+"
         "d.reward_ap_throughput_kbps+' kbps'):'AP off';"
+        "var hwm=d.task_min_stack_hwm_bytes!==undefined?"
+        "'hwm '+d.task_min_stack_hwm_bytes+'b('+d.task_min_stack_hwm_name+')':"
+        "'';"
         "return 'up '+dur(d.uptime_s)+' | heap '+kb(d.free_heap)+' (min '+kb(d.min_free_heap)+"
         "', blk '+kb(d.largest_free_block)+') | cpu '+d.cpu_load_pct+'% | tasks '+d.task_count+"
-        "' | '+w+' | reconn '+d.sta_reconnects+' disc '+d.sta_disconnects+' | '+ap;}"
+        "' | '+w+' | reconn '+d.sta_reconnects+' disc '+d.sta_disconnects+' | '+ap+"
+        "(hwm?' | '+hwm:'');}"
         /* Static fields, already formatted, so equal values compare equal. */
         "function statics(d){return{fw:d.fw_version,rst:d.reset_reason,"
         "ntp:d.time_synced?'ok':'no',link:d.sta_connected?'up':'down',"
