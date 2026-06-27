@@ -15,5 +15,5 @@ idf_build_set_property(COMPILE_DEFINITIONS "MIB2_STATS=1" APPEND)
 # connections while the AP stays associated.
 idf_build_set_property(COMPILE_DEFINITIONS "IP_NAPT_MAX=1024" APPEND)
 idf_build_set_property(COMPILE_DEFINITIONS "IP_NAPT_TIMEOUT_MS_TCP=600000" APPEND)
-set(PROJECT_VER "2.2.2")
+set(PROJECT_VER "2.2.3")
 project(esport-fi32)

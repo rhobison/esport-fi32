@@ -63,3 +63,12 @@ CONFIG_ESP_COREDUMP_CHECK_BOOT=y
 # fail silently and leaving the coredump partition empty.
 CONFIG_ESP_COREDUMP_STACK_SIZE=4096
 
+# Hardware watchpoint at the end of the current FreeRTOS task's stack.
+# When the stack pointer crosses the bottom-of-stack boundary the CPU fires a
+# watchpoint exception IMMEDIATELY — before the overflow can corrupt the SPI
+# flash cache hardware.  Without this, a fast stack overflow reaches the cache
+# controller's address region before the FreeRTOS canary check fires, producing
+# a cache/MMU access fault (MCAUSE=0x19) that disables the flash interface and
+# prevents the coredump handler from writing to the coredump partition.
+CONFIG_FREERTOS_WATCHPOINT_END_OF_STACK=y
+
