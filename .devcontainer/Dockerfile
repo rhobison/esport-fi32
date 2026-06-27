@@ -16,6 +16,7 @@ ARG ESPRESSIF_IDF_VERSION
 FROM ubuntu:${UBUNTU_VERSION}
 
 # Re-declare ARGs after FROM to make them available in build context
+ARG TARGETARCH
 ARG CMAKE_VERSION
 ARG DOXYGEN_VERSION
 ARG PYTHON_VERSION
@@ -25,22 +26,22 @@ ARG ESPRESSIF_IDF_VERSION
 # ENVIRONMENT SETUP
 # =============================================================================
 
-# Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
-ENV LANGUAGE=en_US:en
+# Combine all environment variables into a single layer
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC \
+    LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    LANGUAGE=en_US:en
 
-# Set working directory
-WORKDIR /workspace
-RUN mkdir -p /workspace/esport-fi32
+# WORKDIR creates parent directories automatically; no separate RUN mkdir needed
+WORKDIR /workspace/esport-fi32
 
 # =============================================================================
-# SYSTEM PACKAGES INSTALLATION
+# SYSTEM PACKAGES, LOCALE & SYMLINKS
 # =============================================================================
 
-# Update package list and install system dependencies
+# Merge locale generation and tool symlinks into the apt layer so all package
+# side-effects are committed in one filesystem layer.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Basic utilities
     curl \
@@ -88,44 +89,52 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-click \
     python3-pyparsing \
     python3-pyelftools \
+    && locale-gen en_US.UTF-8 \
+    && update-locale LANG=en_US.UTF-8 \
+    && ln -sf /usr/bin/clangd-18 /usr/bin/clangd \
+    && ln -sf /usr/bin/clang-format-18 /usr/bin/clang-format \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
-
-# Create symlinks for clang tools
-RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
-
-RUN ln -sf /usr/bin/clangd-18 /usr/bin/clangd && \
-    ln -sf /usr/bin/clang-format-18 /usr/bin/clang-format && \
-    ln -sf /usr/bin/python3 /usr/bin/python
 
 # =============================================================================
 # CMAKE INSTALLATION
 # =============================================================================
 
-# Download and install CMake
+# Download and install CMake (architecture-aware)
 # Note: Ensure /usr/local/man is a directory (not a file) before installing
-RUN rm -f /usr/local/man && mkdir -p /usr/local/man && \
+RUN case "${TARGETARCH}" in \
+        amd64) CMAKE_ARCH="x86_64" ;; \
+        arm64) CMAKE_ARCH="aarch64" ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}"; exit 1 ;; \
+    esac && \
+    rm -f /usr/local/man && mkdir -p /usr/local/man && \
     cd /tmp && \
-    wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" && \
-    tar -xf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz && \
-    cp -r cmake-${CMAKE_VERSION}-linux-x86_64/* /usr/local/ && \
+    wget -q "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz" && \
+    tar -xf cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz && \
+    cp -r cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}/* /usr/local/ && \
     rm -rf /tmp/cmake-*
 
 # =============================================================================
 # DOXYGEN INSTALLATION
 # =============================================================================
 
-# Download and install Doxygen
+# Build Doxygen from source to use the exact DOXYGEN_VERSION on all architectures.
+# (The official pre-built binary is x86_64-only; the Ubuntu apt package ships an older version.)
+# Required build tools (cmake, flex, bison, g++) are already installed above.
 RUN cd /tmp && \
-    wget -q "https://www.doxygen.nl/files/doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz" && \
-    tar -xf doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz && \
-    cp doxygen-${DOXYGEN_VERSION}/bin/doxygen /usr/local/bin/ && \
+    wget -q "https://www.doxygen.nl/files/doxygen-${DOXYGEN_VERSION}.src.tar.gz" && \
+    tar -xf doxygen-${DOXYGEN_VERSION}.src.tar.gz && \
+    cmake -S doxygen-${DOXYGEN_VERSION} -B doxygen-${DOXYGEN_VERSION}/build \
+          -DCMAKE_BUILD_TYPE=Release -Dbuild_doc=OFF -Dbuild_wizard=OFF && \
+    cmake --build doxygen-${DOXYGEN_VERSION}/build -j$(nproc) && \
+    cmake --install doxygen-${DOXYGEN_VERSION}/build && \
     rm -rf /tmp/doxygen-*
 
 # =============================================================================
 # PYTHON PACKAGES
 # =============================================================================
 
-# Install Python packages for running scripts (development tools removed to reduce image size)
+# Install Python packages for running scripts
 # Note: Using --break-system-packages is safe in Docker containers (PEP 668)
 # Note: Using --ignore-installed to handle system-installed packages like pyyaml
 RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed \
@@ -141,32 +150,28 @@ ARG USERNAME=developer
 ARG USER_UID=1000
 ARG USER_GID=${USER_UID}
 
-# Create the user and group (handle existing GID/UID gracefully)
+# Create user/group and set workspace ownership in a single layer to avoid
+# duplicating inode metadata across separate chown layers.
 RUN set -e && \
-    # Check if group exists, if not create it
     if ! getent group ${USER_GID} >/dev/null; then \
-    groupadd --gid ${USER_GID} ${USERNAME}; \
+        groupadd --gid ${USER_GID} ${USERNAME}; \
     fi && \
-    # Check if user exists, if not create it
     if ! getent passwd ${USER_UID} >/dev/null; then \
-    useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME}; \
+        useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME}; \
     else \
-    # User exists with this UID, just ensure they're in the right group
-    usermod -g ${USER_GID} -l ${USERNAME} $(getent passwd ${USER_UID} | cut -d: -f1) || true; \
+        usermod -g ${USER_GID} -l ${USERNAME} $(getent passwd ${USER_UID} | cut -d: -f1) || true; \
     fi && \
-    # Add sudo support for the user
     echo ${USERNAME} ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/${USERNAME} && \
-    chmod 0440 /etc/sudoers.d/${USERNAME}
-
-# Set permissions for development directories
-RUN chown -R ${USERNAME}:${USER_GID} /workspace
+    chmod 0440 /etc/sudoers.d/${USERNAME} && \
+    chown -R ${USERNAME}:${USER_GID} /workspace
 
 # =============================================================================
-# ESP-IDF INSTALLATION (latest stable)
+# ESP-IDF INSTALLATION
 # =============================================================================
 
-ENV IDF_PATH=/opt/esp-idf
-ENV IDF_TOOLS_PATH=/opt/esp-idf-tools
+# IDF_PATH and IDF_TOOLS_PATH in one layer; PATH references the already-committed IDF_PATH
+ENV IDF_PATH=/opt/esp-idf \
+    IDF_TOOLS_PATH=/opt/esp-idf-tools
 ENV PATH="${IDF_PATH}/tools:${PATH}"
 
 # Download and install ESP-IDF, then clean up in the same layer to keep image lean:
@@ -183,64 +188,50 @@ RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
         --branch ${ESPRESSIF_IDF_VERSION} \
         https://github.com/espressif/esp-idf.git ${IDF_PATH} && \
     cd ${IDF_PATH} && ./install.sh esp32c6 && \
-    rm -rf ${IDF_TOOLS_PATH}/dist && \
-    rm -rf ${IDF_PATH}/docs && \
+    rm -rf ${IDF_TOOLS_PATH}/dist ${IDF_PATH}/docs && \
     chown -R ${USERNAME}:${USER_GID} ${IDF_PATH} ${IDF_TOOLS_PATH}
-
-# Make ESP-IDF available for all users
-RUN echo 'export IDF_PATH=/opt/esp-idf' > /etc/profile.d/esp-idf.sh && \
-    echo 'source /opt/esp-idf/export.sh' >> /etc/profile.d/esp-idf.sh && \
-    chmod +x /etc/profile.d/esp-idf.sh
 
 # =============================================================================
 # FINAL CONFIGURATION
 # =============================================================================
 
-# Export DOCKER_HOST_IP_ADDRESS for use inside the container
-RUN echo "export DOCKER_HOST_IP_ADDRESS=\`/usr/bin/getent ahostsv4 host.docker.internal | tail -n 1 | awk '{ print \$1 }'\`" > /etc/profile.d/docker-host-ip.sh
+# Write all profile.d scripts in one layer
+RUN printf 'export IDF_PATH=/opt/esp-idf\nsource /opt/esp-idf/export.sh\n' \
+        > /etc/profile.d/esp-idf.sh \
+    && chmod +x /etc/profile.d/esp-idf.sh \
+    && printf 'export DOCKER_HOST_IP_ADDRESS=`/usr/bin/getent ahostsv4 host.docker.internal | tail -n 1 | awk '"'"'{ print $1 }'"'"'`\n' \
+        > /etc/profile.d/docker-host-ip.sh
 
 # Switch to development user
 USER ${USERNAME}
 
-# Install git bash completion and prompt scripts
-RUN mkdir -p ~/.git-completion && \
-    curl -o ~/.git-completion/git-completion.bash \
-        https://raw.githubusercontent.com/git/git/master/contrib/completion/git-completion.bash && \
-    curl -o ~/.git-completion/git-prompt.sh \
-        https://raw.githubusercontent.com/git/git/master/contrib/completion/git-prompt.sh && \
-    echo '# Git bash completion and prompt' >> ~/.bashrc && \
-    echo 'source ~/.git-completion/git-completion.bash' >> ~/.bashrc && \
-    echo 'source ~/.git-completion/git-prompt.sh' >> ~/.bashrc && \
-    echo 'export GIT_PS1_SHOWDIRTYSTATE=1' >> ~/.bashrc && \
-    echo 'export GIT_PS1_SHOWSTASHSTATE=1' >> ~/.bashrc && \
-    echo 'export GIT_PS1_SHOWUNTRACKEDFILES=1' >> ~/.bashrc && \
-    echo 'export GIT_PS1_SHOWUPSTREAM="auto"' >> ~/.bashrc && \
-    echo 'export PS1='"'"'\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[01;31m\]$(__git_ps1 " [%s]")\[\033[00m\]\$ '"'"'' >> ~/.bashrc
-
-# Verify installations
-RUN echo "=== Tool Versions ===" && \
-    echo "Ubuntu: $(lsb_release -d | cut -f2)" && \
-    echo "CMake: $(cmake --version | head -1)" && \
-    echo "Doxygen: $(doxygen --version)" && \
-    echo "Git: $(git --version)" && \
-    echo "Python: $(python3 --version)" && \
-    echo "Ruby: $(ruby --version)" && \
-    echo "Clang-Format: $(clang-format --version | head -1)" && \
-    echo "Graphviz: $(dot -V 2>&1)" && \
-    echo "lcov: $(lcov --version | head -1)"
-
-# Configure git to use VSCode as default editor and diff/merge tool
-RUN git config --global color.ui true && \
-    git config --global diff.tool vscode && \
-    git config --global difftool.prompt false && \
-    git config --global difftool.vscode.cmd 'code --wait --diff "$LOCAL" "$REMOTE"' && \
-    git config --global merge.tool vscode && \
-    git config --global mergetool.prompt false && \
-    git config --global mergetool.keepBackup false && \
-    git config --global mergetool.vscode.cmd 'code --wait --merge $REMOTE $LOCAL $BASE $MERGED' && \
-    git config --global core.editor 'code --wait' && \
-    git config --global rerere.enabled true && \
-    git config --global pull.ff true
+# Configure git, bash prompt and completions in a single user-layer
+RUN mkdir -p ~/.git-completion \
+    && curl -fsSL -o ~/.git-completion/git-completion.bash \
+        https://raw.githubusercontent.com/git/git/master/contrib/completion/git-completion.bash \
+    && curl -fsSL -o ~/.git-completion/git-prompt.sh \
+        https://raw.githubusercontent.com/git/git/master/contrib/completion/git-prompt.sh \
+    && printf '%s\n' \
+        '# Git bash completion and prompt' \
+        'source ~/.git-completion/git-completion.bash' \
+        'source ~/.git-completion/git-prompt.sh' \
+        'export GIT_PS1_SHOWDIRTYSTATE=1' \
+        'export GIT_PS1_SHOWSTASHSTATE=1' \
+        'export GIT_PS1_SHOWUNTRACKEDFILES=1' \
+        'export GIT_PS1_SHOWUPSTREAM="auto"' \
+        'export PS1='\''\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[01;31m\]$(__git_ps1 " [%s]")\[\033[00m\]\n\$ '\''' \
+        >> ~/.bashrc \
+    && git config --global color.ui true \
+    && git config --global diff.tool vscode \
+    && git config --global difftool.prompt false \
+    && git config --global difftool.vscode.cmd 'code --wait --diff "$LOCAL" "$REMOTE"' \
+    && git config --global merge.tool vscode \
+    && git config --global mergetool.prompt false \
+    && git config --global mergetool.keepBackup false \
+    && git config --global mergetool.vscode.cmd 'code --wait --merge $REMOTE $LOCAL $BASE $MERGED' \
+    && git config --global core.editor 'code --wait' \
+    && git config --global rerere.enabled true \
+    && git config --global pull.ff true
 
 # Set default command
 CMD ["/bin/bash"]
