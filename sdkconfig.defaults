@@ -57,6 +57,12 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 CONFIG_ESP_COREDUMP_CHECK_BOOT=y
+# Place the panic handler (and therefore the coredump writer) in IRAM so it
+# can execute even when the SPI flash cache is disabled.  Without this, a panic
+# that fires during any NVS write / OTA flash operation (cache is momentarily
+# disabled) faults before writing a single byte to the coredump partition,
+# leaving `esp_core_dump_image_check()` returning ESP_FAIL on the next boot.
+CONFIG_ESP_PANIC_HANDLER_IRAM=y
 # Dedicated stack for the coredump handler.  Without this (default=0) the
 # handler runs on the panicking task's stack -- which is already corrupted
 # when the panic is a FreeRTOS stack-canary violation, causing the write to
