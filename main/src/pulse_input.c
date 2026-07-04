@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_event.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 #include "event_ids.h"
 #include "pulse_input.h"
 #include "driver/gpio.h"
@@ -49,6 +50,41 @@
  */
 #define PULSE_IN_SPEED_STALE_US (7200000U)
 
+/** Stack size, in bytes, of #pulse_in_forward_task. */
+#define PULSE_IN_FORWARD_TASK_STACK_SIZE (3072U)
+
+/**
+ * \brief FreeRTOS priority of #pulse_in_forward_task.
+ *
+ * Above ordinary app-level tasks (e.g. device_reg_nvs_task at 3, httpd at 5)
+ * so a debounced pulse is handed to the default event loop with minimal
+ * delay, but well below system tasks (tcpip 18, sys_evt 20, esp_timer 22,
+ * wifi 23) so it can never contend with networking-critical scheduling.
+ */
+#define PULSE_IN_FORWARD_TASK_PRIORITY (10U)
+
+/** Name of #pulse_in_forward_task, used for TWDT/debug identification. */
+#define PULSE_IN_FORWARD_TASK_NAME ("pulse_fwd")
+
+/**
+ * \brief Timeout for the esp_event_post() call made from #pulse_in_forward_task.
+ *
+ * Small enough to avoid stalling the forward task on a transient default-loop
+ * queue burst, generous enough to ride out brief congestion instead of
+ * dropping immediately the way the old ISR-post path had to.
+ */
+#define PULSE_IN_POST_TIMEOUT_TICKS (pdMS_TO_TICKS(20U))
+
+/**
+ * \brief Maximum time #pulse_in_forward_task blocks between TWDT feeds.
+ *
+ * Must stay well under CONFIG_ESP_TASK_WDT_TIMEOUT_S (5 s) so a long idle
+ * period between pulses (rider not pedaling) never trips the watchdog; the
+ * task notification wakes the task immediately whenever a pulse is actually
+ * pending, so this bound never adds latency to pulse delivery.
+ */
+#define PULSE_IN_FORWARD_TASK_WDT_FEED_MS (2000U)
+
 //==================================================================================================
 // Variables/Data
 //==================================================================================================
@@ -68,8 +104,13 @@ static volatile uint32_t g_total_count = 0U;
 /** Count of pulses accepted by the ISR but dropped because the event queue was full. */
 static volatile uint32_t g_dropped_count = 0U;
 
-/** Last error code returned by esp_event_isr_post; 0 means no failure yet. */
+/** Last error code returned by esp_event_post (called from #pulse_in_forward_task,
+ *  never from the ISR); 0 means no failure yet. */
 static volatile esp_err_t g_last_post_err = ESP_OK;
+
+/** Handle of #pulse_in_forward_task; NULL until created in #pulse_in_init().
+ *  The ISR NULL-guards on this before notifying it. */
+static TaskHandle_t g_forward_task_handle = NULL;
 
 /**
  * \brief Elapsed time in milliseconds between the two most recent accepted pulses.
@@ -130,18 +171,8 @@ static uint32_t g_centimeters_per_pulse = 0U;
 static void pulse_in_config_changed_handler(void * p_handler_arg, esp_event_base_t base,
     int32_t event_id, void * p_event_data);
 
-/**
- * \brief GPIO any-edge ISR handler for the pulse input pin.
- *
- * Detects genuine HIGH→LOW (falling) transitions, applies software debounce,
- * and posts #ESPORT_EVENT_PULSE on the default event loop when a valid pulse
- * is accepted.  Uses #g_pin_was_high to admit only genuine H→L transitions
- * and #g_last_rise_us to discard contact bounce on the rising transition
- * without disturbing the main debounce reference, so fast consecutive pulses
- * are never suppressed.
- *
- * \param[in] p_arg  Unused user argument passed by the GPIO ISR service.
- */
+static void pulse_in_forward_task(void * p_arg);
+
 static void pulse_in_gpio_isr(void * p_arg);
 
 //==================================================================================================
@@ -189,6 +220,17 @@ esp_err_t pulse_in_init(void)
     /* Seed the transition flag so the very first ISR call is handled correctly
        regardless of the initial pin state. */
     g_pin_was_high = (gpio_get_level((gpio_num_t)CONFIG_ESPORT_PULSE_GPIO) != 0);
+
+    /* Create the pulse-forward task BEFORE attaching the ISR: the ISR only
+       ever notifies g_forward_task_handle (NULL-guarded regardless), but the
+       handle must be valid before the first pulse can possibly arrive. */
+    if (pdPASS != xTaskCreate(pulse_in_forward_task, PULSE_IN_FORWARD_TASK_NAME,
+                      PULSE_IN_FORWARD_TASK_STACK_SIZE, NULL, PULSE_IN_FORWARD_TASK_PRIORITY,
+                      &g_forward_task_handle))
+    {
+        ESP_LOGE(gp_tag, "xTaskCreate (forward) failed");
+        return ESP_ERR_NO_MEM;
+    }
 
     ret = gpio_isr_handler_add((gpio_num_t)CONFIG_ESPORT_PULSE_GPIO, pulse_in_gpio_isr, NULL);
     if (ESP_OK != ret)
@@ -283,6 +325,76 @@ static void pulse_in_config_changed_handler(void * p_handler_arg, esp_event_base
 
 //--------------------------------------------------------------------------------------------------
 
+/**
+ * \brief Pulse-forward task: dispatches one #ESPORT_EVENT_PULSE per accepted
+ * pulse, from task context.
+ *
+ * #pulse_in_gpio_isr() runs with \c ESP_INTR_FLAG_IRAM and must never touch
+ * anything that can be flash-cache-backed (see docs/6-pulse-isr-issue.md for
+ * the crash this caused when it called esp_event_isr_post() directly). This
+ * task is the only place that calls esp_event_post(); that is safe here
+ * because ESP-IDF itself suspends ordinary tasks for the (brief) duration of
+ * any flash cache-disable window instead of letting them run into a fault.
+ *
+ * ulTaskNotifyTake(pdFALSE, ...) is used as a lightweight counting semaphore:
+ * each call decrements the task's notification value by one and returns the
+ * pre-decrement value, so every "give" from the ISR results in exactly one
+ * esp_event_post() call here, in order. This preserves an exact 1:1 mapping
+ * between physical pulses and posted events - both time_ctr_pulse_handler and
+ * session_trk_pulse_handler credit/count per call, so coalescing pulses here
+ * would silently under-count rider credit and qualifying pulses.
+ *
+ * The wait is time-bounded (not portMAX_DELAY) purely so this task can
+ * periodically call esp_task_wdt_reset() even when the rider is not
+ * pedaling; the notification wakes it immediately whenever a pulse is
+ * actually pending, so the bound never adds latency to pulse delivery.
+ *
+ * \param[in] p_arg  Unused.
+ */
+static void pulse_in_forward_task(void * p_arg)
+{
+    (void)p_arg;
+
+    if (ESP_OK != esp_task_wdt_add(NULL))
+    {
+        ESP_LOGW(gp_tag, "esp_task_wdt_add (forward task) failed");
+    }
+
+    for (;;)
+    {
+        uint32_t pending =
+            ulTaskNotifyTake(pdFALSE, pdMS_TO_TICKS(PULSE_IN_FORWARD_TASK_WDT_FEED_MS));
+        (void)esp_task_wdt_reset();
+
+        if (0U != pending)
+        {
+            esp_err_t err = esp_event_post(ESPORT_EVENT_BASE, ESPORT_EVENT_PULSE, NULL, 0,
+                PULSE_IN_POST_TIMEOUT_TICKS);
+            if (ESP_OK != err)
+            {
+                g_dropped_count++;
+                g_last_post_err = err;
+            }
+        }
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * \brief GPIO any-edge ISR handler for the pulse input pin.
+ *
+ * Detects genuine HIGH→LOW (falling) transitions, applies software debounce,
+ * and posts #ESPORT_EVENT_PULSE on the default event loop when a valid pulse
+ * is accepted.  Uses #g_pin_was_high to admit only genuine H→L transitions
+ * and #g_last_rise_us to discard contact bounce on the rising transition
+ * without disturbing the main debounce reference, so fast consecutive pulses
+ * are never suppressed.
+ *
+ * \param[in] p_arg  Unused user argument passed by the GPIO ISR service.
+ */
 static void IRAM_ATTR pulse_in_gpio_isr(void * p_arg)
 {
     (void)p_arg;
@@ -342,17 +454,18 @@ static void IRAM_ATTR pulse_in_gpio_isr(void * p_arg)
     g_last_accepted_us = now_us;
     g_total_count++;
 
-    /* esp_event_isr_post copies payload inline into a uint32_t-sized field (max 4 bytes).
-       No handler needs the exact ISR timestamp - all consumers derive timing from
-       esp_timer_get_time() in handler context, where the sub-ms latency is negligible
-       for second-resolution outputs. */
+    /* Hand off to pulse_in_forward_task via a counting task-notification
+       instead of posting the event directly from ISR context (see
+       docs/6-pulse-isr-issue.md).  vTaskNotifyGiveFromISR is confirmed
+       IRAM-resident in this build, so it remains safe to call even while the
+       flash cache is disabled; esp_event_post() itself is deferred to task
+       context, where the OS - not this ISR - absorbs any cache-disable
+       window. NULL-guarded because pulse_in_init() creates the task before
+       attaching this ISR, but this defends against any future reordering. */
     BaseType_t hp_task_awoken = pdFALSE;
-    esp_err_t  err =
-        esp_event_isr_post(ESPORT_EVENT_BASE, ESPORT_EVENT_PULSE, NULL, 0, &hp_task_awoken);
-    if (ESP_OK != err)
+    if (NULL != g_forward_task_handle)
     {
-        g_dropped_count++;
-        g_last_post_err = err;
+        vTaskNotifyGiveFromISR(g_forward_task_handle, &hp_task_awoken);
     }
 
     if (pdTRUE == hp_task_awoken)

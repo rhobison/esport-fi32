@@ -19,6 +19,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_rom_crc.h"
+#include "esp_task_wdt.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -52,6 +53,12 @@
 
 /** Queue message value requesting a full counter save. */
 #define DEVICE_REG_NVS_SAVE_ALL (0xFFU)
+
+/** Maximum time #device_reg_nvs_task blocks between TWDT feeds. Must stay
+ *  well under CONFIG_ESP_TASK_WDT_TIMEOUT_S (5 s) so a long idle period with
+ *  no pending NVS-save request never trips the watchdog; a queued request
+ *  wakes the task immediately, so this bound never adds save latency. */
+#define DEVICE_REG_NVS_TASK_WDT_FEED_MS (2000U)
 
 //==================================================================================================
 // Internal Type Definitions
@@ -167,8 +174,7 @@ esp_err_t device_reg_init(void)
             ESP_LOGE(gp_tag, "init: xQueueCreate(nvs) failed");
             return ESP_ERR_NO_MEM;
         }
-        if (pdPASS !=
-            xTaskCreate(device_reg_nvs_task, "dev_reg_nvs", 4096, NULL, 3, NULL))
+        if (pdPASS != xTaskCreate(device_reg_nvs_task, "dev_reg_nvs", 4096, NULL, 3, NULL))
         {
             ESP_LOGE(gp_tag, "init: xTaskCreate(nvs) failed");
             return ESP_ERR_NO_MEM;
@@ -1055,16 +1061,30 @@ static void device_reg_counters_save_all(void)
  * timer).  This low-priority task drains #g_nvs_queue and performs the actual
  * flash writes.
  *
+ * Subscribed to the Task Watchdog; the queue wait is time-bounded (not
+ * portMAX_DELAY) purely so this task can periodically call
+ * esp_task_wdt_reset() even when no save request is pending - a queued
+ * request wakes it immediately, so this bound never adds save latency.
+ *
  * \param[in] p_arg  Unused.
  */
 static void device_reg_nvs_task(void * p_arg)
 {
     (void)p_arg;
 
+    if (ESP_OK != esp_task_wdt_add(NULL))
+    {
+        ESP_LOGW(gp_tag, "esp_task_wdt_add (nvs task) failed");
+    }
+
     for (;;)
     {
-        uint8_t msg = 0U;
-        if (pdTRUE == xQueueReceive(g_nvs_queue, &msg, portMAX_DELAY))
+        uint8_t    msg = 0U;
+        BaseType_t got =
+            xQueueReceive(g_nvs_queue, &msg, pdMS_TO_TICKS(DEVICE_REG_NVS_TASK_WDT_FEED_MS));
+        (void)esp_task_wdt_reset();
+
+        if (pdTRUE == got)
         {
             if (DEVICE_REG_NVS_SAVE_ALL == msg)
             {
