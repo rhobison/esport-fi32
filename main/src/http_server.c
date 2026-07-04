@@ -235,9 +235,15 @@ esp_err_t http_srv_init(void)
         .method  = HTTP_GET,
         .handler = http_srv_api_coredump_handler,
     };
+    static const httpd_uri_t sc_uri_api_coredump_delete = {
+        .uri     = "/api/coredump",
+        .method  = HTTP_DELETE,
+        .handler = http_srv_api_coredump_delete_handler,
+    };
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_telemetry_page_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_telemetry_get);
     (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_coredump_get);
+    (void)httpd_register_uri_handler(gp_server_handle, &sc_uri_api_coredump_delete);
 
     ESP_LOGI(gp_tag, "started on port %u", (unsigned)cfg.server_port);
     return ESP_OK;

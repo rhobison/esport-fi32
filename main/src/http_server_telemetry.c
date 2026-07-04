@@ -349,6 +349,46 @@ esp_err_t http_srv_api_coredump_handler(httpd_req_t * p_req)
 
 //--------------------------------------------------------------------------------------------------
 
+esp_err_t http_srv_api_coredump_delete_handler(httpd_req_t * p_req)
+{
+    char * p_buf = http_srv_scratch_take(HTTP_SRV_SCRATCH_WAIT_MS);
+    if (NULL == p_buf)
+    {
+        httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR, "Server busy");
+        return ESP_FAIL;
+    }
+
+    /* Idempotent: erase whenever a valid image is present; otherwise there is
+     * nothing to do and the request still succeeds. */
+    esp_err_t erase_ret = ESP_OK;
+    if (ESP_OK == esp_core_dump_image_check())
+    {
+        erase_ret = esp_core_dump_image_erase();
+    }
+
+    if (ESP_OK != erase_ret)
+    {
+        ESP_LOGW(gp_tag, "core dump erase failed: %s", esp_err_to_name(erase_ret));
+        snprintf(p_buf, HTTP_SRV_SCRATCH_LEN, "{\"ok\":false,\"error\":\"%s\"}\n",
+            esp_err_to_name(erase_ret));
+        httpd_resp_set_type(p_req, "application/json");
+        httpd_resp_send(p_req, p_buf, HTTPD_RESP_USE_STRLEN);
+        http_srv_scratch_give();
+        return ESP_OK;
+    }
+
+    /* Confirm the partition no longer reports a valid image. */
+    bool b_cleared = (ESP_OK != esp_core_dump_image_check());
+    snprintf(p_buf, HTTP_SRV_SCRATCH_LEN, "{\"ok\":true,\"cleared\":%s}\n",
+        b_cleared ? "true" : "false");
+    httpd_resp_set_type(p_req, "application/json");
+    httpd_resp_send(p_req, p_buf, HTTPD_RESP_USE_STRLEN);
+    http_srv_scratch_give();
+    return ESP_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 esp_err_t http_srv_telemetry_page_get_handler(httpd_req_t * p_req)
 {
     static const char sc_page[] =
@@ -389,6 +429,7 @@ esp_err_t http_srv_telemetry_page_get_handler(httpd_req_t * p_req)
         "<button id=\"clr\">Clear</button>"
         "<button id=\"leg\">&#9432; Fields</button>"
         "<button id=\"cdBtn\">&#128293; Core Dump</button>"
+        "<button id=\"cdDelBtn\">&#128465; Delete Core Dump</button>"
         "<a class=\"btn\" href=\"/\">Dashboard</a>"
         "<span id=\"stat\"></span></div>"
         "<div id=\"legend\"><dl>"
@@ -503,6 +544,16 @@ esp_err_t http_srv_telemetry_page_get_handler(httpd_req_t * p_req)
         "cdPanel.classList.add('show');"
         "fetch('/api/coredump',{cache:'no-store'}).then(function(r){return r.json();})"
         ".then(function(d){cdLog.value=renderCD(d);})"
+        ".catch(function(e){cdLog.value='Fetch error: '+e;});};"
+        "document.getElementById('cdDelBtn').onclick=function(){"
+        "if(!window.confirm('Delete the stored core dump from flash? "
+        "Make sure you already downloaded/reviewed it \u2014 this cannot be undone.'))return;"
+        "cdPanel.classList.add('show');cdLog.value='Deleting\u2026';"
+        "fetch('/api/coredump',{method:'DELETE',cache:'no-store'})"
+        ".then(function(r){return r.json();})"
+        ".then(function(d){cdLog.value=d.ok?"
+        "('Core dump erased.'+(d.cleared?'':' (partition still reports data)')):"
+        "('Erase failed: '+(d.error||'unknown error'));})"
         ".catch(function(e){cdLog.value='Fetch error: '+e;});};"
         "</script></body></html>";
 
