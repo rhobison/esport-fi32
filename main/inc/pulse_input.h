@@ -8,8 +8,11 @@
  * previously accepted edge.  Each accepted pulse posts an
  * #ESPORT_EVENT_PULSE event on the default event loop.
  *
- * The ISR is kept minimal (\c IRAM_ATTR); all business logic runs in event
- * callbacks outside interrupt context.
+ * The ISR is kept minimal (\c IRAM_ATTR); it only updates volatile counters
+ * and gives a FreeRTOS task notification.  All business logic - including
+ * posting #ESPORT_EVENT_PULSE - runs in the dedicated \c pulse_fwd task
+ * outside interrupt context (see docs/6-pulse-isr-issue.md for why the ISR
+ * must never call esp_event_post()/esp_event_isr_post() directly).
  *
  * \date 2026-03-14
  */
@@ -69,7 +72,8 @@ uint32_t pulse_in_total_count_get(void);
 uint32_t pulse_in_dropped_count_get(void);
 
 /**
- * \brief Return the last error code from a failed esp_event_isr_post call.
+ * \brief Return the last error code from a failed esp_event_post call, made
+ * by the internal pulse-forward task on behalf of an accepted pulse.
  *
  * \return ESP_OK if no post has ever failed, otherwise the last failure code.
  */
