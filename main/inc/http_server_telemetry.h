@@ -58,6 +58,21 @@ esp_err_t http_srv_api_telemetry_handler(httpd_req_t * p_req);
 esp_err_t http_srv_api_coredump_handler(httpd_req_t * p_req);
 
 /**
+ * \brief Handler for \c DELETE /api/coredump.
+ *
+ * Erases the core dump stored in the dedicated flash partition via
+ * \c esp_core_dump_image_erase(), so that a subsequent panic is guaranteed to
+ * write fresh data instead of being confused with a previously retrieved
+ * dump.  Idempotent: if no core dump is present this still returns success.
+ * Open access (diagnostic data only).
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_api_coredump_delete_handler(httpd_req_t * p_req);
+
+/**
  * \brief Handler for \c GET /telemetry.
  *
  * Serves a static HTML page that polls \c /api/telemetry and logs the most
