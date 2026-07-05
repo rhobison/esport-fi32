@@ -89,6 +89,9 @@
  *  (14-byte Ethernet header + 16-byte offset inside the IPv4 header). */
 #define WIFI_MNGR_ETH_IPV4_DST_IP_OFFSET (30U)
 
+/** Length of a complete Ethernet header (destination MAC + source MAC + EtherType). */
+#define WIFI_MNGR_ETH_HEADER_LEN (14U)
+
 /** Reward AP subnet base address packed as a big-endian uint32 (192.168.5.0). */
 #define WIFI_MNGR_REWARD_AP_SUBNET_U32 (0xC0A80500U)
 
@@ -816,10 +819,9 @@ static void wifi_mngr_ap_dns_forward(bool b_force)
  * counter, then applies an IPv4 drop rule for internet-destined frames from
  * unregistered or expired devices.
  *
- * Assumption: on the ESP32 WiFi driver, AP client frames always arrive with the
- * full Ethernet + IP header in the first pbuf segment, so \c p->len includes at
- * least the 14-byte Ethernet header and 20-byte IPv4 header.  The 34-byte guard
- * below encodes this assumption explicitly.
+ * Guards every payload dereference behind a minimum-length check first: a
+ * runt pbuf (shorter than a full Ethernet header) is counted and passed
+ * through untouched, so no out-of-bounds read of \c p->payload can occur.
  *
  * \param[in] p    Received Ethernet frame as a pbuf chain.
  * \param[in] inp  Netif the frame arrived on (the AP lwIP netif).
@@ -829,14 +831,24 @@ static void wifi_mngr_ap_dns_forward(bool b_force)
  */
 static err_t wifi_mngr_ap_input_hook(struct pbuf * p, struct netif * inp)
 {
-    /* Per-device RX byte count - source MAC starts at byte WIFI_MNGR_ETH_SRC_MAC_OFFSET. */
-    device_reg_mac_rx_bytes_add((const uint8_t *)p->payload + WIFI_MNGR_ETH_SRC_MAC_OFFSET,
-        (uint32_t)p->tot_len);
-
-    /* Global RX byte count. */
+    /* Global RX byte count - safe unconditionally, does not touch the payload. */
     portENTER_CRITICAL(&g_ap_bytes_mux);
     g_ap_rx_bytes += (uint32_t)p->tot_len;
     portEXIT_CRITICAL(&g_ap_bytes_mux);
+
+    /* Guard against runt frames BEFORE any payload dereference below: a valid
+     * Ethernet header (dest MAC + src MAC + EtherType) requires at least
+     * WIFI_MNGR_ETH_HEADER_LEN bytes in the first pbuf segment. Without this
+     * check first, the source-MAC read below could run past the end of a
+     * short/malformed pbuf. */
+    if (p->len < WIFI_MNGR_ETH_HEADER_LEN)
+    {
+        return gp_orig_ap_input(p, inp);
+    }
+
+    /* Per-device RX byte count - source MAC starts at byte WIFI_MNGR_ETH_SRC_MAC_OFFSET. */
+    device_reg_mac_rx_bytes_add((const uint8_t *)p->payload + WIFI_MNGR_ETH_SRC_MAC_OFFSET,
+        (uint32_t)p->tot_len);
 
     /* Per-device internet access filter. */
     if (p->len >= WIFI_MNGR_MIN_ETHERNET_IPV4_LEN)
