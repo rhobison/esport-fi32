@@ -40,6 +40,11 @@ WORKDIR /workspace/esport-fi32
 # SYSTEM PACKAGES, LOCALE & SYMLINKS
 # =============================================================================
 
+# Add git-core PPA to get the latest Git release (Ubuntu base ships an older version)
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common && \
+    add-apt-repository ppa:git-core/ppa && \
+    rm -rf /var/lib/apt/lists/*
+
 # Merge locale generation and tool symlinks into the apt layer so all package
 # side-effects are committed in one filesystem layer.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -59,10 +64,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     make \
     ninja-build \
-    # Version control
-    git=1:2.43.0-1ubuntu7.3 \
-    # Python and pip
-    python3=3.12.3-0ubuntu2.1 \
+    # Version control (latest available from git-core PPA)
+    git \
+    # Python and pip (version controlled via PYTHON_VERSION build arg)
+    python${PYTHON_VERSION} \
     python3-pip \
     python3-venv \
     # Documentation and visualization
@@ -93,6 +98,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-locale LANG=en_US.UTF-8 \
     && ln -sf /usr/bin/clangd-18 /usr/bin/clangd \
     && ln -sf /usr/bin/clang-format-18 /usr/bin/clang-format \
+    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/bin/python3 \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 

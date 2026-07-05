@@ -4,12 +4,6 @@
     "service": "esport-fi32-dev",
     "workspaceFolder": "/workspace/esport-fi32",
     "shutdownAction": "stopCompose",
-    "features": {
-        "ghcr.io/devcontainers/features/git:1": {
-            "ppa": true,
-            "version": "latest"
-        }
-    },
     "customizations": {
         "vscode": {
             "extensions": [
