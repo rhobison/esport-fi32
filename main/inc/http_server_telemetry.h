@@ -58,6 +58,21 @@ esp_err_t http_srv_api_telemetry_handler(httpd_req_t * p_req);
 esp_err_t http_srv_api_coredump_handler(httpd_req_t * p_req);
 
 /**
+ * \brief Handler for \c GET /api/coredump/raw.
+ *
+ * Streams the complete core dump image from flash as an
+ * \c application/octet-stream attachment suitable for offline decoding with
+ * \c esp-coredump.  The response is sent in bounded chunks so the complete
+ * image is never buffered in RAM.  Requires admin HTTP Basic Auth because a
+ * full dump can contain credentials and other sensitive task memory.
+ *
+ * \param[in] p_req  Incoming HTTP request.
+ *
+ * \return \c ESP_OK on success, or a non-zero \c esp_err_t on failure.
+ */
+esp_err_t http_srv_api_coredump_download_handler(httpd_req_t * p_req);
+
+/**
  * \brief Handler for \c DELETE /api/coredump.
  *
  * Erases the core dump stored in the dedicated flash partition via

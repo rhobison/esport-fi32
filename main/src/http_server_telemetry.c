@@ -28,6 +28,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_flash.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -35,6 +36,7 @@
 #include "freertos/task.h"
 
 #include "config_manager.h"
+#include "http_server_config.h"
 #include "time_manager.h"
 #include "wifi_manager.h"
 
@@ -349,6 +351,79 @@ esp_err_t http_srv_api_coredump_handler(httpd_req_t * p_req)
 
 //--------------------------------------------------------------------------------------------------
 
+esp_err_t http_srv_api_coredump_download_handler(httpd_req_t * p_req)
+{
+    if (!http_srv_cfg_auth_check(p_req))
+    {
+        return ESP_OK;
+    }
+
+    if (ESP_OK != esp_core_dump_image_check())
+    {
+        httpd_resp_send_err(p_req, HTTPD_404_NOT_FOUND, "No valid core dump stored in flash");
+        return ESP_FAIL;
+    }
+
+    size_t    image_addr = 0U;
+    size_t    image_size = 0U;
+    esp_err_t ret        = esp_core_dump_image_get(&image_addr, &image_size);
+    if ((ESP_OK != ret) || (image_addr > UINT32_MAX) || (image_size > UINT32_MAX))
+    {
+        ESP_LOGE(gp_tag, "core dump image lookup failed: %s", esp_err_to_name(ret));
+        httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR,
+            "Unable to locate core dump image");
+        return ESP_FAIL;
+    }
+
+    char * p_buf = http_srv_scratch_take(HTTP_SRV_SCRATCH_WAIT_MS);
+    if (NULL == p_buf)
+    {
+        httpd_resp_send_err(p_req, HTTPD_500_INTERNAL_SERVER_ERROR, "Server busy");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(p_req, "application/octet-stream");
+    httpd_resp_set_hdr(p_req, "Content-Disposition",
+        "attachment; filename=\"esport-fi32-coredump.bin\"");
+    httpd_resp_set_hdr(p_req, "Cache-Control", "no-store");
+
+    size_t offset = 0U;
+    while (offset < image_size)
+    {
+        size_t chunk_size = image_size - offset;
+        if (chunk_size > (size_t)HTTP_SRV_SCRATCH_LEN)
+        {
+            chunk_size = (size_t)HTTP_SRV_SCRATCH_LEN;
+        }
+
+        ret = esp_flash_read(NULL, p_buf, (uint32_t)(image_addr + offset), (uint32_t)chunk_size);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGE(gp_tag, "core dump flash read failed at offset %u: %s", (unsigned)offset,
+                esp_err_to_name(ret));
+            break;
+        }
+
+        ret = httpd_resp_send_chunk(p_req, p_buf, (ssize_t)chunk_size);
+        if (ESP_OK != ret)
+        {
+            ESP_LOGW(gp_tag, "core dump download interrupted at offset %u", (unsigned)offset);
+            break;
+        }
+        offset += chunk_size;
+    }
+
+    if (ESP_OK == ret)
+    {
+        ret = httpd_resp_send_chunk(p_req, NULL, 0U);
+    }
+
+    http_srv_scratch_give();
+    return ret;
+}
+
+//--------------------------------------------------------------------------------------------------
+
 esp_err_t http_srv_api_coredump_delete_handler(httpd_req_t * p_req)
 {
     char * p_buf = http_srv_scratch_take(HTTP_SRV_SCRATCH_WAIT_MS);
@@ -429,6 +504,7 @@ esp_err_t http_srv_telemetry_page_get_handler(httpd_req_t * p_req)
         "<button id=\"clr\">Clear</button>"
         "<button id=\"leg\">&#9432; Fields</button>"
         "<button id=\"cdBtn\">&#128293; Core Dump</button>"
+        "<a class=\"btn\" href=\"/api/coredump/raw\" download>Download Raw Dump</a>"
         "<button id=\"cdDelBtn\">&#128465; Delete Core Dump</button>"
         "<a class=\"btn\" href=\"/\">Dashboard</a>"
         "<span id=\"stat\"></span></div>"

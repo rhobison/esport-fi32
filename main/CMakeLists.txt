@@ -119,6 +119,7 @@ idf_component_register(
     PRIV_REQUIRES
         esp_app_format
         espcoredump
+        spi_flash
     INCLUDE_DIRS
         "inc"
         "${_DYN_REG_DIR}"
